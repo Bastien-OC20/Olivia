@@ -1,0 +1,222 @@
+<template>
+  <div class="explorer">
+    <div class="explorer-header">
+      <h3>📁 Documents</h3>
+      <button
+        class="ghost"
+        aria-label="Revenir à la racine"
+        @click="loadRoot"
+      >
+        ↑ Racine
+      </button>
+    </div>
+
+    <div class="upload-row">
+      <label
+        for="fileup"
+        class="upload-btn"
+      >⬆ Importer un fichier</label>
+      <input
+        id="fileup"
+        ref="fileInput"
+        type="file"
+        class="sr-only"
+        @change="onUpload"
+      >
+      <span
+        v-if="uploadMsg"
+        class="upload-msg"
+        aria-live="polite"
+      >{{ uploadMsg }}</span>
+    </div>
+
+    <label
+      for="fs-search"
+      class="sr-only"
+    >Rechercher dans les fichiers</label>
+    <input
+      id="fs-search"
+      v-model="search"
+      placeholder="Rechercher dans les fichiers..."
+      class="search"
+      @keydown.enter.prevent="doSearch"
+    >
+    <button
+      :disabled="!search"
+      @click="doSearch"
+    >
+      🔍 Chercher
+    </button>
+
+    <div
+      v-if="searchResults"
+      class="search-results"
+      aria-live="polite"
+    >
+      <div
+        v-for="(r, i) in searchResults"
+        :key="i"
+        class="search-hit"
+        tabindex="0"
+        role="button"
+        @click="openFile(r.file)"
+        @keydown.enter="openFile(r.file)"
+      >
+        <div class="hit-file">
+          {{ r.file }}:{{ r.line }}
+        </div>
+        <div class="hit-snippet">
+          {{ r.snippet }}
+        </div>
+      </div>
+    </div>
+
+    <ul class="tree">
+      <li
+        v-for="item in items"
+        :key="item.path"
+        :class="{ folder: item.is_dir, file: !item.is_dir }"
+        tabindex="0"
+        role="button"
+        @click="item.is_dir ? navigate(item.path) : openFile(item.path)"
+        @keydown.enter="item.is_dir ? navigate(item.path) : openFile(item.path)"
+      >
+        {{ item.is_dir ? '📂' : icon(item.ext) }} {{ item.name }}
+      </li>
+      <li
+        v-if="items.length === 0"
+        class="empty"
+      >
+        Aucun élément
+      </li>
+    </ul>
+
+    <Transition name="fade">
+      <FilePreview
+        v-if="selectedPath"
+        :path="selectedPath"
+        @inject="onInject"
+        @close="selectedPath = null"
+      />
+    </Transition>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import FilePreview from './FilePreview.vue'
+
+const items = ref([])
+const currentPath = ref('')
+const selectedPath = ref(null)
+const search = ref('')
+const searchResults = ref(null)
+const uploadMsg = ref('')
+const fileInput = ref(null)
+const emit = defineEmits(['file-selected'])
+
+function icon(ext) {
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'].includes(ext)) return '🖼️'
+  if (ext === '.pdf') return '📕'
+  if (['.xlsx', '.xlsm', '.csv'].includes(ext)) return '📊'
+  if (ext === '.docx') return '📘'
+  return '📄'
+}
+
+async function navigate(path) {
+  currentPath.value = path
+  try {
+    const r = await fetch(`/api/fs/list?path=${encodeURIComponent(path)}`)
+    if (!r.ok) throw new Error()
+    const data = await r.json()
+    items.value = data.items || []
+    searchResults.value = null
+  } catch { items.value = [] }
+}
+async function loadRoot() { await navigate('') }
+
+function openFile(path) { selectedPath.value = path }
+
+async function onUpload(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  uploadMsg.value = 'Envoi…'
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const r = await fetch(`/api/fs/upload?path=${encodeURIComponent(currentPath.value)}`, {
+      method: 'POST', body: fd,
+    })
+    const data = await r.json()
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`)
+    uploadMsg.value = `✓ ${data.name} importé`
+    await navigate(currentPath.value)
+  } catch (err) {
+    uploadMsg.value = ''
+    alert('Upload impossible : ' + err.message)
+  } finally {
+    if (fileInput.value) fileInput.value.value = ''
+    setTimeout(() => { uploadMsg.value = '' }, 4000)
+  }
+}
+
+// Injecte le fichier comme contexte de chat, quel que soit son type prévisualisable.
+async function onInject({ path, name }) {
+  try {
+    const r = await fetch(`/api/fs/preview?path=${encodeURIComponent(path)}`)
+    const data = await r.json()
+    let content = ''
+    if (data.kind === 'text') content = data.content || ''
+    else if (data.kind === 'doc') content = (data.paragraphs || []).join('\n\n')
+    else if (data.kind === 'table') {
+      const head = (data.columns || []).join('\t')
+      const body = (data.rows || []).map(row => row.join('\t')).join('\n')
+      content = [head, body].filter(Boolean).join('\n')
+    } else {
+      alert('Ce type de fichier ne peut pas être injecté comme texte.')
+      return
+    }
+    emit('file-selected', { path, name, content })
+  } catch (e) {
+    alert('Injection impossible : ' + e.message)
+  }
+}
+
+async function doSearch() {
+  if (!search.value) return
+  try {
+    const r = await fetch(`/api/fs/search?q=${encodeURIComponent(search.value)}&path=${encodeURIComponent(currentPath.value)}`)
+    if (!r.ok) return
+    const data = await r.json()
+    searchResults.value = data.results || []
+  } catch (e) {
+    console.error('Recherche impossible :', e)
+  }
+}
+</script>
+
+<style scoped>
+.explorer { padding: 12px; }
+.explorer-header { display: flex; justify-content: space-between; align-items: center; }
+.explorer-header h3 { margin: 0; font-size: 14px; }
+.ghost { background: var(--panel-2); color: var(--text); }
+.upload-row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.upload-btn {
+  display: inline-block; background: var(--panel-2); color: var(--text);
+  border: 1px dashed var(--border); padding: 8px 14px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+}
+.upload-btn:hover { border-color: var(--accent); }
+.upload-msg { font-size: 12px; color: var(--muted); }
+.search { width: 100%; margin: 8px 0; }
+.search-results { margin: 8px 0; max-height: 200px; overflow-y: auto; }
+.search-hit { padding: 6px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 4px; }
+.search-hit:hover { background: var(--panel-2); }
+.hit-file { font-size: 12px; color: var(--accent); }
+.hit-snippet { font-size: 12px; color: var(--muted); font-family: monospace; }
+.tree { list-style: none; padding: 0; margin: 8px 0; }
+.tree li { padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.tree li:hover { background: var(--panel-2); }
+.tree li.empty { color: var(--muted); cursor: default; }
+.tree li.empty:hover { background: transparent; }
+</style>

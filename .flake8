@@ -1,0 +1,12 @@
+[flake8]
+max-line-length = 100
+extend-exclude =
+    .venv,
+    venv,
+    node_modules,
+    build,
+    dist,
+    __pycache__
+# build.spec s'appuie sur des noms injectés par PyInstaller (Analysis, PYZ, EXE, COLLECT)
+per-file-ignores =
+    build.spec: F821

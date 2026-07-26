@@ -1,0 +1,17 @@
+# Minimums compatibles Python 3.10 → 3.14 (pip choisit une version récente avec wheel).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+pydantic>=2.9
+python-dotenv>=1.0
+python-multipart>=0.0.12
+ics>=0.7.2
+python-docx>=1.1
+openpyxl>=3.1
+# Optionnel (décommentez si vous branchez OAuth réel) :
+# google-auth>=2.35
+# google-auth-oauthlib>=1.2
+# google-api-python-client>=2.149
+# msal>=1.31
+# Optionnel (chiffrement des secrets via le coffre OS) :
+# keyring>=25.4

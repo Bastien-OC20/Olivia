@@ -1,0 +1,68 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# --- Secrets & données locales (RGPD : ne jamais committer) ---
+backend/settings.json
+backend/settings.tmp
+backend/.env
+.env
+*.pem
+*.key
+
+# --- Uploads / données créées par l'app ---
+_uploads/
+backend/_uploads/
+
+# --- Build / distribution ---
+dist/
+build/
+*.spec.bak
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# --- Éditeurs / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Claude / assistants IA ---
+.claude/
+CLAUDE.local.md
+.aider*
+.cursor/
+
+# --- Modèles IA locaux (volumineux, jamais versionnés) ---
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.ggml
+models/
+.ollama/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+*.log
+
+# --- Présentations / documents générés (hors dépôt) ---
+*.pptx
+*.potx
+*.pdf
