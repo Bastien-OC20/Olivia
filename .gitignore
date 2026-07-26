@@ -53,6 +53,7 @@ CLAUDE.local.md
 *.ggml
 models/
 .ollama/
+ollama/
 
 # --- OS ---
 .DS_Store

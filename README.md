@@ -32,7 +32,8 @@ puis laisse Olivia en mode simple pour l'assistante de direction.
 ### Pré-requis
 - Python 3.10 → 3.14
 - Node.js 20+
-- Ollama (https://ollama.com) tournant sur `http://localhost:11434`
+- Ollama (https://ollama.com) — installé en portable dans `./ollama` (démarré
+  automatiquement par `launch.py`) ou déjà lancé sur `http://localhost:11434`
 
 ### Lancement en une commande (dev)
 
@@ -41,11 +42,16 @@ python launch.py
 ```
 
 Le script :
-1. Crée le venv backend s'il n'existe pas et installe les dépendances
-2. Démarre FastAPI (`backend.main:app`, port 8000) depuis la racine
-3. Lance Vite en parallèle si `frontend/node_modules` existe (mode dev)
-4. Attend que les serveurs répondent (health-check par port)
-5. Ouvre le navigateur sur l'URL correcte
+1. **Démarre Ollama automatiquement** s'il est installé en portable dans `./ollama`
+   (avec les modèles du projet `./ollama/models`), sauf s'il tourne déjà
+2. Crée le venv backend s'il n'existe pas et installe les dépendances
+3. Démarre FastAPI (`backend.main:app`, port 8000) depuis la racine
+4. Lance Vite en parallèle si `frontend/node_modules` existe (mode dev)
+5. Attend que les serveurs répondent (health-check par port)
+6. Ouvre le navigateur sur l'URL correcte
+
+> `--no-ollama` pour ne pas démarrer le moteur ; `start-ollama.ps1` reste disponible
+> pour lancer Ollama seul dans sa propre fenêtre.
 
 Options :
 ```bash
@@ -111,8 +117,8 @@ automatiquement vers un modèle adapté si le modèle courant ne l'est pas. List
 
 | Périphérique | Modèles recommandés |
 |---|---|
-| GPU (ex. RTX 5060 8 Go) | `qwen3:9b`, `qwen2.5-coder:7b`, `llama3.3:8b`, `qwen2.5-vl:7b`, `phi4-mini:3.8b` |
-| CPU | `phi4-mini:3.8b`, `qwen2.5:3b`, `llama3.2:3b`, `gemma2:2b` |
+| GPU (ex. RTX 5060 8 Go) | `qwen3:8b`, `qwen2.5-coder:7b`, `llama3.3:8b`, `qwen2.5-vl:7b`, `phi4-mini:3.8b` |
+| CPU / bureautique | `qwen3:4b` (~2,5 Go), `qwen3:1.7b` (~1,4 Go, très léger), `phi4-mini:3.8b`, `gemma2:2b` |
 
 Les modèles recommandés non installés apparaissent grisés avec la commande `ollama pull`.
 
@@ -197,7 +203,7 @@ Assemblé dynamiquement à chaque requête ; pas besoin de redémarrer Ollama.
 
 ## ⚠️ Notes VRAM (cible RTX 5060 8 Go)
 
-`qwen3:9b` (~5,5 Go), `qwen2.5-coder:7b` (~5 Go), `phi4-mini:3.8b` (~2,5 Go),
+`qwen3:8b` (~5,2 Go), `qwen2.5-coder:7b` (~5 Go), `phi4-mini:3.8b` (~2,5 Go),
 `llama3.3:8b` (~5,5 Go), `qwen2.5-vl:7b` (~6 Go). Quantification Q4_K_M recommandée.
 
 ## 📁 Arborescence

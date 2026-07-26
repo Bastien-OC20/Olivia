@@ -12,8 +12,8 @@ from threading import RLock
 #   gpu : cible RTX 5060 8 Go (voir README) — modèles quantifiés Q4_K_M
 #   cpu : petits modèles qui restent fluides sans carte graphique
 DEVICE_MODELS = {
-    "gpu": ["qwen3:9b", "qwen2.5-coder:7b", "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-    "cpu": ["phi4-mini:3.8b", "qwen2.5:3b", "llama3.2:3b", "gemma2:2b"],
+    "gpu": ["qwen3:8b", "qwen2.5-coder:7b", "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
+    "cpu": ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
 }
 
 DEFAULTS = {

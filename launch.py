@@ -20,6 +20,7 @@ Usage :
   python launch.py --port 9000      # changer le port backend
 """
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -33,6 +34,12 @@ SRC_ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = (ROOT if FROZEN else SRC_ROOT) / "backend"
 FRONTEND_DIR = SRC_ROOT / "frontend"
 IS_WINDOWS = sys.platform.startswith("win")
+
+# Ollama portable installé DANS le projet (à côté de launch.py ou de l'.exe).
+APP_DIR = Path(sys.executable).resolve().parent if FROZEN else SRC_ROOT
+OLLAMA_DIR = APP_DIR / "ollama"
+OLLAMA_EXE = OLLAMA_DIR / ("ollama.exe" if IS_WINDOWS else "ollama")
+OLLAMA_MODELS_DIR = OLLAMA_DIR / "models"
 
 
 def port_is_open(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -52,8 +59,37 @@ def wait_for_port(host: str, port: int, max_wait: int = 30) -> bool:
     return False
 
 
-def check_ollama() -> bool:
-    return port_is_open("127.0.0.1", 11434)
+def start_ollama():
+    """Démarre le moteur Ollama portable (modèles stockés dans le projet).
+
+    - S'il tourne déjà sur :11434, on le réutilise.
+    - Sinon, si ./ollama/ollama(.exe) existe, on le lance avec OLLAMA_MODELS
+      pointant vers ./ollama/models.
+    - Sinon, on avertit et l'app démarre quand même (sans inférence).
+    Renvoie le sous-process démarré (à arrêter en sortie) ou None.
+    """
+    if port_is_open("127.0.0.1", 11434):
+        print("✅ Ollama déjà démarré sur :11434 — réutilisé.")
+        return None
+    if not OLLAMA_EXE.exists():
+        print("⚠️  Ollama introuvable dans ./ollama — aucune inférence possible.")
+        print("   Installez la version portable dans ce dossier, ou lancez 'ollama serve'.")
+        return None
+
+    OLLAMA_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["OLLAMA_MODELS"] = str(OLLAMA_MODELS_DIR)
+    env.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
+    print(f"→ Démarrage d'Ollama (portable) — modèles : {OLLAMA_MODELS_DIR}")
+    proc = subprocess.Popen(
+        [str(OLLAMA_EXE), "serve"], env=env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if wait_for_port("127.0.0.1", 11434, 20):
+        print("✅ Ollama opérationnel sur :11434")
+    else:
+        print("⚠️  Ollama n'a pas répondu à temps — l'app démarre quand même.")
+    return proc
 
 
 def open_browser(url: str) -> None:
@@ -193,11 +229,20 @@ def run_source(args) -> int:
 
 
 def main() -> int:
+    # Console Windows : forcer l'UTF-8 pour ne pas planter sur les emojis (🌷, ✅, →…)
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description="Lanceur Olivia")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-dev", action="store_true", help="Ne pas lancer Vite (backend seul)")
     parser.add_argument("--no-browser", action="store_true", help="Ne pas ouvrir le navigateur")
+    parser.add_argument("--no-ollama", action="store_true",
+                        help="Ne pas démarrer Ollama automatiquement")
     parser.add_argument("--max-wait", type=int, default=30)
     args = parser.parse_args()
 
@@ -205,11 +250,17 @@ def main() -> int:
     print("🌷 Olivia — lanceur" + ("  [.exe]" if FROZEN else ""))
     print("=" * 60)
 
-    if not check_ollama():
-        print("⚠️  Ollama ne répond pas sur :11434 — lancez 'ollama serve'.")
-        print("   L'application démarre quand même, mais aucune inférence ne fonctionnera.")
-
-    return run_frozen(args) if FROZEN else run_source(args)
+    ollama_proc = None if args.no_ollama else start_ollama()
+    try:
+        return run_frozen(args) if FROZEN else run_source(args)
+    finally:
+        if ollama_proc and ollama_proc.poll() is None:
+            print("→ Arrêt d'Ollama ...")
+            try:
+                ollama_proc.terminate()
+                ollama_proc.wait(timeout=5)
+            except Exception:
+                ollama_proc.kill()
 
 
 if __name__ == "__main__":
