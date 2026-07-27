@@ -94,13 +94,18 @@ npm install
 npm run build
 cd ..
 
-# 2) Compiler l'exécutable autonome
-pip install pyinstaller
-pyinstaller build.spec --clean --noconfirm
+# 2) Compiler l'exécutable autonome (PyInstaller installé DANS le venv du projet)
+backend\.venv\Scripts\python.exe -m pip install pyinstaller
+backend\.venv\Scripts\pyinstaller.exe build.spec --clean --noconfirm
 
 # → dist\ai-webapp\ai-webapp.exe
 # Double-clic → FastAPI démarre + navigateur ouvert sur http://127.0.0.1:8000/ui/
 ```
+
+> **Déploiement avec Ollama portable** : pour que l'.exe démarre aussi le moteur d'IA,
+> copiez le dossier `ollama/` (binaire + `models/`) **à côté de `ai-webapp.exe`**
+> (le lanceur cherche `./ollama` relatif à l'exécutable). Sinon, l'.exe réutilise
+> un Ollama déjà lancé sur :11434.
 
 Icône personnalisée : placez `ai-webapp.ico` à la racine et décommentez la ligne
 `# icon='ai-webapp.ico'` dans `build.spec`.

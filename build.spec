@@ -25,21 +25,27 @@ else:
     print("⚠️  frontend/dist absent — l'.exe n'embarquera pas l'UI. "
           "Lancez d'abord : cd frontend && npm run build")
 
-hiddenimports = [
-    'uvicorn', 'uvicorn.logging', 'uvicorn.loops', 'uvicorn.loops.auto',
-    'uvicorn.protocols', 'uvicorn.protocols.http', 'uvicorn.protocols.http.auto',
-    'uvicorn.protocols.websockets', 'uvicorn.protocols.websockets.auto',
-    'uvicorn.lifespan', 'uvicorn.lifespan.on',
-    'fastapi', 'starlette', 'starlette.middleware', 'starlette.middleware.base',
-    'pydantic', 'pydantic.fields', 'pydantic.main', 'pydantic.types',
-    'httpx', 'httpcore', 'anyio',
-    'multipart',                       # python-multipart (uploads)
-    'docx',                            # python-docx (preview .docx)
-    'openpyxl',                        # preview .xlsx
-    'ics',                             # calendrier .ics
-    'email.mime.text', 'email.mime.multipart',
-    'imaplib', 'smtplib',
-]
+# Le backend est chargé DYNAMIQUEMENT par uvicorn ("backend.main:app") : PyInstaller
+# ne le voit pas à l'analyse statique de launch.py. Il faut donc collecter
+# explicitement TOUS les sous-modules des frameworks (un simple 'fastapi' ne
+# suffit pas : fastapi.middleware.cors, staticfiles, etc. manqueraient).
+from PyInstaller.utils.hooks import collect_submodules
+
+hiddenimports = (
+    collect_submodules('uvicorn')
+    + collect_submodules('fastapi')
+    + collect_submodules('starlette')
+    + [m for m in collect_submodules('pydantic') if '.mypy' not in m]
+    + [
+        'httpx', 'httpcore', 'anyio',
+        'multipart',                   # python-multipart (uploads)
+        'docx',                        # python-docx (preview .docx)
+        'openpyxl',                    # preview .xlsx
+        'ics',                         # calendrier .ics
+        'email.mime.text', 'email.mime.multipart',
+        'imaplib', 'smtplib',
+    ]
+)
 
 a = Analysis(
     ['launch.py'],
