@@ -26,7 +26,9 @@ DEFAULTS = {
     "simple_mode": True,              # UI épurée par défaut (utilisatrice non technique)
     "search_provider": "duckduckgo",
     "searxng_url": "http://localhost:8888",
-    "fs_root": str(Path.home() / "Documents"),
+    # Vide = utiliser le défaut (variable d'env FS_ROOT, sinon ~/Documents).
+    # Ne pas pré-remplir : une valeur non vide prendrait le pas sur l'env.
+    "fs_root": "",
     "privacy_consent": False,          # RGPD : consentement au stockage local
     "connectors": {
         "imap": {"enabled": False, "label": "Boîte pro", "host": "", "user": "",

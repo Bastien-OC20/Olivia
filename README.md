@@ -174,7 +174,9 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 
 ## 🛡️ Sécurité
 
-- Routes `/api/fs/*` **sandboxées** sous `FS_ROOT` (path-traversal → **HTTP 403**).
+- Routes `/api/fs/*` **sandboxées** sous le dossier accessible configuré (path-traversal →
+  **HTTP 403**). Ce dossier se change dans *Paramètres → Réglages avancés → Préférences*,
+  sans redémarrage ; la variable d'environnement `FS_ROOT` reste la valeur par défaut.
 - En-têtes de sécurité sur toutes les réponses : `Content-Security-Policy`, `X-Content-Type-Options`,
   `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`.
 - **CORS restreint** au poste local (plus de wildcard).

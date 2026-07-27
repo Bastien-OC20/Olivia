@@ -16,6 +16,7 @@ const DEFAULTS = {
   simple_mode: true,
   search_provider: "duckduckgo",
   searxng_url: "http://localhost:8888",
+  fs_root: "",
   privacy_consent: false,
   connectors: {
     imap: { enabled: false, label: "Boîte pro", host: "", user: "", password: "", folder: "INBOX" },
@@ -65,9 +66,18 @@ export const useSettingsStore = defineStore('settings', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch ?? data.value)
       })
-      if (r.ok) data.value = _merge(DEFAULTS, await r.json())
-    } catch (e) { console.error('Sauvegarde échouée :', e) }
-    finally { saving.value = false }
+      const body = await r.json().catch(() => null)
+      if (r.ok) {
+        data.value = _merge(DEFAULTS, body)
+        return { ok: true }
+      }
+      const error = body?.detail || `HTTP ${r.status}`
+      console.error('Sauvegarde échouée :', error)
+      return { ok: false, error }
+    } catch (e) {
+      console.error('Sauvegarde échouée :', e)
+      return { ok: false, error: e.message }
+    } finally { saving.value = false }
   }
 
   function show() { open.value = true }

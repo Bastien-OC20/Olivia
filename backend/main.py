@@ -55,7 +55,9 @@ from .connectors import (
 
 # ---------- Configuration runtime ----------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-FS_ROOT = Path(os.getenv("FS_ROOT", os.path.expanduser("~/Documents"))).resolve()
+# Valeur par défaut (variable d'env ou ~/Documents) — utilisée si aucun dossier valide
+# n'est configuré dans les paramètres, ou si le dossier configuré n'existe plus.
+FS_ROOT_DEFAULT = Path(os.getenv("FS_ROOT", os.path.expanduser("~/Documents"))).resolve()
 UPLOAD_SUBDIR = "_uploads"                       # RGPD : zone de données créée par l'app
 MAX_FILE_SIZE = 1_000_000                         # 1 Mo pour la lecture texte
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024                # 25 Mo pour l'upload
@@ -140,15 +142,33 @@ class ChatRequest(BaseModel):
 
 
 # ---------- Sécurité : anti path-traversal ----------
-def safe_path(rel_or_abs: str) -> Path:
+def get_fs_root() -> Path:
+    """Racine FS effective : dossier configuré dans les paramètres s'il est valide
+    (existe et est un dossier), sinon repli sur FS_ROOT_DEFAULT (env / ~/Documents).
+    Lue à chaque appel : un changement de réglage s'applique donc sans redémarrage.
+    """
+    configured = (settings.get().get("fs_root") or "").strip()
+    if configured:
+        try:
+            p = Path(configured)
+            if p.is_dir():
+                return p.resolve()
+        except OSError:
+            pass
+    return FS_ROOT_DEFAULT
+
+
+def safe_path(rel_or_abs: str, root: Path = None) -> Path:
+    if root is None:
+        root = get_fs_root()
     p = Path(rel_or_abs)
-    p = p.resolve() if p.is_absolute() else (FS_ROOT / rel_or_abs).resolve()
+    p = p.resolve() if p.is_absolute() else (root / rel_or_abs).resolve()
     try:
-        p.relative_to(FS_ROOT)
+        p.relative_to(root)
     except ValueError:
         raise HTTPException(
             status_code=403,
-            detail=f"Accès refusé : '{rel_or_abs}' sort du périmètre autorisé ({FS_ROOT})",
+            detail=f"Accès refusé : '{rel_or_abs}' sort du périmètre autorisé ({root})",
         )
     return p
 
@@ -247,8 +267,9 @@ async def chat_blocking(req: ChatRequest):
 
 # ---------- Routes Filesystem sandboxées ----------
 @app.get("/api/fs/list")
-async def fs_list(path: str = Query("", description="Chemin relatif sous FS_ROOT")):
-    p = safe_path(path)
+async def fs_list(path: str = Query("", description="Chemin relatif sous la racine configurée")):
+    root = get_fs_root()
+    p = safe_path(path, root)
     if not p.exists():
         raise HTTPException(404, f"Dossier introuvable : {p}")
     if not p.is_dir():
@@ -259,7 +280,7 @@ async def fs_list(path: str = Query("", description="Chemin relatif sous FS_ROOT
             stat = entry.stat()
             items.append({
                 "name": entry.name,
-                "path": str(entry.relative_to(FS_ROOT)),
+                "path": str(entry.relative_to(root)),
                 "is_dir": entry.is_dir(),
                 "size": stat.st_size if entry.is_file() else 0,
                 "modified": stat.st_mtime,
@@ -267,12 +288,13 @@ async def fs_list(path: str = Query("", description="Chemin relatif sous FS_ROOT
             })
         except PermissionError:
             continue
-    return {"root": str(FS_ROOT), "current": str(p.relative_to(FS_ROOT)), "items": items}
+    return {"root": str(root), "current": str(p.relative_to(root)), "items": items}
 
 
 @app.get("/api/fs/read")
 async def fs_read(path: str = Query(...)):
-    p = safe_path(path)
+    root = get_fs_root()
+    p = safe_path(path, root)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     if p.suffix.lower() not in ALLOWED_EXT:
@@ -280,17 +302,18 @@ async def fs_read(path: str = Query(...)):
     if p.stat().st_size > MAX_FILE_SIZE:
         raise HTTPException(413, f"Fichier trop volumineux (>{MAX_FILE_SIZE} octets)")
     try:
-        return {"path": str(p.relative_to(FS_ROOT)), "content": p.read_text(errors="ignore")}
+        return {"path": str(p.relative_to(root)), "content": p.read_text(errors="ignore")}
     except Exception as e:
         raise HTTPException(500, f"Erreur lecture : {e}")
 
 
 @app.get("/api/fs/preview")
 async def fs_preview(path: str = Query(...)):
-    p = safe_path(path)
+    root = get_fs_root()
+    p = safe_path(path, root)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
-    rel = str(p.relative_to(FS_ROOT))
+    rel = str(p.relative_to(root))
     download_url = f"/api/fs/download?path={rel}"
     result = documents.preview(p, download_url)
     result["path"] = rel
@@ -316,9 +339,10 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     if ext not in UPLOAD_EXT:
         raise HTTPException(400, f"Type de fichier non autorisé : {ext or 'inconnu'}")
 
-    target_dir = safe_path(path) if path else (FS_ROOT / UPLOAD_SUBDIR)
+    root = get_fs_root()
+    target_dir = safe_path(path, root) if path else (root / UPLOAD_SUBDIR)
     target_dir.mkdir(parents=True, exist_ok=True)
-    safe_path(str(target_dir))  # revérifie le sandbox
+    safe_path(str(target_dir), root)  # revérifie le sandbox
     dest = target_dir / safe_name
 
     size = 0
@@ -339,12 +363,13 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(500, f"Erreur d'upload : {e}")
-    return {"path": str(dest.relative_to(FS_ROOT)), "name": safe_name, "size": size}
+    return {"path": str(dest.relative_to(root)), "name": safe_name, "size": size}
 
 
 @app.get("/api/fs/search")
 async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
-    p = safe_path(path)
+    root = get_fs_root()
+    p = safe_path(path, root)
     if not p.is_dir():
         raise HTTPException(400, "Le chemin doit être un dossier")
     results = []
@@ -364,7 +389,7 @@ async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
         for i, line in enumerate(text.splitlines(), 1):
             if pattern.search(line):
                 results.append({
-                    "file": str(fp.relative_to(FS_ROOT)),
+                    "file": str(fp.relative_to(root)),
                     "line": i,
                     "snippet": line.strip()[:200],
                 })
@@ -385,6 +410,12 @@ async def update_settings(patch: dict):
         raise HTTPException(400, "Body doit être un objet JSON")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
+    if "fs_root" in patch:
+        fs_root_value = (patch.get("fs_root") or "").strip()
+        patch["fs_root"] = fs_root_value
+        # Une valeur vide signifie "revenir au défaut" : toujours autorisée.
+        if fs_root_value and not Path(fs_root_value).is_dir():
+            raise HTTPException(400, f"Dossier introuvable : {fs_root_value}")
     settings.update(patch)
     return JSONResponse(_mask_secrets(settings.get()))
 
@@ -517,7 +548,7 @@ async def privacy_export():
 async def privacy_delete():
     """Droit à l'effacement : réinitialise les paramètres + purge la zone d'upload de l'app."""
     removed = 0
-    upload_dir = FS_ROOT / UPLOAD_SUBDIR
+    upload_dir = get_fs_root() / UPLOAD_SUBDIR
     if upload_dir.exists():
         for f in upload_dir.glob("*"):
             try:
@@ -540,7 +571,7 @@ async def health():
         "status": "ok",
         "version": app.version,
         "ollama": OLLAMA_URL,
-        "fs_root": str(FS_ROOT),
+        "fs_root": str(get_fs_root()),
         "compute_device": s.get("compute_device", "gpu"),
         "frontend_ui": FRONTEND_DIST.exists(),
         "api_token_required": bool(API_TOKEN),

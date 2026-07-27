@@ -112,6 +112,21 @@
                 (<code>num_gpu=0</code>). Modifiable aussi depuis la barre du haut.
               </p>
             </div>
+            <div
+              v-if="!simple"
+              class="field"
+            >
+              <label for="f-fsroot">📁 Dossier de documents accessible</label>
+              <input
+                id="f-fsroot"
+                v-model="settings.data.fs_root"
+                placeholder="C:\Users\vous\Documents"
+              >
+              <p class="hint">
+                Olivia ne peut lire et écrire que dans ce dossier. Laissez vide pour utiliser
+                Documents. Appliqué immédiatement après Enregistrer.
+              </p>
+            </div>
             <div class="field">
               <label for="f-temp">Température : {{ Number(settings.data.temperature).toFixed(2) }}</label>
               <input
@@ -574,7 +589,11 @@ async function deleteData() {
 }
 
 async function save() {
-  await settings.save()
+  const result = await settings.save()
+  if (!result?.ok) {
+    alert('Enregistrement impossible : ' + (result?.error || 'erreur inconnue'))
+    return
+  }
   settings.hide()
 }
 

@@ -10,6 +10,13 @@
         ↑ Racine
       </button>
     </div>
+    <div
+      v-if="rootLabel"
+      class="root-path"
+      :title="rootPath"
+    >
+      {{ rootLabel }}
+    </div>
 
     <div class="upload-row">
       <label
@@ -103,17 +110,28 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import FilePreview from './FilePreview.vue'
+import { useSettingsStore } from '../stores/settings.js'
 
+const settings = useSettingsStore()
 const items = ref([])
 const currentPath = ref('')
+const rootPath = ref('')
+const rootLabel = ref('')
 const selectedPath = ref(null)
 const search = ref('')
 const searchResults = ref(null)
 const uploadMsg = ref('')
 const fileInput = ref(null)
 const emit = defineEmits(['file-selected'])
+
+function basename(p) {
+  return p.split(/[\\/]/).filter(Boolean).pop() || p
+}
+
+// Recharge la liste quand le dossier accessible est reconfiguré dans les paramètres.
+watch(() => settings.data.fs_root, () => { loadRoot() })
 
 function icon(ext) {
   if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'].includes(ext)) return '🖼️'
@@ -131,6 +149,10 @@ async function navigate(path) {
     const data = await r.json()
     items.value = data.items || []
     searchResults.value = null
+    if (data.root) {
+      rootPath.value = data.root
+      rootLabel.value = basename(data.root)
+    }
   } catch { items.value = [] }
 }
 async function loadRoot() { await navigate('') }
@@ -199,6 +221,10 @@ async function doSearch() {
 .explorer { padding: 12px; }
 .explorer-header { display: flex; justify-content: space-between; align-items: center; }
 .explorer-header h3 { margin: 0; font-size: 14px; }
+.root-path {
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; margin: 2px 0 6px;
+}
 .ghost { background: var(--panel-2); color: var(--text); }
 .upload-row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .upload-btn {
