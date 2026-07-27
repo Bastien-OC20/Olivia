@@ -19,6 +19,9 @@ backend/.env
 _uploads/
 backend/_uploads/
 
+# --- Config SearXNG locale (contient un secret_key propre à la machine) ---
+searxng/
+
 # --- Build / distribution ---
 dist/
 build/

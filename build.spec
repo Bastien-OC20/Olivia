@@ -13,6 +13,8 @@ le navigateur sur http://127.0.0.1:8000/ui/.
 """
 import os
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 # Le backend est embarqué comme package importable au runtime (voir launch.py).
@@ -29,8 +31,6 @@ else:
 # ne le voit pas à l'analyse statique de launch.py. Il faut donc collecter
 # explicitement TOUS les sous-modules des frameworks (un simple 'fastapi' ne
 # suffit pas : fastapi.middleware.cors, staticfiles, etc. manqueraient).
-from PyInstaller.utils.hooks import collect_submodules
-
 hiddenimports = (
     collect_submodules('uvicorn')
     + collect_submodules('fastapi')

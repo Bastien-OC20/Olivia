@@ -14,9 +14,23 @@ from urllib.parse import unquote
 
 
 async def search_searxng(query: str, base_url: str = "http://localhost:8888", limit: int = 5):
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{base_url}/search",
-                             params={"q": query, "format": "json"})
+    """Interroge une instance SearXNG locale (métamoteur : Google, DuckDuckGo, etc.).
+
+    L'instance doit autoriser le format JSON : dans son `settings.yml`,
+    `search.formats` doit contenir `json` (absent de la configuration par
+    défaut, ce qui provoque sinon un HTTP 403).
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{base_url.rstrip('/')}/search",
+            params={"q": query, "format": "json", "language": "fr-FR"},
+        )
+        if r.status_code == 403:
+            raise RuntimeError(
+                "SearXNG refuse le format JSON (HTTP 403). Ajoutez 'json' à "
+                "search.formats dans le settings.yml de votre instance, puis "
+                "redémarrez-la."
+            )
         r.raise_for_status()
         data = r.json()
         return [

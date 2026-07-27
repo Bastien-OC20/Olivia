@@ -200,9 +200,39 @@ depuis **Paramètres → Recherche web** (champ + bouton « 🔍 Tester »).
 
 | Provider | Pré-requis | Fiabilité |
 |---|---|---|
+| **SearXNG** (recommandé) | Docker — voir ci-dessous | Élevée |
 | **DuckDuckGo** | Aucun | Moyenne (scraping HTML) |
-| **SearXNG** | `docker run -d -p 8888:8080 searxng/searxng` | Élevée |
 | **Brave Search** | `BRAVE_API_KEY` dans l'environnement | Élevée |
+
+### Installer SearXNG (métamoteur auto-hébergé)
+
+SearXNG interroge plusieurs moteurs à la fois (Google, DuckDuckGo, Wikipédia…) depuis
+**votre machine** : aucun compte, aucune clé API, et aucun profilage publicitaire.
+
+```powershell
+docker run -d --name olivia-searxng --restart unless-stopped `
+  -p 8888:8080 -v "D:\Olivia\searxng:/etc/searxng" `
+  -e "SEARXNG_BASE_URL=http://localhost:8888/" searxng/searxng:latest
+```
+
+> ⚠️ **Indispensable** : la configuration par défaut de SearXNG **n'autorise pas le
+> format JSON** dont Olivia a besoin (`/search?format=json` → HTTP 403). Après le
+> premier démarrage, ajoutez dans `searxng/settings.yml` :
+> ```yaml
+> search:
+>   formats: [html, json]
+>   default_lang: "fr-FR"
+> ```
+> puis `docker restart olivia-searxng`. Le dossier `searxng/` est ignoré par Git
+> (il contient une `secret_key` propre à la machine).
+
+### À propos de Qwant
+
+Qwant (moteur français) **n'est pas disponible** dans Olivia : son accès automatisé est
+protégé par un captcha anti-robot (DataDome), en appel direct comme via le connecteur
+officiel de SearXNG, qui le signale `qwant: CAPTCHA`. Seul un contrat d'API commercial
+avec Qwant permettrait l'intégration. SearXNG en local reste l'option la plus proche :
+auto-hébergée, sans traçage, avec des résultats en français.
 
 ## 🧠 Raisonnement et ton
 

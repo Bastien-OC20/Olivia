@@ -187,7 +187,10 @@
                 placeholder="http://localhost:8888"
               >
               <p class="hint">
-                Docker : <code>docker run -d --name searxng -p 8888:8080 searxng/searxng</code>
+                Métamoteur installé sur cette machine : il interroge plusieurs moteurs à la
+                fois (Google, DuckDuckGo…) sans qu'aucun compte ni clé ne soit nécessaire.
+                Son fichier <code>settings.yml</code> doit autoriser le format
+                <code>json</code>, sinon la recherche renvoie une erreur 403.
               </p>
             </div>
             <div
