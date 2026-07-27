@@ -59,6 +59,81 @@ def wait_for_port(host: str, port: int, max_wait: int = 30) -> bool:
     return False
 
 
+# ---------------------------------------------------------- fermeture liée (Windows)
+# Job Object avec KILL_ON_JOB_CLOSE : tous les processus enfants (Ollama, uvicorn,
+# Vite) y sont rattachés. Si CE processus meurt — même tué brutalement — l'OS ferme
+# le handle du job et tue toute la descendance. Aucun orphelin possible.
+_JOB = None
+
+
+def _create_job():
+    if not IS_WINDOWS:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_uint64) for n in (
+            "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+            "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    KILL_ON_JOB_CLOSE = 0x2000
+    EXTENDED_LIMIT_INFO = 9
+    k32 = ctypes.windll.kernel32
+    job = k32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    info = _ExtendedLimits()
+    info.BasicLimitInformation.LimitFlags = KILL_ON_JOB_CLOSE
+    if not k32.SetInformationJobObject(job, EXTENDED_LIMIT_INFO,
+                                       ctypes.byref(info), ctypes.sizeof(info)):
+        k32.CloseHandle(job)
+        return None
+    return job
+
+
+def bind_child(proc: subprocess.Popen | None) -> None:
+    """Rattache un processus enfant au job 'fermeture liée' (no-op hors Windows)."""
+    global _JOB
+    if proc is None or not IS_WINDOWS:
+        return
+    if _JOB is None:
+        _JOB = _create_job()
+    if not _JOB:
+        return
+    import ctypes
+    handle = getattr(proc, "_handle", None)
+    if handle is None:
+        return
+    try:
+        ctypes.windll.kernel32.AssignProcessToJobObject(_JOB, int(handle))
+    except Exception:
+        pass  # best effort : le terminate() explicite reste le filet de sécurité
+
+
 def start_ollama():
     """Démarre le moteur Ollama portable (modèles stockés dans le projet).
 
@@ -85,6 +160,7 @@ def start_ollama():
         [str(OLLAMA_EXE), "serve"], env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
+    bind_child(proc)  # fermeture liée : Ollama meurt avec le lanceur
     if wait_for_port("127.0.0.1", 11434, 20):
         print("✅ Ollama opérationnel sur :11434")
     else:
@@ -161,11 +237,13 @@ def start_backend(host: str, port: int) -> subprocess.Popen:
     print(f"→ Démarrage du backend FastAPI sur {host}:{port} ...")
     # Lancé depuis la RACINE en ciblant 'backend.main:app' pour que les imports
     # relatifs du package (from .settings ...) fonctionnent.
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [py, "-m", "uvicorn", "backend.main:app", "--host", host, "--port", str(port), "--reload"],
         cwd=str(SRC_ROOT),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
+    bind_child(proc)
+    return proc
 
 
 def start_npm_dev() -> subprocess.Popen | None:
@@ -174,11 +252,13 @@ def start_npm_dev() -> subprocess.Popen | None:
         return None
     print("→ Démarrage de Vite (UI mode dev) ...")
     npm = "npm.cmd" if IS_WINDOWS else "npm"
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         [npm, "run", "dev"],
         cwd=str(FRONTEND_DIR),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
     )
+    bind_child(proc)
+    return proc
 
 
 def stream_output(proc: subprocess.Popen, prefix: str = "") -> None:
