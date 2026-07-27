@@ -14,6 +14,8 @@ Routes principales :
   GET  /api/fs/preview                   : prévisualisation (txt/csv/xlsx/docx/img/pdf)
   POST /api/fs/upload                    : upload d'un fichier (sandboxé, filtré)
   GET  /api/fs/download                  : téléchargement d'un fichier (sandboxé)
+  GET  /api/fs/drives                    : lecteurs disponibles (hors sandbox, dossiers only)
+  GET  /api/fs/browse                    : sous-dossiers d'un chemin absolu (hors sandbox)
   POST /api/search                       : recherche web via provider configuré
   GET  /api/connectors/status            : état stylisable de tous les connecteurs
   GET  /api/connectors/mail/unread       : nombre d'e-mails non lus (notifications)
@@ -21,6 +23,11 @@ Routes principales :
   GET  /api/connectors/calendar/preview  : aperçu calendrier .ics
   GET  /api/privacy/export               : RGPD — export de toutes les données locales
   POST /api/privacy/delete               : RGPD — suppression des données locales
+  GET  /api/conversations                : liste des conversations (métadonnées)
+  GET  /api/conversations/{conv_id}      : conversation complète
+  POST /api/conversations                : crée une conversation
+  PUT  /api/conversations/{conv_id}      : met à jour une conversation
+  DELETE /api/conversations/{conv_id}    : supprime une conversation
   /ui                                    : interface Vue buildée (frontend/dist)
 """
 import os
@@ -43,6 +50,7 @@ from pydantic import BaseModel
 from .settings import settings, style_directives
 from .search import web_search
 from . import documents
+from . import conversations
 from .connectors import (
     read_inbox,
     unread_count,
@@ -260,6 +268,11 @@ def _list_dir_items(p: Path, root: Path, prefix: str) -> list[dict]:
     return items
 
 
+# Secrets stockés à la racine des paramètres (hors bloc `connectors`) : masqués
+# comme les autres à la lecture, et ignorés au PUT s'ils reviennent masqués.
+TOP_LEVEL_SECRET_KEYS = {"search_brave_api_key"}
+
+
 def _mask_secrets(data: dict) -> dict:
     """Masque les secrets dans la réponse GET /api/settings (défense en profondeur).
     L'UI n'a pas besoin de relire les mots de passe ; elle ne réécrit que ce qui change.
@@ -272,6 +285,10 @@ def _mask_secrets(data: dict) -> dict:
             for k in list(conn.keys()):
                 if k in secret_keys and conn[k]:
                     conn[k] = "••••••••"
+    # Secrets hors bloc connecteurs (clé d'API du moteur de recherche).
+    for k in TOP_LEVEL_SECRET_KEYS:
+        if d.get(k):
+            d[k] = "••••••••"
     return d
 
 
@@ -527,6 +544,60 @@ async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
     return {"query": q, "results": results, "truncated": truncated}
 
 
+# ---------- Routes Filesystem hors sandbox : sélection d'un dossier ----------
+# Ces deux routes sortent volontairement du périmètre imposé par safe_path().
+# Raison : pour ajouter un nouveau dossier à `fs_roots` depuis l'interface (au lieu
+# de taper un chemin à la main), il faut bien pouvoir parcourir le disque *avant*
+# qu'un dossier ne devienne une racine autorisée — safe_path() ne peut donc pas
+# s'appliquer ici, par construction. Une fois choisi, le dossier est validé et
+# enregistré via PUT /api/settings (qui vérifie qu'il existe) ; à partir de là,
+# et uniquement à partir de là, il redevient accessible en lecture via safe_path().
+# Cadrage strict de ces deux routes, à ne jamais relâcher :
+#   - dossiers uniquement : jamais de fichier, jamais de contenu, jamais de taille ;
+#   - un seul niveau de profondeur par appel (aucune récursion) ;
+#   - les dossiers illisibles (droits système) sont ignorés silencieusement ;
+#   - elles restent soumises comme toute route /api/* à ApiTokenMiddleware
+#     (API_TOKEN) — voir plus haut. Ne pas les exempter de ce middleware.
+@app.get("/api/fs/drives")
+async def fs_drives():
+    """Lecteurs disponibles : lettres existantes sous Windows, '/' sous POSIX."""
+    drives: list[str] = []
+    if os.name == "nt":
+        import string
+        for letter in string.ascii_uppercase:
+            d = Path(f"{letter}:/")
+            try:
+                if d.exists():
+                    drives.append(str(d))
+            except OSError:
+                continue
+    else:
+        drives.append("/")
+    return {"drives": drives}
+
+
+@app.get("/api/fs/browse")
+async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sandbox)")):
+    """Sous-dossiers directs d'un chemin absolu — et rien d'autre (voir note ci-dessus)."""
+    p = Path(path)
+    if not p.is_absolute():
+        raise HTTPException(400, "Chemin absolu requis")
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(404, f"Dossier introuvable : {p}")
+    folders: list[dict] = []
+    try:
+        children = sorted(p.iterdir(), key=lambda x: x.name.lower())
+    except (PermissionError, OSError):
+        children = []
+    for entry in children:
+        try:
+            if entry.is_dir():
+                folders.append({"name": entry.name, "path": str(entry)})
+        except OSError:
+            continue
+    return {"path": str(p), "folders": folders}
+
+
 # ---------- Routes Settings ----------
 @app.get("/api/settings")
 async def get_settings():
@@ -570,6 +641,11 @@ def _strip_masked(patch: dict):
             for k in list(conn.keys()):
                 if conn[k] == "••••••••":
                     del conn[k]
+    # Sans ceci, ré-enregistrer les paramètres depuis l'UI écraserait la vraie
+    # clé par la valeur d'affichage masquée.
+    for k in TOP_LEVEL_SECRET_KEYS:
+        if patch.get(k) == "••••••••":
+            del patch[k]
 
 
 # ---------- Route Recherche web ----------
@@ -581,14 +657,58 @@ async def do_search(body: dict):
     s = settings.get()
     provider = s.get("search_provider", "duckduckgo")
     try:
-        results = await web_search(
+        used_provider, results = await web_search(
             provider, query,
             searxng_url=s.get("searxng_url", "http://localhost:8888"),
+            brave_api_key=s.get("search_brave_api_key", ""),
             limit=body.get("limit", 5),
         )
-        return {"provider": provider, "query": query, "results": results}
+        return {"provider": used_provider, "query": query, "results": results}
     except Exception as e:
-        raise HTTPException(502, f"Erreur recherche via {provider} : {e}")
+        raise HTTPException(502, f"Erreur recherche : {e}")
+
+
+# ---------- Routes Conversations ----------
+@app.get("/api/conversations")
+async def list_conversations():
+    """Liste des conversations (métadonnées seules), triées par date de mise à jour."""
+    return {"conversations": conversations.list_conversations()}
+
+
+@app.get("/api/conversations/{conv_id}")
+async def get_conversation(conv_id: str):
+    """Conversation complète (messages inclus)."""
+    conv = conversations.get_conversation(conv_id)
+    if conv is None:
+        raise HTTPException(404, "Conversation introuvable")
+    return conv
+
+
+@app.post("/api/conversations")
+async def create_conversation(body: dict):
+    """Crée une nouvelle conversation et la renvoie (avec son id)."""
+    return conversations.create_conversation(
+        messages=body.get("messages"), title=body.get("title"),
+    )
+
+
+@app.put("/api/conversations/{conv_id}")
+async def update_conversation(conv_id: str, body: dict):
+    """Met à jour les messages et/ou le titre d'une conversation existante."""
+    conv = conversations.update_conversation(
+        conv_id, messages=body.get("messages"), title=body.get("title"),
+    )
+    if conv is None:
+        raise HTTPException(404, "Conversation introuvable")
+    return conv
+
+
+@app.delete("/api/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    """Supprime une conversation."""
+    if not conversations.delete_conversation(conv_id):
+        raise HTTPException(404, "Conversation introuvable")
+    return {"ok": True}
 
 
 # ---------- Routes Connecteurs ----------
@@ -680,6 +800,7 @@ async def privacy_export():
     """Droit d'accès/portabilité : export de toutes les données locales de l'app."""
     payload = {
         "settings": settings.get(),
+        "conversations": conversations.export_all_conversations(),
         "note": "Toutes vos données restent sur cette machine. Aucun envoi externe.",
     }
     return JSONResponse(
@@ -706,7 +827,11 @@ async def privacy_delete():
                 except Exception:
                     pass
     settings.reset()
-    return {"ok": True, "settings_reset": True, "uploads_removed": removed}
+    conversations_removed = conversations.delete_all_conversations()
+    return {
+        "ok": True, "settings_reset": True, "uploads_removed": removed,
+        "conversations_removed": conversations_removed,
+    }
 
 
 # ---------- Health ----------

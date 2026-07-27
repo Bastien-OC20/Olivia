@@ -78,9 +78,48 @@
     >
       <aside
         class="sidebar"
-        aria-label="Explorateur de fichiers"
+        aria-label="Conversations et documents"
       >
-        <FileExplorer @file-selected="onFileSelected" />
+        <div
+          class="side-tabs"
+          role="tablist"
+          aria-label="Sections de la barre latérale"
+        >
+          <button
+            v-for="t in sideTabs"
+            :id="`tab-${t.id}`"
+            :key="t.id"
+            role="tab"
+            type="button"
+            :class="{ on: sideTab === t.id }"
+            :aria-selected="sideTab === t.id"
+            :aria-controls="`panel-${t.id}`"
+            :tabindex="sideTab === t.id ? 0 : -1"
+            @click="sideTab = t.id"
+            @keydown="onTabKeydown"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+
+        <div
+          v-show="sideTab === 'conversations'"
+          id="panel-conversations"
+          role="tabpanel"
+          aria-labelledby="tab-conversations"
+          tabindex="0"
+        >
+          <ConversationList />
+        </div>
+        <div
+          v-show="sideTab === 'documents'"
+          id="panel-documents"
+          role="tabpanel"
+          aria-labelledby="tab-documents"
+          tabindex="0"
+        >
+          <FileExplorer @file-selected="onFileSelected" />
+        </div>
       </aside>
       <section
         class="content"
@@ -102,6 +141,7 @@ import { useSettingsStore } from './stores/settings.js'
 import ModelPicker from './components/ModelPicker.vue'
 import FileExplorer from './components/FileExplorer.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import ConversationList from './components/ConversationList.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
 import ConnectedTools from './components/ConnectedTools.vue'
 import ConsentBanner from './components/ConsentBanner.vue'
@@ -115,10 +155,34 @@ const settingsMenu = ref(null)
 const device = computed(() => settings.data.compute_device || 'gpu')
 const simple = computed(() => settings.data.simple_mode !== false)
 
+// Barre latérale à deux onglets : conversations et documents.
+// Visible dans les deux modes (simple et avancé).
+const sideTabs = [
+  { id: 'conversations', label: '💬 Conversations' },
+  { id: 'documents', label: '📁 Documents' },
+]
+const sideTab = ref('conversations')
+
 onMounted(async () => {
   await settings.load()
   chat.loadModels()
+  chat.loadConversations()
 })
+
+// Navigation clavier attendue pour un role="tablist" (flèches, Début, Fin).
+function onTabKeydown(e) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
+  if (!keys.includes(e.key)) return
+  e.preventDefault()
+  const i = sideTabs.findIndex(t => t.id === sideTab.value)
+  let next
+  if (e.key === 'ArrowLeft') next = (i - 1 + sideTabs.length) % sideTabs.length
+  else if (e.key === 'ArrowRight') next = (i + 1) % sideTabs.length
+  else if (e.key === 'Home') next = 0
+  else next = sideTabs.length - 1
+  sideTab.value = sideTabs[next].id
+  document.getElementById(`tab-${sideTabs[next].id}`)?.focus()
+}
 
 function onFileSelected(file) { currentFile.value = file }
 
@@ -158,6 +222,20 @@ function openPrivacy() {
 .seg button.on { background: var(--accent); color: #fff; }
 
 .main { display: flex; flex: 1; overflow: hidden; }
-.sidebar { width: 320px; border-right: 1px solid var(--border); overflow-y: auto; }
+.sidebar {
+  width: 320px; border-right: 1px solid var(--border);
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.side-tabs {
+  display: flex; gap: 4px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+.side-tabs button {
+  flex: 1; background: var(--panel-2); color: var(--muted);
+  padding: 7px 8px; font-size: 13px;
+}
+.side-tabs button.on { background: var(--accent); color: #fff; }
+.sidebar [role="tabpanel"] { outline-offset: -2px; }
 .content { flex: 1; overflow: hidden; }
 </style>

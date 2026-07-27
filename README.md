@@ -9,8 +9,11 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 - **Prévisualise** fichiers texte, code, CSV, Excel (.xlsx), Word (.docx), images et PDF
 - **Importe (upload) et télécharge (download)** des fichiers dans le périmètre sandboxé
 - Injecte le contenu d'un fichier dans le contexte du LLM (mini-RAG, tous formats prévisualisables)
+- Garde l'**historique des conversations** (rouvrir, renommer, supprimer) et affiche
+  les réponses en **Markdown** avec liens cliquables
+- Laisse **choisir son dossier de travail à la souris** (parcours des lecteurs)
 - Effectue des recherches web à la demande (bouton 🌐 du chat) et cite ses sources
-  (DuckDuckGo / SearXNG / Brave)
+  (SearXNG / Brave / DuckDuckGo, avec repli automatique entre moteurs)
 - Bascule le calcul **GPU ↔ CPU** et adapte les modèles recommandés
 - Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier, outils métier)
 - Respecte les mesures techniques **RGPD** (export / suppression des données, consentement) et **RGAA/WCAG AA** (ARIA, clavier, contrastes)
@@ -129,6 +132,46 @@ automatiquement vers un modèle adapté si le modèle courant ne l'est pas. List
 
 Les modèles recommandés non installés apparaissent grisés avec la commande `ollama pull`.
 
+## 💬 Historique des conversations
+
+La barre latérale a deux onglets : **💬 Conversations** et **📁 Documents**.
+
+Chaque conversation est enregistrée automatiquement **à la fin de chaque réponse**
+(y compris après un « ⏸ Stop », la réponse partielle est conservée), dans
+`backend/conversations/<id>.json` — un fichier par conversation, écriture atomique.
+Le dossier est ignoré par Git. On peut rouvrir, **renommer** et **supprimer** une
+conversation depuis la liste ; « ＋ Nouvelle conversation » repart de zéro sans
+créer d'entrée tant que rien n'a été échangé.
+
+Ce sont des **données personnelles** : elles sont incluses dans
+`GET /api/privacy/export` et effacées par `POST /api/privacy/delete`
+(Paramètres → Confidentialité).
+
+> Les réponses sont affichées en **Markdown** (titres, listes, gras, tableaux, code)
+> et les liens sont **cliquables**. Le HTML produit est systématiquement assaini
+> (DOMPurify) avant affichage : la réponse d'un modèle, surtout nourrie par la
+> recherche web, n'est pas du contenu de confiance. Les balises qui déclencheraient
+> une requête réseau (`img`, `iframe`, `video`…) sont retirées, en cohérence avec
+> la CSP du backend qui n'autorise déjà que les ressources locales.
+
+## 📂 Choisir son dossier de travail
+
+Dans l'onglet **📁 Documents** :
+- une **liste déroulante** en haut bascule entre les dossiers configurés ;
+- le bouton **« 📂 Parcourir… »** ouvre une fenêtre qui part des lecteurs de la
+  machine, descend dans l'arborescence et permet d'**ajouter** le dossier courant
+  comme dossier de travail — ou d'en **retirer** un.
+
+Disponible **en mode simple** : plus besoin de taper les chemins à la main dans
+les réglages avancés.
+
+> 🔒 Deux routes servent uniquement à ce parcours : `GET /api/fs/drives` et
+> `GET /api/fs/browse`. Elles **sortent volontairement du sandbox** — c'est le seul
+> moyen de désigner un dossier qui n'est pas encore autorisé — mais elles ne
+> renvoient **que des noms de dossiers** : jamais de fichier, jamais de contenu,
+> et sans récursion. Tout le reste (`/api/fs/list`, `read`, `preview`, `download`,
+> `upload`) reste strictement borné aux dossiers configurés par `safe_path()`.
+
 ## 📎 Fichiers : import, téléchargement, prévisualisation
 
 - **Importer** : bouton « ⬆ Importer un fichier » dans l'explorateur (déposé sous `_uploads/`
@@ -217,9 +260,30 @@ depuis **Paramètres → Recherche web** (champ + bouton « 🔍 Tester »).
 
 | Provider | Pré-requis | Fiabilité |
 |---|---|---|
-| **SearXNG** (recommandé) | Docker — voir ci-dessous | Élevée |
+| **SearXNG** | Docker — voir ci-dessous | Élevée, et 100 % auto-hébergé |
+| **Brave Search** | Une clé d'API, collée dans **Paramètres → Recherche web** | Élevée, **sans Docker** |
 | **DuckDuckGo** | Aucun | Moyenne (scraping HTML, bloqué après quelques requêtes rapprochées) |
-| **Brave Search** | `BRAVE_API_KEY` dans l'environnement | Élevée |
+
+### Repli automatique entre moteurs
+
+Le moteur choisi est essayé en premier ; s'il est injoignable ou ne renvoie rien,
+Olivia **bascule automatiquement** sur les autres moteurs disponibles jusqu'à obtenir
+une réponse. C'est ce qui permet à la recherche de fonctionner sur une machine sans
+Docker, même si SearXNG est sélectionné.
+
+Le repli reste **visible** : la réponse de `POST /api/search` indique dans `provider`
+le moteur qui a *réellement* répondu, pas celui demandé. C'est important côté vie
+privée — un repli envoie la requête à un autre moteur que celui configuré.
+
+Une requête qui n'a simplement aucun résultat n'est pas traitée comme une panne :
+Olivia répond alors sans le web et le dit, au lieu d'annoncer une erreur.
+
+> **Clé Brave** : le palier gratuit est annoncé autour de 2 000 requêtes/mois et
+> demande la création d'un compte sur `brave.com/search/api`. La clé se colle dans
+> **Paramètres → Recherche web** ; elle est stockée dans `backend/settings.json`
+> (fichier ignoré par Git) et n'est **jamais renvoyée en clair** à l'interface —
+> elle s'affiche masquée, comme les mots de passe des connecteurs.
+> La variable d'environnement `BRAVE_API_KEY` reste acceptée en repli.
 
 ### Installer SearXNG (métamoteur auto-hébergé)
 
@@ -273,7 +337,8 @@ ai-webapp/
 ├── backend/
 │   ├── main.py            ← FastAPI : chat + fs + upload/download/preview + settings + search + connectors + RGPD
 │   ├── settings.py        ← persistance JSON + CPU/GPU + modèles par périphérique
-│   ├── search.py          ← recherche web pluggable
+│   ├── conversations.py   ← historique : un JSON par conversation, écriture atomique
+│   ├── search.py          ← recherche web pluggable + cascade de repli entre moteurs
 │   ├── documents.py       ← prévisualisation txt/csv/xlsx/docx/img/pdf
 │   ├── connectors/
 │   │   ├── __init__.py
@@ -289,9 +354,12 @@ ai-webapp/
         ├── stores/ (chat.js, settings.js)
         └── components/
             ├── ModelPicker.vue      ← sélecteur device-aware
-            ├── FileExplorer.vue     ← arbre + upload + recherche
+            ├── FileExplorer.vue     ← arbre + upload + recherche + sélecteur de dossier
+            ├── FolderPickerModal.vue ← parcours des lecteurs pour ajouter un dossier
             ├── FilePreview.vue      ← aperçu multi-format
             ├── ChatPanel.vue
+            ├── ConversationList.vue ← historique : ouvrir / renommer / supprimer
+            ├── MessageBubble.vue    ← rendu Markdown assaini + liens cliquables
             ├── ConnectedTools.vue   ← barre des outils connectés + notif mail
             ├── ConsentBanner.vue    ← bandeau RGPD
             └── SettingsMenu.vue     ← 4 onglets (Raisonnement / Recherche / Connexions / Confidentialité)

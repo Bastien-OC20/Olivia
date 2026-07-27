@@ -18,6 +18,37 @@
       {{ rootLabel }}
     </div>
 
+    <div class="root-row">
+      <label
+        for="fs-root-select"
+        class="sr-only"
+      >Choisir un dossier</label>
+      <select
+        v-if="settings.data.fs_roots.length > 1"
+        id="fs-root-select"
+        :value="rootPrefix"
+        @change="onSelectRoot"
+      >
+        <option value="">
+          📁 Tous les dossiers
+        </option>
+        <option
+          v-for="(entry, i) in settings.data.fs_roots"
+          :key="entry.path + i"
+          :value="'r' + i"
+        >
+          {{ entry.label || basename(entry.path) }}
+        </option>
+      </select>
+      <button
+        ref="browseBtn"
+        class="ghost"
+        @click="browserOpen = true"
+      >
+        📂 Parcourir…
+      </button>
+    </div>
+
     <div class="upload-row">
       <label
         for="fileup"
@@ -106,12 +137,18 @@
         @close="selectedPath = null"
       />
     </Transition>
+
+    <FolderPickerModal
+      :is-open="browserOpen"
+      @close="closeBrowser"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import FilePreview from './FilePreview.vue'
+import FolderPickerModal from './FolderPickerModal.vue'
 import { useSettingsStore } from '../stores/settings.js'
 
 const settings = useSettingsStore()
@@ -124,7 +161,23 @@ const search = ref('')
 const searchResults = ref(null)
 const uploadMsg = ref('')
 const fileInput = ref(null)
+const browseBtn = ref(null)
+const browserOpen = ref(false)
 const emit = defineEmits(['file-selected'])
+
+// Préfixe rN du dossier actuellement affiché, pour synchroniser le sélecteur.
+const rootPrefix = computed(() => {
+  const m = currentPath.value.match(/^r(\d+)/)
+  return m ? `r${m[1]}` : ''
+})
+
+function onSelectRoot(e) { navigate(e.target.value) }
+
+// Accessibilité : le focus revient au bouton « Parcourir » à la fermeture de la modale.
+function closeBrowser() {
+  browserOpen.value = false
+  nextTick(() => browseBtn.value?.focus())
+}
 
 function basename(p) {
   return p.split(/[\\/]/).filter(Boolean).pop() || p
@@ -228,6 +281,8 @@ async function doSearch() {
   font-size: 11px; color: var(--muted); white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; margin: 2px 0 6px;
 }
+.root-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.root-row select { flex: 1; }
 .ghost { background: var(--panel-2); color: var(--text); }
 .upload-row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .upload-btn {

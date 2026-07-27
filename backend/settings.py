@@ -26,6 +26,8 @@ DEFAULTS = {
     "simple_mode": True,              # UI épurée par défaut (utilisatrice non technique)
     "search_provider": "duckduckgo",
     "searxng_url": "http://localhost:8888",
+    # Vide = repli sur la variable d'env BRAVE_API_KEY (compatibilité).
+    "search_brave_api_key": "",
     # Liste vide = utiliser le défaut (variable d'env FS_ROOT, sinon ~/Documents).
     # Ne pas pré-remplir : une liste non vide prendrait le pas sur l'env.
     "fs_roots": [],

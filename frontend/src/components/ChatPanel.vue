@@ -18,123 +18,139 @@
       ref="messagesEl"
       class="messages"
     >
-      <div
-        v-for="(m, i) in chat.messages"
-        :key="i"
-        :class="['msg', m.role]"
-      >
-        <strong>{{ m.role === 'user' ? 'Vous' : 'Olivia' }}</strong>
-        <div class="bubble">
-          {{ m.content }}
-        </div>
-        <p
-          v-if="m.searchNote"
-          class="search-note"
+      <div class="stream">
+        <div
+          v-for="(m, i) in chat.messages"
+          :key="i"
+          :class="['msg', m.role]"
         >
-          ⚠️ {{ m.searchNote }}
-        </p>
-        <details
-          v-if="m.sources && m.sources.length"
-          class="sources"
-        >
-          <summary>🌐 {{ m.sources.length }} source{{ m.sources.length > 1 ? 's' : '' }} web</summary>
-          <ol>
-            <li
-              v-for="(s, j) in m.sources"
-              :key="j"
-            >
-              <a
-                :href="s.url"
-                target="_blank"
-                rel="noopener noreferrer"
-              >{{ s.title || s.url }}</a>
-            </li>
-          </ol>
-        </details>
-      </div>
-      <div
-        v-if="chat.messages.length === 0"
-        class="welcome"
-      >
-        <img
-          :src="logoUrl"
-          alt=""
-          class="welcome-logo"
-        >
-        <h2>Bonjour, je suis Olivia</h2>
-        <p class="welcome-lead">
-          Votre assistante pour le secrétariat de direction. Posez votre demande,
-          ou choisissez un exemple pour commencer :
-        </p>
-        <div class="examples">
-          <button
-            v-for="(ex, i) in examples"
-            :key="i"
-            class="example"
-            @click="useExample(ex)"
+          <strong>{{ m.role === 'user' ? 'Vous' : 'Olivia' }}</strong>
+          <div
+            v-if="m.role === 'user'"
+            class="bubble plain"
           >
-            {{ ex }}
-          </button>
+            {{ m.content }}
+          </div>
+          <div
+            v-else
+            class="bubble"
+          >
+            <MessageBubble
+              :content="m.content"
+              :streaming="chat.isStreaming && i === chat.messages.length - 1"
+            />
+          </div>
+          <p
+            v-if="m.searchNote"
+            class="search-note"
+          >
+            ⚠️ {{ m.searchNote }}
+          </p>
+          <details
+            v-if="m.sources && m.sources.length"
+            class="sources"
+          >
+            <summary>🌐 {{ m.sources.length }} source{{ m.sources.length > 1 ? 's' : '' }} web</summary>
+            <ol>
+              <li
+                v-for="(s, j) in m.sources"
+                :key="j"
+              >
+                <a
+                  :href="s.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ s.title || s.url }}</a>
+              </li>
+            </ol>
+          </details>
         </div>
-        <p class="tip">
-          <small>💡 Astuce : sélectionnez un document à gauche pour que je l'utilise dans ma réponse.</small>
-        </p>
-      </div>
-      <div
-        v-if="chat.isSearching"
-        class="searching"
-        aria-live="polite"
-      >
-        🌐 Recherche sur le web…
-      </div>
-      <div
-        v-if="chat.isStreaming && !chat.isSearching
-          && (chat.messages[chat.messages.length-1]?.content || '') === ''"
-        class="typing"
-      >
-        <span /><span /><span />
+        <div
+          v-if="chat.messages.length === 0"
+          class="welcome"
+        >
+          <img
+            :src="logoUrl"
+            alt=""
+            class="welcome-logo"
+          >
+          <h2>Bonjour, je suis Olivia</h2>
+          <p class="welcome-lead">
+            Votre assistante pour le secrétariat de direction. Posez votre demande,
+            ou choisissez un exemple pour commencer :
+          </p>
+          <div class="examples">
+            <button
+              v-for="(ex, i) in examples"
+              :key="i"
+              class="example"
+              @click="useExample(ex)"
+            >
+              {{ ex }}
+            </button>
+          </div>
+          <p class="tip">
+            <small>💡 Astuce : ouvrez l'onglet 📁 Documents à gauche pour que j'utilise un fichier dans ma réponse.</small>
+          </p>
+        </div>
+        <div
+          v-if="chat.isSearching"
+          class="searching"
+          aria-live="polite"
+        >
+          🌐 Recherche sur le web…
+        </div>
+        <div
+          v-if="chat.isStreaming && !chat.isSearching
+            && (chat.messages[chat.messages.length-1]?.content || '') === ''"
+          class="typing"
+        >
+          <span /><span /><span />
+        </div>
       </div>
     </div>
 
     <div class="composer">
-      <textarea
-        v-model="input"
-        placeholder="Écrivez votre demande à Olivia…"
-        :disabled="chat.isStreaming"
-        rows="3"
-        @keydown.enter.exact.prevent="send"
-      />
-      <div class="actions">
-        <button
-          class="toggle"
-          :class="{ on: webSearch }"
-          :aria-pressed="webSearch"
+      <div class="composer-inner">
+        <textarea
+          v-model="input"
+          placeholder="Écrivez votre demande à Olivia…"
           :disabled="chat.isStreaming"
-          title="Chercher sur le web avant de répondre, et citer les sources"
-          @click="webSearch = !webSearch"
+          rows="3"
+          @keydown.enter.exact.prevent="send"
+        />
+        <div class="actions">
+          <button
+            class="toggle"
+            :class="{ on: webSearch }"
+            :aria-pressed="webSearch"
+            :disabled="chat.isStreaming"
+            title="Chercher sur le web avant de répondre, et citer les sources"
+            @click="webSearch = !webSearch"
+          >
+            🌐 Recherche web
+          </button>
+          <button
+            v-if="chat.isStreaming"
+            @click="chat.stop()"
+          >
+            ⏸ Stop
+          </button>
+          <button
+            v-else
+            :disabled="!input.trim()"
+            @click="send"
+          >
+            ▶ Envoyer
+          </button>
+        </div>
+        <p
+          v-if="webSearch"
+          class="web-hint"
         >
-          🌐 Recherche web
-        </button>
-        <button
-          v-if="chat.isStreaming"
-          @click="chat.stop()"
-        >
-          ⏸ Stop
-        </button>
-        <button
-          v-else
-          :disabled="!input.trim()"
-          @click="send"
-        >
-          ▶ Envoyer
-        </button>
+          Olivia consultera le web avant de répondre, et indiquera ses sources.
+        </p>
       </div>
-      <p
-        v-if="webSearch"
-        class="web-hint"
-      >
-        Olivia consultera le web avant de répondre, et indiquera ses sources.
-      </p>
     </div>
   </div>
 </template>
@@ -142,6 +158,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import MessageBubble from './MessageBubble.vue'
 import logoUrl from '../assets/logo-mark.png'
 
 const props = defineProps({ fileContext: { type: Object, default: null } })
@@ -200,13 +217,19 @@ function send() {
 .file-banner code { color: var(--accent); }
 .x { background: transparent; padding: 2px 8px; font-size: 12px; }
 .messages { flex: 1; overflow-y: auto; padding: 16px; }
-.msg { margin-bottom: 16px; animation: msg-in 0.22s ease; }
+/* Colonne de lecture centrée (confort de lecture, style Claude Desktop) */
+.stream { max-width: 760px; margin: 0 auto; }
+.msg { margin-bottom: 20px; animation: msg-in 0.22s ease; }
 @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .msg strong { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
-.bubble { padding: 10px 14px; border-radius: 8px; white-space: pre-wrap;
+.bubble { padding: 10px 14px; border-radius: 8px;
           word-wrap: break-word; line-height: 1.5; }
-.msg.user .bubble { background: var(--user); margin-left: auto; max-width: 80%; }
-.msg.assistant .bubble { background: var(--assistant); }
+/* Message tapé par l'utilisatrice : texte brut, bulle alignée à droite */
+.bubble.plain { white-space: pre-wrap; }
+.msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .bubble { background: var(--user); max-width: 80%; }
+/* Réponse d'Olivia : pleine largeur, sans bulle (comme Claude Desktop) */
+.msg.assistant .bubble { background: transparent; padding: 2px 0; }
 .search-note { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
 .sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .sources summary { cursor: pointer; padding: 2px 0; }
@@ -233,6 +256,7 @@ function send() {
 .typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
 .composer { padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--border); }
+.composer-inner { max-width: 760px; margin: 0 auto; }
 .composer textarea { width: 100%; resize: vertical; font-family: inherit; }
 .composer .actions { display: flex; justify-content: space-between; align-items: center;
                      gap: 8px; margin-top: 8px; }

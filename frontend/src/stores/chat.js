@@ -31,6 +31,14 @@ function withWebContext(question, results) {
     `Demande : ${question}`
 }
 
+/** Titre par défaut d'une conversation : début de la première demande. */
+function deriveTitle(msgs) {
+  const first = msgs.find((m) => m.role === 'user')
+  const raw = (first?.content || '').replace(/\s+/g, ' ').trim()
+  if (!raw) return 'Nouvelle conversation'
+  return raw.length > 60 ? `${raw.slice(0, 60)}…` : raw
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref([])
   const isStreaming = ref(false)
@@ -38,6 +46,13 @@ export const useChatStore = defineStore('chat', () => {
   const currentModel = ref('')
   const availableModels = ref([])
   const abortController = ref(null)
+
+  // Historique des conversations (persistées côté backend).
+  const conversations = ref([])
+  const currentId = ref(null)
+  // Vrai si le backend ne sait pas gérer l'historique : l'interface le signale
+  // sans se casser (les routes peuvent être absentes d'une ancienne version).
+  const historyUnavailable = ref(false)
 
   async function loadModels() {
     try {
@@ -52,12 +67,137 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // ---------- Historique des conversations ----------
+
+  /** Ne conserve que les champs utiles (dont sources / searchNote, qui doivent
+   *  survivre à un rechargement de page). */
+  function serialize(msgs) {
+    return msgs.map((m) => ({
+      role: m.role,
+      content: m.content,
+      sources: m.sources || [],
+      searchNote: m.searchNote || '',
+    }))
+  }
+
+  async function loadConversations() {
+    try {
+      const r = await fetch('/api/conversations')
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json()
+      conversations.value = Array.isArray(data) ? data : (data.conversations || [])
+      historyUnavailable.value = false
+    } catch (e) {
+      conversations.value = []
+      historyUnavailable.value = true
+      console.warn('Historique des conversations indisponible :', e.message)
+    }
+  }
+
+  async function openConversation(id) {
+    if (isStreaming.value) stop()
+    try {
+      const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json()
+      messages.value = (data.messages || []).map((m) => ({
+        role: m.role,
+        content: m.content || '',
+        sources: m.sources || [],
+        searchNote: m.searchNote || '',
+      }))
+      currentId.value = data.id ?? id
+      historyUnavailable.value = false
+    } catch (e) {
+      historyUnavailable.value = true
+      console.warn('Ouverture de la conversation impossible :', e.message)
+    }
+  }
+
+  /** Repart d'une conversation vierge. Rien n'est envoyé au backend tant que
+   *  le premier échange n'est pas terminé : une conversation vide ne crée
+   *  aucune entrée dans l'historique. */
+  function newConversation() {
+    if (isStreaming.value) stop()
+    messages.value = []
+    currentId.value = null
+  }
+
+  async function renameConversation(id, titre) {
+    const title = (titre || '').trim()
+    if (!title) return false
+    try {
+      const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const item = conversations.value.find((c) => c.id === id)
+      if (item) item.title = title
+      await loadConversations()
+      return true
+    } catch (e) {
+      console.warn('Renommage impossible :', e.message)
+      return false
+    }
+  }
+
+  async function deleteConversation(id) {
+    try {
+      const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      conversations.value = conversations.value.filter((c) => c.id !== id)
+      if (currentId.value === id) newConversation()
+      return true
+    } catch (e) {
+      console.warn('Suppression impossible :', e.message)
+      return false
+    }
+  }
+
+  /** Sauvegarde de la conversation courante. Appelée UNIQUEMENT à la fin du
+   *  streaming (ou quand l'utilisatrice interrompt) — jamais à chaque token. */
+  async function persist() {
+    if (!messages.value.length) return
+    const body = { messages: serialize(messages.value) }
+    try {
+      let r
+      if (currentId.value) {
+        r = await fetch(`/api/conversations/${encodeURIComponent(currentId.value)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      } else {
+        body.title = deriveTitle(messages.value)
+        r = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json().catch(() => null)
+      if (data?.id) currentId.value = data.id
+      historyUnavailable.value = false
+      await loadConversations()
+    } catch (e) {
+      historyUnavailable.value = true
+      console.warn('Sauvegarde de la conversation impossible :', e.message)
+    }
+  }
+
   async function send(userMessage, fileContext = null, useWebSearch = false) {
     if (isStreaming.value || !currentModel.value) return
     messages.value.push({ role: 'user', content: userMessage })
     isStreaming.value = true
-    const assistantMsg = { role: 'assistant', content: '', sources: [], searchNote: '' }
-    messages.value.push(assistantMsg)
+    messages.value.push({ role: 'assistant', content: '', sources: [], searchNote: '' })
+    // On reprend l'élément DEPUIS le tableau : Vue renvoie alors un proxy réactif.
+    // Écrire sur l'objet brut d'origine ne déclencherait aucun rendu — la réponse
+    // n'apparaîtrait qu'à la toute fin du streaming, et la comparaison
+    // « m === assistantMsg » plus bas échouerait (proxy ≠ objet brut).
+    const assistantMsg = messages.value[messages.value.length - 1]
     abortController.value = new AbortController()
 
     // Recherche web (bouton 🌐 du composeur) : on interroge le moteur AVANT
@@ -151,6 +291,8 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       isStreaming.value = false
       abortController.value = null
+      // Sauvegarde en fin de streaming, y compris après un « Stop ».
+      await persist()
     }
   }
 
@@ -158,8 +300,13 @@ export const useChatStore = defineStore('chat', () => {
     if (abortController.value) abortController.value.abort()
   }
 
-  function clear() { messages.value = [] }
+  /** Vide l'affichage. La conversation déjà enregistrée reste dans l'historique :
+   *  on se détache simplement d'elle (équivalent d'une nouvelle conversation). */
+  function clear() { newConversation() }
 
   return { messages, isStreaming, isSearching, currentModel, availableModels,
-           loadModels, send, stop, clear }
+           conversations, currentId, historyUnavailable,
+           loadModels, send, stop, clear,
+           loadConversations, openConversation, newConversation,
+           renameConversation, deleteConversation }
 })

@@ -10,6 +10,7 @@ __pycache__/
 # --- Secrets & données locales (RGPD : ne jamais committer) ---
 backend/settings.json
 backend/settings.tmp
+backend/conversations/
 backend/.env
 .env
 *.pem
