@@ -72,7 +72,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='ai-webapp.ico',  # décommenter si vous avez une icône à la racine
+    icon='ai-webapp.ico',  # logo Olivia (généré depuis visuel/logo.png)
 )
 
 coll = COLLECT(

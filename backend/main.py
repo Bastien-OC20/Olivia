@@ -142,35 +142,105 @@ class ChatRequest(BaseModel):
 
 
 # ---------- Sécurité : anti path-traversal ----------
-def get_fs_root() -> Path:
-    """Racine FS effective : dossier configuré dans les paramètres s'il est valide
-    (existe et est un dossier), sinon repli sur FS_ROOT_DEFAULT (env / ~/Documents).
+def get_fs_roots() -> list[Path]:
+    """Racines FS effectives : liste des dossiers configurés dans les paramètres,
+    filtrée aux entrées non vides, valides (dossier existant), résolues et
+    dédupliquées (ordre préservé).
+
+    Compat héritée : si la liste résultante est vide et que l'ancienne clé str
+    `fs_root` (potentiellement présente dans un settings.json existant) est non
+    vide et valide, elle est utilisée. Sinon repli sur FS_ROOT_DEFAULT
+    (env FS_ROOT / ~/Documents). Ne renvoie jamais une liste vide.
+
     Lue à chaque appel : un changement de réglage s'applique donc sans redémarrage.
     """
-    configured = (settings.get().get("fs_root") or "").strip()
-    if configured:
+    s = settings.get()
+    configured = s.get("fs_roots")
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    if isinstance(configured, list):
+        for entry in configured:
+            if not isinstance(entry, str) or not entry.strip():
+                continue
+            try:
+                p = Path(entry.strip())
+                if p.is_dir():
+                    rp = p.resolve()
+                    if rp not in seen:
+                        seen.add(rp)
+                        roots.append(rp)
+            except OSError:
+                continue
+    if roots:
+        return roots
+    # Compat héritée : ancienne clé str unique `fs_root`.
+    legacy = (s.get("fs_root") or "").strip()
+    if legacy:
         try:
-            p = Path(configured)
+            p = Path(legacy)
             if p.is_dir():
-                return p.resolve()
+                return [p.resolve()]
         except OSError:
             pass
-    return FS_ROOT_DEFAULT
+    return [FS_ROOT_DEFAULT]
 
 
-def safe_path(rel_or_abs: str, root: Path = None) -> Path:
-    if root is None:
-        root = get_fs_root()
-    p = Path(rel_or_abs)
-    p = p.resolve() if p.is_absolute() else (root / rel_or_abs).resolve()
+_R_PREFIX_RE = re.compile(r"^r(\d+)$")
+
+
+def safe_path(virtual: str) -> tuple[Path, Path, str]:
+    """Résout un chemin virtuel `rN/...` vers (chemin_absolu, racine, préfixe 'rN').
+
+    Refuse les chemins absolus (403), les préfixes `rN` inconnus (404), et toute
+    tentative de sortie de la racine désignée par traversal (403).
+    """
+    raw = (virtual or "").strip().replace("\\", "/")
+    if raw.startswith("/") or (len(raw) > 1 and raw[1] == ":"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Accès refusé : chemin absolu interdit ('{virtual}')",
+        )
+    first, _, rest = raw.partition("/")
+    m = _R_PREFIX_RE.match(first)
+    roots = get_fs_roots()
+    if not m or not (0 <= int(m.group(1)) < len(roots)):
+        raise HTTPException(404, "Dossier inconnu")
+    idx = int(m.group(1))
+    root = roots[idx]
+    prefix = f"r{idx}"
+    p = (root / rest).resolve() if rest else root
     try:
         p.relative_to(root)
     except ValueError:
         raise HTTPException(
             status_code=403,
-            detail=f"Accès refusé : '{rel_or_abs}' sort du périmètre autorisé ({root})",
+            detail=f"Accès refusé : '{virtual}' sort du périmètre autorisé ({root})",
         )
-    return p
+    return p, root, prefix
+
+
+def _virtual_path(p: Path, root: Path, prefix: str) -> str:
+    """Reconstruit le chemin virtuel `rN/...` correspondant à un chemin absolu."""
+    rel = p.relative_to(root)
+    return prefix if str(rel) == "." else f"{prefix}/{rel.as_posix()}"
+
+
+def _list_dir_items(p: Path, root: Path, prefix: str) -> list[dict]:
+    items = []
+    for entry in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        try:
+            stat = entry.stat()
+            items.append({
+                "name": entry.name,
+                "path": _virtual_path(entry, root, prefix),
+                "is_dir": entry.is_dir(),
+                "size": stat.st_size if entry.is_file() else 0,
+                "modified": stat.st_mtime,
+                "ext": entry.suffix.lower(),
+            })
+        except PermissionError:
+            continue
+    return items
 
 
 def _mask_secrets(data: dict) -> dict:
@@ -267,34 +337,42 @@ async def chat_blocking(req: ChatRequest):
 
 # ---------- Routes Filesystem sandboxées ----------
 @app.get("/api/fs/list")
-async def fs_list(path: str = Query("", description="Chemin relatif sous la racine configurée")):
-    root = get_fs_root()
-    p = safe_path(path, root)
+async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide = racine)")):
+    raw = (path or "").strip()
+    roots = get_fs_roots()
+
+    if raw == "":
+        if len(roots) == 1:
+            root = roots[0]
+            if not root.exists() or not root.is_dir():
+                raise HTTPException(404, f"Dossier introuvable : {root}")
+            return {"root": str(root), "current": "", "items": _list_dir_items(root, root, "r0")}
+        # Plusieurs racines : on les présente comme des dossiers de premier niveau.
+        basenames = [r.name for r in roots]
+        items = []
+        for i, r in enumerate(roots):
+            name = f"{r.name} — {r.parent}" if basenames.count(r.name) > 1 else r.name
+            try:
+                mtime = r.stat().st_mtime
+            except OSError:
+                mtime = 0
+            items.append({
+                "name": name, "path": f"r{i}", "is_dir": True,
+                "size": 0, "modified": mtime, "ext": "",
+            })
+        return {"root": "Plusieurs dossiers", "current": "", "items": items}
+
+    p, root, prefix = safe_path(raw)
     if not p.exists():
         raise HTTPException(404, f"Dossier introuvable : {p}")
     if not p.is_dir():
         raise HTTPException(400, f"Pas un dossier : {p}")
-    items = []
-    for entry in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
-        try:
-            stat = entry.stat()
-            items.append({
-                "name": entry.name,
-                "path": str(entry.relative_to(root)),
-                "is_dir": entry.is_dir(),
-                "size": stat.st_size if entry.is_file() else 0,
-                "modified": stat.st_mtime,
-                "ext": entry.suffix.lower(),
-            })
-        except PermissionError:
-            continue
-    return {"root": str(root), "current": str(p.relative_to(root)), "items": items}
+    return {"root": str(root), "current": raw, "items": _list_dir_items(p, root, prefix)}
 
 
 @app.get("/api/fs/read")
 async def fs_read(path: str = Query(...)):
-    root = get_fs_root()
-    p = safe_path(path, root)
+    p, root, prefix = safe_path(path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     if p.suffix.lower() not in ALLOWED_EXT:
@@ -302,18 +380,17 @@ async def fs_read(path: str = Query(...)):
     if p.stat().st_size > MAX_FILE_SIZE:
         raise HTTPException(413, f"Fichier trop volumineux (>{MAX_FILE_SIZE} octets)")
     try:
-        return {"path": str(p.relative_to(root)), "content": p.read_text(errors="ignore")}
+        return {"path": _virtual_path(p, root, prefix), "content": p.read_text(errors="ignore")}
     except Exception as e:
         raise HTTPException(500, f"Erreur lecture : {e}")
 
 
 @app.get("/api/fs/preview")
 async def fs_preview(path: str = Query(...)):
-    root = get_fs_root()
-    p = safe_path(path, root)
+    p, root, prefix = safe_path(path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
-    rel = str(p.relative_to(root))
+    rel = _virtual_path(p, root, prefix)
     download_url = f"/api/fs/download?path={rel}"
     result = documents.preview(p, download_url)
     result["path"] = rel
@@ -323,7 +400,7 @@ async def fs_preview(path: str = Query(...)):
 
 @app.get("/api/fs/download")
 async def fs_download(path: str = Query(...)):
-    p = safe_path(path)
+    p, _root, _prefix = safe_path(path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     return FileResponse(str(p), filename=p.name)
@@ -339,10 +416,19 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     if ext not in UPLOAD_EXT:
         raise HTTPException(400, f"Type de fichier non autorisé : {ext or 'inconnu'}")
 
-    root = get_fs_root()
-    target_dir = safe_path(path, root) if path else (root / UPLOAD_SUBDIR)
+    raw = (path or "").strip()
+    if raw == "":
+        root = get_fs_roots()[0]
+        prefix = "r0"
+        target_dir = root / UPLOAD_SUBDIR
+    else:
+        target_dir, root, prefix = safe_path(raw)
     target_dir.mkdir(parents=True, exist_ok=True)
-    safe_path(str(target_dir), root)  # revérifie le sandbox
+    target_dir = target_dir.resolve()
+    try:
+        target_dir.relative_to(root)  # revérifie le sandbox après création
+    except ValueError:
+        raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
     dest = target_dir / safe_name
 
     size = 0
@@ -363,39 +449,52 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(500, f"Erreur d'upload : {e}")
-    return {"path": str(dest.relative_to(root)), "name": safe_name, "size": size}
+    return {"path": _virtual_path(dest, root, prefix), "name": safe_name, "size": size}
 
 
 @app.get("/api/fs/search")
 async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
-    root = get_fs_root()
-    p = safe_path(path, root)
-    if not p.is_dir():
-        raise HTTPException(400, "Le chemin doit être un dossier")
-    results = []
     try:
         pattern = re.compile(q, re.IGNORECASE)
     except re.error:
         raise HTTPException(400, "Motif regex invalide")
-    for fp in p.rglob("*"):
-        if not fp.is_file() or fp.suffix.lower() not in ALLOWED_EXT:
-            continue
-        if fp.stat().st_size > MAX_FILE_SIZE:
-            continue
-        try:
-            text = fp.read_text(errors="ignore")
-        except Exception:
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if pattern.search(line):
-                results.append({
-                    "file": str(fp.relative_to(root)),
-                    "line": i,
-                    "snippet": line.strip()[:200],
-                })
-                if len(results) >= 200:
-                    return {"query": q, "results": results, "truncated": True}
-    return {"query": q, "results": results, "truncated": False}
+
+    raw = (path or "").strip()
+    if raw == "":
+        targets = [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots())]
+    else:
+        p, root, prefix = safe_path(raw)
+        if not p.is_dir():
+            raise HTTPException(400, "Le chemin doit être un dossier")
+        targets = [(p, root, prefix)]
+
+    results = []
+    truncated = False
+    for search_dir, root, prefix in targets:
+        if truncated:
+            break
+        for fp in search_dir.rglob("*"):
+            if not fp.is_file() or fp.suffix.lower() not in ALLOWED_EXT:
+                continue
+            if fp.stat().st_size > MAX_FILE_SIZE:
+                continue
+            try:
+                text = fp.read_text(errors="ignore")
+            except Exception:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                if pattern.search(line):
+                    results.append({
+                        "file": _virtual_path(fp, root, prefix),
+                        "line": i,
+                        "snippet": line.strip()[:200],
+                    })
+                    if len(results) >= 200:
+                        truncated = True
+                        break
+            if truncated:
+                break
+    return {"query": q, "results": results, "truncated": truncated}
 
 
 # ---------- Routes Settings ----------
@@ -410,12 +509,22 @@ async def update_settings(patch: dict):
         raise HTTPException(400, "Body doit être un objet JSON")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
-    if "fs_root" in patch:
-        fs_root_value = (patch.get("fs_root") or "").strip()
-        patch["fs_root"] = fs_root_value
-        # Une valeur vide signifie "revenir au défaut" : toujours autorisée.
-        if fs_root_value and not Path(fs_root_value).is_dir():
-            raise HTTPException(400, f"Dossier introuvable : {fs_root_value}")
+    if "fs_roots" in patch:
+        raw_list = patch.get("fs_roots")
+        if not isinstance(raw_list, list):
+            raise HTTPException(400, "fs_roots doit être une liste de chemins")
+        cleaned = []
+        for entry in raw_list:
+            if not isinstance(entry, str):
+                raise HTTPException(400, "fs_roots doit être une liste de chemins")
+            v = entry.strip()
+            if not v:
+                continue
+            # Une liste vide signifie "revenir au défaut" : toujours autorisée.
+            if not Path(v).is_dir():
+                raise HTTPException(400, f"Dossier introuvable : {v}")
+            cleaned.append(v)
+        patch["fs_roots"] = cleaned
     settings.update(patch)
     return JSONResponse(_mask_secrets(settings.get()))
 
@@ -546,19 +655,21 @@ async def privacy_export():
 
 @app.post("/api/privacy/delete")
 async def privacy_delete():
-    """Droit à l'effacement : réinitialise les paramètres + purge la zone d'upload de l'app."""
+    """Droit à l'effacement : réinitialise les paramètres + purge la zone d'upload de l'app
+    dans chacune des racines documentaires configurées."""
     removed = 0
-    upload_dir = get_fs_root() / UPLOAD_SUBDIR
-    if upload_dir.exists():
-        for f in upload_dir.glob("*"):
-            try:
-                if f.is_file():
-                    f.unlink()
-                    removed += 1
-                elif f.is_dir():
-                    shutil.rmtree(f)
-            except Exception:
-                pass
+    for root in get_fs_roots():
+        upload_dir = root / UPLOAD_SUBDIR
+        if upload_dir.exists():
+            for f in upload_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        f.unlink()
+                        removed += 1
+                    elif f.is_dir():
+                        shutil.rmtree(f)
+                except Exception:
+                    pass
     settings.reset()
     return {"ok": True, "settings_reset": True, "uploads_removed": removed}
 
@@ -571,7 +682,7 @@ async def health():
         "status": "ok",
         "version": app.version,
         "ollama": OLLAMA_URL,
-        "fs_root": str(get_fs_root()),
+        "fs_roots": [str(r) for r in get_fs_roots()],
         "compute_device": s.get("compute_device", "gpu"),
         "frontend_ui": FRONTEND_DIST.exists(),
         "api_token_required": bool(API_TOKEN),

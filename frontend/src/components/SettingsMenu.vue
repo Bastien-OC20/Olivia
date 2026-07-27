@@ -116,15 +116,16 @@
               v-if="!simple"
               class="field"
             >
-              <label for="f-fsroot">📁 Dossier de documents accessible</label>
-              <input
-                id="f-fsroot"
-                v-model="settings.data.fs_root"
+              <label for="f-fsroots">📁 Dossiers de documents accessibles</label>
+              <textarea
+                id="f-fsroots"
+                v-model="fsRootsText"
+                rows="3"
                 placeholder="C:\Users\vous\Documents"
-              >
+              />
               <p class="hint">
-                Olivia ne peut lire et écrire que dans ce dossier. Laissez vide pour utiliser
-                Documents. Appliqué immédiatement après Enregistrer.
+                Un dossier par ligne. Olivia ne peut lire et écrire que dans ces dossiers.
+                Laissez vide pour utiliser Documents. Appliqué après Enregistrer.
               </p>
             </div>
             <div class="field">
@@ -518,6 +519,14 @@ const allTabs = [
   { id: 'privacy', label: 'Confidentialité', simple: true },
 ]
 const tabs = computed(() => (simple.value ? allTabs.filter(t => t.simple) : allTabs))
+
+// Textarea "un dossier par ligne" <-> tableau fs_roots.
+const fsRootsText = computed({
+  get: () => (settings.data.fs_roots || []).join('\n'),
+  set: (val) => {
+    settings.data.fs_roots = val.split('\n').map(l => l.trim()).filter(Boolean)
+  },
+})
 
 // Bascule mode simple ↔ avancé (persistée)
 async function toggleAdvanced() {

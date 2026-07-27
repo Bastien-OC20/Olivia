@@ -32,12 +32,11 @@
         v-if="chat.messages.length === 0"
         class="welcome"
       >
-        <div
-          class="welcome-mark"
-          aria-hidden="true"
+        <img
+          :src="logoUrl"
+          alt=""
+          class="welcome-logo"
         >
-          🌷
-        </div>
         <h2>Bonjour, je suis Olivia</h2>
         <p class="welcome-lead">
           Votre assistante pour le secrétariat de direction. Posez votre demande,
@@ -95,6 +94,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import logoUrl from '../assets/logo-mark.png'
 
 const props = defineProps({ fileContext: { type: Object, default: null } })
 const chat = useChatStore()
@@ -158,7 +158,7 @@ function send() {
 .msg.user .bubble { background: var(--user); margin-left: auto; max-width: 80%; }
 .msg.assistant .bubble { background: var(--assistant); }
 .welcome { text-align: center; color: var(--muted); padding: 32px 20px; max-width: 620px; margin: 0 auto; }
-.welcome-mark { font-size: 40px; }
+.welcome-logo { width: 84px; height: 84px; border-radius: 16px; background: #fff; padding: 6px; }
 .welcome h2 { color: var(--text); font-size: 20px; margin: 8px 0 4px; }
 .welcome-lead { line-height: 1.6; margin: 0 0 20px; }
 .examples { display: grid; gap: 10px; text-align: left; }

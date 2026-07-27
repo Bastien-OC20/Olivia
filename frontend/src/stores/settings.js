@@ -16,7 +16,7 @@ const DEFAULTS = {
   simple_mode: true,
   search_provider: "duckduckgo",
   searxng_url: "http://localhost:8888",
-  fs_root: "",
+  fs_roots: [],
   privacy_consent: false,
   connectors: {
     imap: { enabled: false, label: "Boîte pro", host: "", user: "", password: "", folder: "INBOX" },

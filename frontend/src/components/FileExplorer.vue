@@ -110,7 +110,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import FilePreview from './FilePreview.vue'
 import { useSettingsStore } from '../stores/settings.js'
 
@@ -130,8 +130,11 @@ function basename(p) {
   return p.split(/[\\/]/).filter(Boolean).pop() || p
 }
 
-// Recharge la liste quand le dossier accessible est reconfiguré dans les paramètres.
-watch(() => settings.data.fs_root, () => { loadRoot() })
+// Recharge la liste quand les dossiers accessibles sont reconfigurés dans les paramètres.
+watch(() => JSON.stringify(settings.data.fs_roots), () => { loadRoot() })
+
+// Charge la racine au montage (sinon la liste reste vide tant que rien ne déclenche le watch).
+onMounted(loadRoot)
 
 function icon(ext) {
   if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'].includes(ext)) return '🖼️'

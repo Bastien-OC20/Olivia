@@ -7,10 +7,11 @@
 
     <header class="topbar">
       <h1 class="brand">
-        <span
-          class="brand-mark"
-          aria-hidden="true"
-        >🌷</span>
+        <img
+          :src="logoUrl"
+          alt=""
+          class="brand-logo"
+        >
         <span class="brand-name">Olivia</span>
         <span class="brand-sub">votre assistante</span>
       </h1>
@@ -104,6 +105,7 @@ import ChatPanel from './components/ChatPanel.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
 import ConnectedTools from './components/ConnectedTools.vue'
 import ConsentBanner from './components/ConsentBanner.vue'
+import logoUrl from './assets/logo-mark.png'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
@@ -139,8 +141,9 @@ function openPrivacy() {
   padding: 12px 20px; background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.brand { margin: 0; flex: 1; display: flex; align-items: baseline; gap: 8px; }
-.brand-mark { font-size: 18px; }
+.brand { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; }
+.brand-logo { width: 30px; height: 30px; border-radius: 6px; background: #fff; padding: 1px; }
+.brand-sub { align-self: flex-end; padding-bottom: 3px; }
 .brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
 .brand-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
 .topbar .ghost { background: var(--panel-2); color: var(--text); }
