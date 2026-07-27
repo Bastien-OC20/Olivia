@@ -63,6 +63,29 @@ a = Analysis(
     noarchive=False,
 )
 
+# Le dossier `backend/` est embarqué en bloc (voir `datas`), ce qui y ferait entrer
+# les DONNÉES de la machine de compilation : les réglages de l'utilisateur — clé
+# d'API du moteur de recherche, mot de passe IMAP, chemins des dossiers de travail —
+# et ses conversations. On les retire du binaire : une installation neuve (clé USB,
+# autre poste) doit démarrer sur les valeurs par défaut, et le `.exe` ne doit jamais
+# transporter de secret. `settings.json` est recréé au premier enregistrement.
+# On retire aussi `backend/.venv` : l'environnement virtuel de développement n'a
+# rien à faire dans le binaire (PyInstaller y embarque déjà les dépendances), il
+# ne ferait que dupliquer ~65 Mo — d'autant plus pénalisant sur une clé USB.
+def _est_donnee_utilisateur(dest: str) -> bool:
+    d = dest.replace("\\", "/")
+    return (
+        d.startswith("backend/conversations/")
+        or d.startswith("backend/.venv/")
+        or d in ("backend/settings.json", "backend/settings.tmp", "backend/.env")
+        or "/__pycache__/" in f"/{d}"
+    )
+
+
+_avant = len(a.datas)
+a.datas = [entry for entry in a.datas if not _est_donnee_utilisateur(entry[0])]
+print(f"build.spec : {_avant - len(a.datas)} fichier(s) de donnees utilisateur exclus du binaire")
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
