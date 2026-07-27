@@ -1,0 +1,69 @@
+========================================================
+  OLIVIA - assistante locale, version portable
+========================================================
+
+POUR DEMARRER
+-------------
+Double-cliquez sur "Lancer-Olivia.bat".
+
+Le navigateur s'ouvre tout seul sur Olivia.
+Une fenetre noire reste ouverte : c'est normal, c'est elle
+qui fait tourner l'assistante. Ne la fermez pas tant que
+vous utilisez Olivia.
+
+POUR QUITTER
+------------
+Fermez la fenetre noire. Tout s'arrete proprement.
+Attendez qu'elle disparaisse avant de retirer le disque.
+
+
+CE QUI EST SUR CE DISQUE
+------------------------
+  Lancer-Olivia.bat   <- le raccourci de demarrage
+  ai-webapp\          <- l'application
+      ai-webapp.exe
+      _internal\      <- fichiers techniques, ne pas toucher
+      ollama\         <- le moteur d'intelligence artificielle
+          models\     <- les modeles qwen3:4b et qwen3:8b
+
+
+VOS DONNEES
+-----------
+Tout reste sur ce disque, rien n'est envoye sur Internet
+et rien n'est installe sur l'ordinateur utilise :
+
+  - vos reglages       : ai-webapp\_internal\backend\settings.json
+  - vos conversations  : ai-webapp\_internal\backend\conversations\
+
+Si vous branchez ce disque sur un autre ordinateur, vous
+retrouvez vos conversations. Si vous le perdez, elles
+partent avec : pensez a en garder une copie.
+
+Pour tout effacer d'un coup : Parametres > Confidentialite
+> "Supprimer mes donnees".
+
+
+BON A SAVOIR
+------------
+* Premier demarrage un peu long : Windows verifie
+  l'application, et le moteur charge le modele en memoire.
+
+* Windows peut afficher un avertissement bleu
+  "Windows a protege votre ordinateur". L'application n'est
+  pas signee numeriquement : cliquez sur "Informations
+  complementaires" puis "Executer quand meme".
+
+* Rapidite : Olivia utilise la carte graphique de
+  l'ordinateur si elle en trouve une. Sur un poste sans
+  carte graphique, allez dans Parametres > Reglages avances
+  et choisissez la puissance "Standard" avec le modele
+  qwen3:4b - beaucoup plus fluide.
+
+* Vos dossiers de travail : onglet "Documents", bouton
+  "Parcourir". Attention, si vous designez un dossier de
+  l'ordinateur (par exemple C:\Users\...\Documents), il ne
+  sera evidemment plus accessible sur un autre poste.
+
+* Recherche web (bouton avec le globe) : c'est la seule
+  fonction qui a besoin d'Internet, et elle ne s'active que
+  si vous cliquez dessus.

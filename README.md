@@ -112,6 +112,75 @@ backend\.venv\Scripts\pyinstaller.exe build.spec --clean --noconfirm
 > (le lanceur cherche `./ollama` relatif à l'exécutable). Sinon, l'.exe réutilise
 > un Ollama déjà lancé sur :11434.
 
+Le binaire **n'embarque ni les réglages ni les conversations** : `build.spec` les
+retire explicitement. Une installation neuve démarre donc sur les valeurs par défaut,
+et un `.exe` distribué ne transporte aucun secret (clé d'API, mot de passe IMAP).
+
+## 🔌 Version portable (clé USB / disque externe)
+
+Olivia tourne entièrement depuis un disque amovible : application, moteur, modèles,
+réglages et conversations restent dessus, rien n'est installé sur l'ordinateur hôte.
+
+```powershell
+.\deploy-portable.ps1                             # interactif : choix du disque, puis du mode
+.\deploy-portable.ps1 -Destination G:\Olivia -Update    # mise à jour silencieuse
+.\deploy-portable.ps1 -Destination E:\Olivia -Replace   # réinstallation complète
+.\deploy-portable.ps1 -SkipFrontend -SkipExe            # resynchroniser sans rebuilder
+```
+
+Le script enchaîne build Vite → build PyInstaller → copie du moteur si nécessaire →
+synchronisation, puis vérifie que l'installation est complète.
+
+**Choix du disque** — sans `-Destination`, le script liste les lecteurs et propose
+celui qui contient déjà Olivia, sinon le disque non système le plus libre. Les
+lecteurs de cartes vides sont écartés. Attention : un disque USB externe est souvent
+vu comme « fixe » par Windows, le tri se fait donc sur l'espace libre, pas sur le
+type de bus.
+
+**Installation déjà présente** — le script demande quoi faire :
+
+| Mode | Effet |
+|---|---|
+| `-Update` (défaut) | Remplace l'application. **Conserve** moteur, modèles, conversations et réglages. |
+| `-Replace` | Efface intégralement le dossier et repart à neuf. **Destructif** : conversations et réglages perdus, modèles recopiés (plusieurs minutes). |
+
+En mode `-Update`, la synchronisation est un miroir — les fichiers des anciennes
+versions sont supprimés — avec trois éléments sanctuarisés, car ils vivent sur le
+disque portable et n'existent pas dans le build :
+
+| Préservé | Pourquoi |
+|---|---|
+| `ai-webapp\ollama\` | moteur + modèles (~9 Go) : les réécraser à chaque déploiement serait absurde |
+| `..\backend\conversations\` | l'historique de l'utilisatrice |
+| `..\backend\settings.json` | ses réglages, dont la clé du moteur de recherche |
+
+Le moteur et les modèles ne sont pas dans le build : ils sont copiés depuis
+`ollama/` du projet uniquement s'ils manquent à destination — première installation
+ou réinstallation.
+
+Deux garde-fous refusent d'écrire au mauvais endroit : lecteur absent (disque non
+branché), et dossier non vide qui ne ressemble pas à une installation Olivia —
+`-Force` outrepasse le second. Sans console (tâche planifiée), le script retombe
+sur les valeurs par défaut plutôt que de bloquer, et ne passe **jamais** en mode
+destructif sans `-Replace` explicite.
+
+Structure produite (`ollama\` doit être **dans** `ai-webapp\` : le lanceur le cherche
+à côté de l'exécutable, pas du `.bat`) :
+
+```
+G:\Olivia\
+├── Lancer-Olivia.bat      ← double-clic (source versionnée : portable/)
+├── LISEZ-MOI.txt          ← notice non technique
+└── ai-webapp\
+    ├── ai-webapp.exe
+    ├── _internal\         ← dont réglages et conversations, créés à l'usage
+    └── ollama\            ← moteur + models\
+```
+
+> L'exécutable n'étant pas signé, Windows affiche « Windows a protégé votre
+> ordinateur » au premier lancement : *Informations complémentaires* → *Exécuter
+> quand même*. C'est expliqué dans le `LISEZ-MOI.txt`.
+
 Icône personnalisée : placez `ai-webapp.ico` à la racine et décommentez la ligne
 `# icon='ai-webapp.ico'` dans `build.spec`.
 
@@ -333,6 +402,8 @@ ai-webapp/
 ├── README.md
 ├── launch.py              ← lanceur multi-OS (dev) + point d'entrée .exe (mode gelé)
 ├── build.spec             ← config PyInstaller (embarque backend + frontend/dist)
+├── deploy-portable.ps1    ← build + synchro vers un disque portable (préserve modèles et données)
+├── portable/              ← lanceur .bat et notice copiés sur le disque portable
 ├── .gitignore
 ├── backend/
 │   ├── main.py            ← FastAPI : chat + fs + upload/download/preview + settings + search + connectors + RGPD

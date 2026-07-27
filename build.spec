@@ -63,6 +63,7 @@ a = Analysis(
     noarchive=False,
 )
 
+
 # Le dossier `backend/` est embarqué en bloc (voir `datas`), ce qui y ferait entrer
 # les DONNÉES de la machine de compilation : les réglages de l'utilisateur — clé
 # d'API du moteur de recherche, mot de passe IMAP, chemins des dossiers de travail —
