@@ -154,7 +154,7 @@ async function navigate(path) {
     searchResults.value = null
     if (data.root) {
       rootPath.value = data.root
-      rootLabel.value = basename(data.root)
+      rootLabel.value = data.root_label || basename(data.root)
     }
   } catch { items.value = [] }
 }

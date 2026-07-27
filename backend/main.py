@@ -142,10 +142,15 @@ class ChatRequest(BaseModel):
 
 
 # ---------- Sécurité : anti path-traversal ----------
-def get_fs_roots() -> list[Path]:
-    """Racines FS effectives : liste des dossiers configurés dans les paramètres,
+def get_fs_root_entries() -> list[tuple[Path, str]]:
+    """Racines FS effectives avec leur libellé éventuel : liste de tuples
+    (chemin résolu, label) issus des dossiers configurés dans les paramètres,
     filtrée aux entrées non vides, valides (dossier existant), résolues et
-    dédupliquées (ordre préservé).
+    dédupliquées par chemin (ordre préservé, on garde la première occurrence
+    et son label).
+
+    Chaque entrée de `fs_roots` peut être une chaîne (chemin seul, compat
+    héritée) ou un objet `{"path": str, "label": str}` (label facultatif).
 
     Compat héritée : si la liste résultante est vide et que l'ancienne clé str
     `fs_root` (potentiellement présente dans un settings.json existant) est non
@@ -156,33 +161,45 @@ def get_fs_roots() -> list[Path]:
     """
     s = settings.get()
     configured = s.get("fs_roots")
-    roots: list[Path] = []
+    entries: list[tuple[Path, str]] = []
     seen: set[Path] = set()
     if isinstance(configured, list):
         for entry in configured:
-            if not isinstance(entry, str) or not entry.strip():
+            raw_path = ""
+            label = ""
+            if isinstance(entry, str):
+                raw_path = entry.strip()
+            elif isinstance(entry, dict):
+                raw_path = str(entry.get("path") or "").strip()
+                label = str(entry.get("label") or "").strip()
+            if not raw_path:
                 continue
             try:
-                p = Path(entry.strip())
+                p = Path(raw_path)
                 if p.is_dir():
                     rp = p.resolve()
                     if rp not in seen:
                         seen.add(rp)
-                        roots.append(rp)
+                        entries.append((rp, label))
             except OSError:
                 continue
-    if roots:
-        return roots
+    if entries:
+        return entries
     # Compat héritée : ancienne clé str unique `fs_root`.
     legacy = (s.get("fs_root") or "").strip()
     if legacy:
         try:
             p = Path(legacy)
             if p.is_dir():
-                return [p.resolve()]
+                return [(p.resolve(), "")]
         except OSError:
             pass
-    return [FS_ROOT_DEFAULT]
+    return [(FS_ROOT_DEFAULT, "")]
+
+
+def get_fs_roots() -> list[Path]:
+    """Racines FS effectives (chemins seuls) — dérivé de get_fs_root_entries()."""
+    return [p for p, _ in get_fs_root_entries()]
 
 
 _R_PREFIX_RE = re.compile(r"^r(\d+)$")
@@ -339,19 +356,24 @@ async def chat_blocking(req: ChatRequest):
 @app.get("/api/fs/list")
 async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide = racine)")):
     raw = (path or "").strip()
-    roots = get_fs_roots()
+    entries = get_fs_root_entries()
 
     if raw == "":
-        if len(roots) == 1:
-            root = roots[0]
+        if len(entries) == 1:
+            root, label = entries[0]
             if not root.exists() or not root.is_dir():
                 raise HTTPException(404, f"Dossier introuvable : {root}")
-            return {"root": str(root), "current": "", "items": _list_dir_items(root, root, "r0")}
+            return {
+                "root": str(root), "current": "", "items": _list_dir_items(root, root, "r0"),
+                "root_label": label or root.name,
+            }
         # Plusieurs racines : on les présente comme des dossiers de premier niveau.
-        basenames = [r.name for r in roots]
+        display_names = [label or r.name for r, label in entries]
         items = []
-        for i, r in enumerate(roots):
-            name = f"{r.name} — {r.parent}" if basenames.count(r.name) > 1 else r.name
+        for i, (r, label) in enumerate(entries):
+            name = display_names[i]
+            if display_names.count(name) > 1:
+                name = f"{name} — {r.parent}"
             try:
                 mtime = r.stat().st_mtime
             except OSError:
@@ -360,14 +382,22 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
                 "name": name, "path": f"r{i}", "is_dir": True,
                 "size": 0, "modified": mtime, "ext": "",
             })
-        return {"root": "Plusieurs dossiers", "current": "", "items": items}
+        return {
+            "root": "Plusieurs dossiers", "current": "", "items": items,
+            "root_label": "Plusieurs dossiers",
+        }
 
     p, root, prefix = safe_path(raw)
     if not p.exists():
         raise HTTPException(404, f"Dossier introuvable : {p}")
     if not p.is_dir():
         raise HTTPException(400, f"Pas un dossier : {p}")
-    return {"root": str(root), "current": raw, "items": _list_dir_items(p, root, prefix)}
+    idx = int(_R_PREFIX_RE.match(prefix).group(1))
+    root_label = entries[idx][1] or root.name
+    return {
+        "root": str(root), "current": raw, "items": _list_dir_items(p, root, prefix),
+        "root_label": root_label,
+    }
 
 
 @app.get("/api/fs/read")
@@ -515,15 +545,20 @@ async def update_settings(patch: dict):
             raise HTTPException(400, "fs_roots doit être une liste de chemins")
         cleaned = []
         for entry in raw_list:
-            if not isinstance(entry, str):
+            if isinstance(entry, str):
+                v = entry.strip()
+                label = ""
+            elif isinstance(entry, dict):
+                v = str(entry.get("path") or "").strip()
+                label = str(entry.get("label") or "").strip()[:60]
+            else:
                 raise HTTPException(400, "fs_roots doit être une liste de chemins")
-            v = entry.strip()
             if not v:
                 continue
             # Une liste vide signifie "revenir au défaut" : toujours autorisée.
             if not Path(v).is_dir():
                 raise HTTPException(400, f"Dossier introuvable : {v}")
-            cleaned.append(v)
+            cleaned.append({"path": v, "label": label})
         patch["fs_roots"] = cleaned
     settings.update(patch)
     return JSONResponse(_mask_secrets(settings.get()))
@@ -682,7 +717,7 @@ async def health():
         "status": "ok",
         "version": app.version,
         "ollama": OLLAMA_URL,
-        "fs_roots": [str(r) for r in get_fs_roots()],
+        "fs_roots": [{"path": str(p), "label": label} for p, label in get_fs_root_entries()],
         "compute_device": s.get("compute_device", "gpu"),
         "frontend_ui": FRONTEND_DIST.exists(),
         "api_token_required": bool(API_TOKEN),

@@ -124,7 +124,8 @@
                 placeholder="C:\Users\vous\Documents"
               />
               <p class="hint">
-                Un dossier par ligne. Olivia ne peut lire et écrire que dans ces dossiers.
+                Un dossier par ligne. Ajoutez un libellé après une barre verticale :
+                C:\Dossier | Mes documents. Olivia ne peut lire et écrire que dans ces dossiers.
                 Laissez vide pour utiliser Documents. Appliqué après Enregistrer.
               </p>
             </div>
@@ -521,10 +522,23 @@ const allTabs = [
 const tabs = computed(() => (simple.value ? allTabs.filter(t => t.simple) : allTabs))
 
 // Textarea "un dossier par ligne" <-> tableau fs_roots.
+// Chaque ligne : "chemin" ou "chemin | libellé". Entrées objet {path, label}
+// ou chaînes héritées en entrée ; toujours des objets en sortie.
 const fsRootsText = computed({
-  get: () => (settings.data.fs_roots || []).join('\n'),
+  get: () => (settings.data.fs_roots || []).map((entry) => {
+    if (entry && typeof entry === 'object') {
+      return entry.label ? `${entry.path} | ${entry.label}` : entry.path
+    }
+    return entry
+  }).join('\n'),
   set: (val) => {
-    settings.data.fs_roots = val.split('\n').map(l => l.trim()).filter(Boolean)
+    settings.data.fs_roots = val.split('\n').map((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return null
+      const idx = trimmed.indexOf('|')
+      if (idx === -1) return { path: trimmed, label: '' }
+      return { path: trimmed.slice(0, idx).trim(), label: trimmed.slice(idx + 1).trim() }
+    }).filter(Boolean)
   },
 })
 
