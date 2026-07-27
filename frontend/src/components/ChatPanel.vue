@@ -27,6 +27,30 @@
         <div class="bubble">
           {{ m.content }}
         </div>
+        <p
+          v-if="m.searchNote"
+          class="search-note"
+        >
+          ⚠️ {{ m.searchNote }}
+        </p>
+        <details
+          v-if="m.sources && m.sources.length"
+          class="sources"
+        >
+          <summary>🌐 {{ m.sources.length }} source{{ m.sources.length > 1 ? 's' : '' }} web</summary>
+          <ol>
+            <li
+              v-for="(s, j) in m.sources"
+              :key="j"
+            >
+              <a
+                :href="s.url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ s.title || s.url }}</a>
+            </li>
+          </ol>
+        </details>
       </div>
       <div
         v-if="chat.messages.length === 0"
@@ -57,7 +81,15 @@
         </p>
       </div>
       <div
-        v-if="chat.isStreaming && (chat.messages[chat.messages.length-1]?.content || '') === ''"
+        v-if="chat.isSearching"
+        class="searching"
+        aria-live="polite"
+      >
+        🌐 Recherche sur le web…
+      </div>
+      <div
+        v-if="chat.isStreaming && !chat.isSearching
+          && (chat.messages[chat.messages.length-1]?.content || '') === ''"
         class="typing"
       >
         <span /><span /><span />
@@ -74,6 +106,16 @@
       />
       <div class="actions">
         <button
+          class="toggle"
+          :class="{ on: webSearch }"
+          :aria-pressed="webSearch"
+          :disabled="chat.isStreaming"
+          title="Chercher sur le web avant de répondre, et citer les sources"
+          @click="webSearch = !webSearch"
+        >
+          🌐 Recherche web
+        </button>
+        <button
           v-if="chat.isStreaming"
           @click="chat.stop()"
         >
@@ -87,6 +129,12 @@
           ▶ Envoyer
         </button>
       </div>
+      <p
+        v-if="webSearch"
+        class="web-hint"
+      >
+        Olivia consultera le web avant de répondre, et indiquera ses sources.
+      </p>
     </div>
   </div>
 </template>
@@ -101,6 +149,8 @@ const chat = useChatStore()
 const input = ref('')
 const messagesEl = ref(null)
 const localFile = ref(null)
+// Recherche web : choix explicite de l'utilisatrice, conservé d'un message à l'autre.
+const webSearch = ref(false)
 
 // Exemples concrets pour une assistante de direction en lycée
 const examples = [
@@ -111,7 +161,7 @@ const examples = [
 ]
 
 function useExample(text) {
-  chat.send(text, localFile.value)
+  chat.send(text, localFile.value, webSearch.value)
 }
 
 watch(() => props.fileContext, (v) => { localFile.value = v })
@@ -138,7 +188,7 @@ watch(() => chat.messages[chat.messages.length - 1]?.content, async () => {
 
 function send() {
   if (!input.value.trim()) return
-  chat.send(input.value, localFile.value)
+  chat.send(input.value, localFile.value, webSearch.value)
   input.value = ''
 }
 </script>
@@ -157,6 +207,13 @@ function send() {
           word-wrap: break-word; line-height: 1.5; }
 .msg.user .bubble { background: var(--user); margin-left: auto; max-width: 80%; }
 .msg.assistant .bubble { background: var(--assistant); }
+.search-note { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
+.sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.sources summary { cursor: pointer; padding: 2px 0; }
+.sources ol { margin: 6px 0 0; padding-left: 22px; }
+.sources li { margin-bottom: 4px; line-height: 1.4; }
+.sources a { color: var(--accent); }
+.searching { font-size: 13px; color: var(--muted); padding: 4px 0; }
 .welcome { text-align: center; color: var(--muted); padding: 32px 20px; max-width: 620px; margin: 0 auto; }
 .welcome-logo { width: 84px; height: 84px; border-radius: 16px; background: #fff; padding: 6px; }
 .welcome h2 { color: var(--text); font-size: 20px; margin: 8px 0 4px; }
@@ -177,5 +234,13 @@ function send() {
 @keyframes blink { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
 .composer { padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--border); }
 .composer textarea { width: 100%; resize: vertical; font-family: inherit; }
-.composer .actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.composer .actions { display: flex; justify-content: space-between; align-items: center;
+                     gap: 8px; margin-top: 8px; }
+.composer .toggle {
+  background: var(--panel-2); color: var(--muted);
+  border: 1px solid var(--border); font-size: 13px;
+}
+.composer .toggle:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.composer .toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.web-hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 </style>

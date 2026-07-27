@@ -10,7 +10,25 @@ import os
 import re
 
 import httpx
+from html import unescape
 from urllib.parse import unquote
+
+
+def _strip_html(fragment: str) -> str:
+    """Retire les balises et décode les entités (&#x27;, &amp;…) d'un extrait HTML."""
+    return unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
+
+
+def _unwrap_ddg_url(href: str) -> str:
+    """DuckDuckGo enveloppe chaque lien dans //duckduckgo.com/l/?uddg=<url encodée>.
+
+    On extrait l'URL réelle : c'est elle qu'Olivia affiche et cite en source.
+    """
+    href = unescape(href)
+    m = re.search(r"[?&]uddg=([^&]+)", href)
+    if m:
+        return unquote(m.group(1))
+    return f"https:{href}" if href.startswith("//") else href
 
 
 async def search_searxng(query: str, base_url: str = "http://localhost:8888", limit: int = 5):
@@ -41,24 +59,36 @@ async def search_searxng(query: str, base_url: str = "http://localhost:8888", li
 
 
 async def search_duckduckgo(query: str, limit: int = 5):
+    # duckduckgo.com/html/ redirige (302) vers html.duckduckgo.com : on vise
+    # directement l'hôte final et on suit les redirections restantes, sans quoi
+    # httpx renvoie la réponse 302 et le parsing ne trouve aucun résultat.
     async with httpx.AsyncClient(
         timeout=10,
+        follow_redirects=True,
         headers={"User-Agent": "Mozilla/5.0 (compatible; LocalAI/2.0)"}
     ) as client:
-        r = await client.get("https://duckduckgo.com/html/",
+        r = await client.get("https://html.duckduckgo.com/html/",
                              params={"q": query})
         r.raise_for_status()
         html = r.text
+        # Sous protection anti-robot, DuckDuckGo sert une page de blocage en
+        # HTTP 202 (et non un 4xx) : sans ce garde-fou elle serait interprétée
+        # comme « zéro résultat », ce qui masquerait la vraie cause.
+        if r.status_code == 202 and 'class="result__a"' not in html:
+            raise RuntimeError(
+                "DuckDuckGo a bloqué la requête (protection anti-robot). "
+                "Réessayez dans un instant, ou passez au moteur SearXNG "
+                "(plus fiable — voir Paramètres → Recherche web)."
+            )
         titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, re.S)
         snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.S)
         hrefs = re.findall(r'class="result__a"[^>]+href="([^"]+)"', html)
         out = []
         for i in range(min(limit, len(titles))):
             out.append({
-                "title": re.sub(r"<[^>]+>", "", titles[i]).strip(),
-                "url": unquote(hrefs[i]) if i < len(hrefs) else "",
-                "snippet": re.sub(r"<[^>]+>", "",
-                                  snippets[i]).strip() if i < len(snippets) else "",
+                "title": _strip_html(titles[i]),
+                "url": _unwrap_ddg_url(hrefs[i]) if i < len(hrefs) else "",
+                "snippet": _strip_html(snippets[i]) if i < len(snippets) else "",
             })
         return out
 

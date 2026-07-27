@@ -1,9 +1,40 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+// Recherche web : nombre de résultats injectés et longueur max de la requête
+// envoyée au moteur (une demande de chat peut être un paragraphe entier).
+const WEB_SEARCH_LIMIT = 5
+const WEB_QUERY_MAX = 300
+
+async function fetchWebResults(query, signal) {
+  const r = await fetch('/api/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: query.slice(0, WEB_QUERY_MAX), limit: WEB_SEARCH_LIMIT }),
+    signal
+  })
+  const data = await r.json().catch(() => null)
+  if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+  return data?.results || []
+}
+
+/** Reformule la demande de l'utilisateur en y joignant les résultats web numérotés. */
+function withWebContext(question, results) {
+  const today = new Date().toLocaleDateString('fr-FR',
+    { day: 'numeric', month: 'long', year: 'numeric' })
+  const sources = results.map((r, i) =>
+    `[${i + 1}] ${r.title || r.url}\n${r.url}\n${r.snippet || ''}`.trim()).join('\n\n')
+  return `Résultats d'une recherche web effectuée le ${today} :\n\n${sources}\n\n` +
+    'Appuie-toi sur ces résultats pour répondre à la demande ci-dessous et cite tes ' +
+    'sources par leur numéro entre crochets ([1], [2]…). Si les résultats ne ' +
+    "permettent pas de répondre, dis-le simplement plutôt que d'inventer.\n\n" +
+    `Demande : ${question}`
+}
+
 export const useChatStore = defineStore('chat', () => {
   const messages = ref([])
   const isStreaming = ref(false)
+  const isSearching = ref(false)
   const currentModel = ref('')
   const availableModels = ref([])
   const abortController = ref(null)
@@ -21,12 +52,40 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function send(userMessage, fileContext = null) {
+  async function send(userMessage, fileContext = null, useWebSearch = false) {
     if (isStreaming.value || !currentModel.value) return
     messages.value.push({ role: 'user', content: userMessage })
     isStreaming.value = true
-    const assistantMsg = { role: 'assistant', content: '' }
+    const assistantMsg = { role: 'assistant', content: '', sources: [], searchNote: '' }
     messages.value.push(assistantMsg)
+    abortController.value = new AbortController()
+
+    // Recherche web (bouton 🌐 du composeur) : on interroge le moteur AVANT
+    // d'appeler le modèle, puis on injecte les résultats dans la demande.
+    // Un échec du moteur ne bloque pas la réponse : on prévient et on continue.
+    let webResults = []
+    if (useWebSearch) {
+      isSearching.value = true
+      try {
+        webResults = await fetchWebResults(userMessage, abortController.value.signal)
+        assistantMsg.sources = webResults
+        if (webResults.length === 0) {
+          assistantMsg.searchNote = 'Aucun résultat web trouvé — réponse basée sur les '
+            + 'seules connaissances du modèle.'
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          isSearching.value = false
+          isStreaming.value = false
+          abortController.value = null
+          return
+        }
+        assistantMsg.searchNote = `Recherche web indisponible (${e.message}) — réponse `
+          + 'basée sur les seules connaissances du modèle.'
+      } finally {
+        isSearching.value = false
+      }
+    }
 
     // Contexte RAG : si un fichier est sélectionné, on injecte son contenu (tronqué à 8 Ko)
     const ollamaMessages = []
@@ -41,7 +100,13 @@ export const useChatStore = defineStore('chat', () => {
       ollamaMessages.push({ role: m.role, content: m.content })
     }
 
-    abortController.value = new AbortController()
+    // Les résultats web enrichissent la DERNIÈRE demande (et non le début de
+    // l'historique) : les petits modèles locaux suivent mieux un contexte récent.
+    if (webResults.length) {
+      const last = ollamaMessages[ollamaMessages.length - 1]
+      last.content = withWebContext(userMessage, webResults)
+    }
+
     try {
       const r = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -95,6 +160,6 @@ export const useChatStore = defineStore('chat', () => {
 
   function clear() { messages.value = [] }
 
-  return { messages, isStreaming, currentModel, availableModels,
+  return { messages, isStreaming, isSearching, currentModel, availableModels,
            loadModels, send, stop, clear }
 })

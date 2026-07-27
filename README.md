@@ -9,7 +9,8 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 - **Prévisualise** fichiers texte, code, CSV, Excel (.xlsx), Word (.docx), images et PDF
 - **Importe (upload) et télécharge (download)** des fichiers dans le périmètre sandboxé
 - Injecte le contenu d'un fichier dans le contexte du LLM (mini-RAG, tous formats prévisualisables)
-- Effectue des recherches web (DuckDuckGo / SearXNG / Brave)
+- Effectue des recherches web à la demande (bouton 🌐 du chat) et cite ses sources
+  (DuckDuckGo / SearXNG / Brave)
 - Bascule le calcul **GPU ↔ CPU** et adapte les modèles recommandés
 - Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier, outils métier)
 - Respecte les mesures techniques **RGPD** (export / suppression des données, consentement) et **RGAA/WCAG AA** (ARIA, clavier, contrastes)
@@ -19,8 +20,9 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 
 Olivia démarre en **mode simple** pour ne montrer à l'utilisatrice que l'essentiel :
 la **conversation**, les **documents** (import / aperçu) et la **barre des outils connectés**
-(dont les e-mails non lus). Les réglages techniques (puissance GPU/CPU, choix du modèle,
-recherche web, connexions, prompt système) sont **masqués**.
+(dont les e-mails non lus), plus le bouton **🌐 Recherche web** du chat. Les réglages
+techniques (puissance GPU/CPU, choix du modèle, *choix du moteur* de recherche web,
+connexions, prompt système) sont **masqués**.
 
 Pour les afficher : **⚙️ Paramètres → 🔧 Réglages avancés**. Un clic sur
 **« ← Revenir au mode simple »** rétablit l'affichage épuré. Le choix est mémorisé.
@@ -195,13 +197,28 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 
 ## 🔍 Recherche web
 
+### Dans la conversation (bouton 🌐)
+
+Sous la zone de saisie, le bouton **« 🌐 Recherche web »** est un interrupteur. Activé
+(il devient coloré), Olivia interroge le moteur **avant** de répondre, injecte les
+5 premiers résultats dans la demande et **cite ses sources** par numéro (`[1]`, `[2]`…).
+Les liens correspondants s'affichent sous sa réponse, dans un bloc dépliable
+« 🌐 N sources web ». L'état reste actif jusqu'à ce qu'on le désactive.
+
+Le bouton est visible **y compris en mode simple** : c'est un choix explicite de
+l'utilisatrice, seule action qui fait sortir une donnée de la machine (la requête
+part vers le moteur configuré). Si le moteur est injoignable ou ne renvoie rien,
+Olivia répond quand même et l'annonce clairement au lieu d'échouer.
+
+### API
+
 `POST /api/search` accepte `{query, limit}` et renvoie jusqu'à 5 résultats. Testable en direct
 depuis **Paramètres → Recherche web** (champ + bouton « 🔍 Tester »).
 
 | Provider | Pré-requis | Fiabilité |
 |---|---|---|
 | **SearXNG** (recommandé) | Docker — voir ci-dessous | Élevée |
-| **DuckDuckGo** | Aucun | Moyenne (scraping HTML) |
+| **DuckDuckGo** | Aucun | Moyenne (scraping HTML, bloqué après quelques requêtes rapprochées) |
 | **Brave Search** | `BRAVE_API_KEY` dans l'environnement | Élevée |
 
 ### Installer SearXNG (métamoteur auto-hébergé)
