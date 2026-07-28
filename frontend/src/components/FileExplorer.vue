@@ -85,10 +85,32 @@
         id="fs-search-help"
         class="search-help"
       >
-        Écrivez simplement les mots à retrouver. Olivia cherche à l'intérieur de vos
-        documents Word, Excel, PDF et texte. Ni les majuscules ni les accents n'ont
-        d'importance.
+        {{ searchHelpText }}
       </p>
+      <div
+        class="search-mode"
+        role="group"
+        aria-label="Mode de recherche"
+      >
+        <div class="seg">
+          <button
+            type="button"
+            :class="{ on: searchMode === 'keyword' }"
+            :aria-pressed="searchMode === 'keyword'"
+            @click="searchMode = 'keyword'"
+          >
+            🔤 Mots-clés
+          </button>
+          <button
+            type="button"
+            :class="{ on: searchMode === 'semantic' }"
+            :aria-pressed="searchMode === 'semantic'"
+            @click="searchMode = 'semantic'"
+          >
+            🧠 Par le sens
+          </button>
+        </div>
+      </div>
       <div class="search-actions">
         <button
           :disabled="!search.trim() || searching"
@@ -245,6 +267,9 @@ const rootPath = ref('')
 const rootLabel = ref('')
 const selectedPath = ref(null)
 const search = ref('')
+// Mode de recherche documentaire : 'keyword' (mots exacts) ou 'semantic' (par le
+// sens, via l'index vectoriel). Simple état de session, non persisté.
+const searchMode = ref('keyword')
 const searchData = ref(null)
 const searching = ref(false)
 const injectMsg = ref('')
@@ -260,12 +285,25 @@ const rootPrefix = computed(() => {
 })
 
 // Message d'absence de résultat, construit en une seule chaîne : la ponctuation
-// française reste correcte (pas d'espace parasite avant le point).
+// française reste correcte (pas d'espace parasite avant le point). Les « termes »
+// n'ont de sens qu'en recherche par mots-clés.
 const texteAucunResultat = computed(() => {
+  if (searchMode.value === 'semantic') {
+    return 'Aucun extrait ne correspond à cette recherche. Essayez de la reformuler.'
+  }
   const mots = searchData.value?.terms || []
   const liste = mots.length ? ` (${mots.join(', ')})` : ''
   return `Aucun document ne contient tous ces mots${liste}. Essayez avec moins de mots.`
 })
+
+// Texte d'aide sous le champ de recherche, adapté au mode choisi.
+const searchHelpText = computed(() => (searchMode.value === 'semantic'
+  ? 'Décrivez l\'idée recherchée avec vos propres mots — Olivia comprend le sens, '
+    + 'pas seulement les mots exacts. Nécessite d\'avoir construit l\'index dans '
+    + 'Paramètres → Documents.'
+  : 'Écrivez simplement les mots à retrouver. Olivia cherche à l\'intérieur de vos '
+    + 'documents Word, Excel, PDF et texte. Ni les majuscules ni les accents n\'ont '
+    + 'd\'importance.'))
 
 function onSelectRoot(e) { navigate(e.target.value) }
 
@@ -403,7 +441,8 @@ async function doSearch() {
   searching.value = true
   injectMsg.value = ''
   try {
-    const url = `/api/fs/search?q=${encodeURIComponent(q)}`
+    const base = searchMode.value === 'semantic' ? '/api/fs/search/semantic' : '/api/fs/search'
+    const url = `${base}?q=${encodeURIComponent(q)}`
       + `&path=${encodeURIComponent(currentPath.value)}`
     const r = await fetch(url)
     const data = await r.json().catch(() => null)
@@ -443,6 +482,13 @@ async function doSearch() {
 .search-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .search { width: 100%; }
 .search-help { font-size: 11px; color: var(--muted); line-height: 1.4; margin: 4px 0 6px; }
+.search-mode { margin: 0 0 8px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button {
+  background: var(--panel-2); color: var(--muted); border: none;
+  padding: 6px 12px; font-size: 12px; border-radius: 0;
+}
+.seg button.on { background: var(--accent); color: #fff; }
 .search-actions { display: flex; gap: 8px; }
 .search-results { margin: 8px 0; max-height: 420px; overflow-y: auto; }
 .search-summary { font-size: 12px; color: var(--muted); margin: 0 0 6px; }

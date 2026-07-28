@@ -207,6 +207,53 @@
               </p>
             </div>
 
+            <h3>🧠 Recherche par le sens</h3>
+            <p class="hint">
+              En plus de la recherche par mots-clés, Olivia peut retrouver un document
+              d'après l'idée qu'il contient, même si les mots exacts diffèrent. Cela
+              demande de construire une fois un index de vos documents, à partir du
+              modèle local <code>bge-m3</code> (via Ollama, sans rien envoyer sur
+              Internet). Reconstruisez l'index après un ajout important de documents.
+            </p>
+            <p
+              v-if="docIndexState"
+              class="hint doc-index-state"
+              aria-live="polite"
+            >
+              {{ docIndexState.modele_disponible ? '✅' : '⚠️' }} {{ docIndexState.message }}
+              <template v-if="docIndexState.index_construit">
+                <br>
+                {{ docIndexState.documents }} document(s), {{ docIndexState.extraits }} extrait(s),
+                construit le {{ formatDate(docIndexState.construit_le) }}.
+              </template>
+            </p>
+            <p
+              v-if="docIndexState?.en_cours"
+              class="hint doc-index-progress"
+              aria-live="polite"
+            >
+              ⏳ Indexation en cours…
+              {{ docIndexState.progression?.fait ?? 0 }}/{{ docIndexState.progression?.total ?? 0 }} document(s)
+              <template v-if="docIndexState.progression?.fichier">
+                — {{ docIndexState.progression.fichier }}
+              </template>
+            </p>
+            <div class="row">
+              <button
+                :disabled="!docIndexState?.modele_disponible || docIndexState?.en_cours"
+                @click="construireIndex"
+              >
+                🧠 Construire / mettre à jour l'index
+              </button>
+              <button
+                v-if="docIndexState?.en_cours"
+                class="ghost"
+                @click="annulerIndex"
+              >
+                ✕ Annuler
+              </button>
+            </div>
+
             <h3>📄 Documents Word créés par Olivia</h3>
             <p
               v-if="modeleEtat"
@@ -607,7 +654,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useSettingsStore } from '../stores/settings.js'
 
 const settings = useSettingsStore()
@@ -724,11 +771,80 @@ async function fabriquerModele() {
   }
 }
 
+// État de l'index vectoriel de recherche par le sens (onglet Documents). Même
+// motif que l'OCR et le modèle Word : c'est le back-end qui connaît l'état réel
+// (index construit ou non, modèle Ollama disponible), rechargé à chaque ouverture.
+const docIndexState = ref(null)
+let docIndexPoll = null
+
+async function loadDocIndexState() {
+  try {
+    const r = await fetch('/api/docindex/status')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    docIndexState.value = await r.json()
+  } catch {
+    // Back-end plus ancien ou route indisponible : la section reste simplement
+    // masquée, sans casser l'affichage du reste des réglages.
+    docIndexState.value = null
+  }
+}
+
+function formatDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+// Suit la progression pendant une construction d'index, et s'arrête d'elle-même
+// dès que le back-end signale que la construction est terminée.
+function demarrerSuiviIndex() {
+  if (docIndexPoll) return
+  docIndexPoll = setInterval(async () => {
+    await loadDocIndexState()
+    if (!docIndexState.value?.en_cours) {
+      clearInterval(docIndexPoll)
+      docIndexPoll = null
+    }
+  }, 1500)
+}
+
+async function construireIndex() {
+  try {
+    const r = await fetch('/api/docindex/build', { method: 'POST' })
+    const data = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+    docIndexState.value = data
+    demarrerSuiviIndex()
+  } catch (e) {
+    alert('Construction de l\'index impossible : ' + e.message)
+  }
+}
+
+async function annulerIndex() {
+  try {
+    const r = await fetch('/api/docindex/cancel', { method: 'POST' })
+    const data = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+    docIndexState.value = data
+  } catch (e) {
+    alert('Annulation impossible : ' + e.message)
+  }
+}
+
+onUnmounted(() => {
+  if (docIndexPoll) clearInterval(docIndexPoll)
+})
+
 // Accessibilité : au focus à l'ouverture de la modale
 watch(() => settings.open, async (o) => {
   if (o) {
     loadOcrState()
     loadModeleState()
+    await loadDocIndexState()
+    // Une construction laissée en cours (ex. paramètres refermés puis rouverts)
+    // doit reprendre son suivi automatiquement.
+    if (docIndexState.value?.en_cours) demarrerSuiviIndex()
     await nextTick()
     closeBtn.value?.focus()
   }

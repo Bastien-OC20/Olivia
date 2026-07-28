@@ -13,6 +13,11 @@ pypdf>=4.0
 # Choisi contre pdf2image : le moteur de rendu est embarqué dans la roue Python,
 # donc AUCUN binaire externe à installer (pdf2image exigerait Poppler).
 pypdfium2>=4.30
+# Recherche documentaire par le sens : embeddings bge-m3 (via Ollama) + index
+# vectoriel local FAISS. Corpus réaliste (centaines à quelques milliers
+# d'extraits pour un secrétariat) : faiss-cpu suffit largement, pas besoin de GPU.
+faiss-cpu>=1.8
+numpy>=1.26,<3
 # Optionnel (décommentez si vous branchez OAuth réel) :
 # google-auth>=2.35
 # google-auth-oauthlib>=1.2

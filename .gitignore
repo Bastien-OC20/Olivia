@@ -27,6 +27,10 @@ backend/conversations/
 # Texte reconnu sur les documents scannés : recopie du contenu de fichiers
 # personnels, et cache reconstructible — jamais versionné.
 backend/ocr_cache/
+# Index vectoriel de la recherche par le sens (embeddings + métadonnées des
+# extraits) : dérivé du contenu de documents personnels, et reconstructible —
+# jamais versionné (RGPD).
+backend/docindex/
 backend/.env
 .env
 *.pem

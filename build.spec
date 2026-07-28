@@ -13,7 +13,7 @@ le navigateur sur http://127.0.0.1:8000/ui/.
 """
 import os
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -36,6 +36,7 @@ hiddenimports = (
     + collect_submodules('fastapi')
     + collect_submodules('starlette')
     + [m for m in collect_submodules('pydantic') if '.mypy' not in m]
+    + collect_submodules('faiss')
     + [
         'httpx', 'httpcore', 'anyio',
         'multipart',                   # python-multipart (uploads)
@@ -44,16 +45,27 @@ hiddenimports = (
         'pypdf',                       # extraction du texte des .pdf (recherche)
         'pypdfium2',                   # rendu des .pdf scannés avant OCR (ocr.py)
         'pypdfium2_raw',               # bibliothèque native livrée avec pypdfium2
+        # Recherche par le sens (backend/docindex.py). faiss/loader.py choisit
+        # AU RUNTIME, selon le jeu d'instructions du processeur détecté, entre
+        # ces deux extensions compilées — un import conditionnel que l'analyse
+        # statique de PyInstaller ne peut pas suivre seule.
+        'faiss._swigfaiss', 'faiss._swigfaiss_avx2',
         'ics',                         # calendrier .ics
         'email.mime.text', 'email.mime.multipart',
         'imaplib', 'smtplib',
     ]
 )
 
+# `collect_submodules('faiss')` ne rapatrie que les modules PYTHON du paquet :
+# l'extension native (`_swigfaiss*.pyd` et les DLL qu'elle charge) n'est pas un
+# module importable au sens de l'analyse statique. Sans cette collecte, l'.exe
+# se construirait sans erreur puis planterait à l'import de faiss.
+binaries = collect_dynamic_libs('faiss')
+
 a = Analysis(
     ['launch.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -82,6 +94,7 @@ def _est_donnee_utilisateur(dest: str) -> bool:
         d.startswith("backend/conversations/")
         or d.startswith("backend/.venv/")
         or d.startswith("backend/ocr_cache/")
+        or d.startswith("backend/docindex/")
         or d in ("backend/settings.json", "backend/settings.tmp", "backend/.env")
         or "/__pycache__/" in f"/{d}"
     )

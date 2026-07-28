@@ -12,6 +12,10 @@ Routes principales :
   GET  /api/fs/read                      : lit un fichier texte (sandboxé, filtré)
   GET  /api/fs/text                      : texte brut d'un document (docx/xlsx/pdf/texte)
   GET  /api/fs/search                    : recherche en langage courant (docx/xlsx/pdf/texte)
+  GET  /api/fs/search/semantic           : recherche par le sens (embeddings + FAISS)
+  GET  /api/docindex/status              : état de l'index sémantique
+  POST /api/docindex/build               : construit/met à jour l'index sémantique
+  POST /api/docindex/cancel              : interrompt la construction en cours
   GET  /api/fs/preview                   : prévisualisation (txt/csv/xlsx/docx/img/pdf)
   POST /api/fs/upload                    : upload d'un fichier (sandboxé, filtré)
   GET  /api/fs/download                  : téléchargement d'un fichier (sandboxé)
@@ -55,6 +59,7 @@ from .settings import settings, style_directives
 from .search import web_search
 from . import documents
 from . import docsearch
+from . import docindex
 from . import docgen
 from . import docmodele
 from . import ocr
@@ -610,6 +615,33 @@ def _iter_searchable_files(targets):
                 yield fp, _virtual_path(fp, root, prefix)
 
 
+def _resolve_search_targets(path: str) -> list[tuple[Path, Path, str]]:
+    """Périmètre d'un balayage : (dossier à parcourir, racine, préfixe 'rN').
+
+    Chemin vide = toutes les racines configurées. Sinon un seul sous-dossier,
+    validé par `safe_path()` — le balayage reste donc borné au sandbox.
+    """
+    raw = (path or "").strip()
+    if raw == "":
+        return [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots())]
+    p, root, prefix = safe_path(raw)
+    if not p.is_dir():
+        raise HTTPException(400, "Le chemin doit être un dossier")
+    return [(p, root, prefix)]
+
+
+def _virtual_for_abs(p: Path) -> str | None:
+    """Chemin virtuel rN/... pour un chemin absolu, ou None s'il ne tombe sous
+    aucune racine actuellement autorisée."""
+    for i, root in enumerate(get_fs_roots()):
+        try:
+            rel = p.resolve().relative_to(root)
+        except (OSError, ValueError):
+            continue
+        return f"r{i}" if str(rel) == "." else f"r{i}/{rel.as_posix()}"
+    return None
+
+
 # Route volontairement synchrone (def et non async def) : l'extraction de texte
 # est un travail CPU/disque bloquant. FastAPI l'exécute alors dans son pool de
 # threads, ce qui évite de figer le reste de l'application pendant une recherche.
@@ -621,16 +653,57 @@ def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
     la comparaison ignore la casse et les accents ; les résultats sont groupés
     par document et classés par pertinence. Voir `docsearch.py`.
     """
-    raw = (path or "").strip()
-    if raw == "":
-        targets = [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots())]
-    else:
-        p, root, prefix = safe_path(raw)
-        if not p.is_dir():
-            raise HTTPException(400, "Le chemin doit être un dossier")
-        targets = [(p, root, prefix)]
+    return docsearch.search(_iter_searchable_files(_resolve_search_targets(path)), q)
 
-    return docsearch.search(_iter_searchable_files(targets), q)
+
+# ---------- Routes Recherche par le sens (embeddings + index vectoriel) ----------
+@app.get("/api/docindex/status")
+def docindex_status():
+    """État de l'index sémantique (embeddings bge-m3 + FAISS). Voir docindex.etat()."""
+    return docindex.etat()
+
+
+@app.post("/api/docindex/build")
+def docindex_build(path: str = Query("")):
+    """Démarre (ou signale déjà en cours) la construction/mise à jour de l'index
+    sémantique en tâche de fond. Route synchrone : le lancement est instantané,
+    le travail réel se fait dans un thread démon (voir docindex.py)."""
+    targets = _resolve_search_targets(path)
+    demarree = docindex.lancer_construction(_iter_searchable_files(targets))
+    etat = docindex.etat()
+    etat["demarree"] = demarree
+    return etat
+
+
+@app.post("/api/docindex/cancel")
+def docindex_cancel():
+    """Interrompt la construction en cours : l'arrêt est effectif entre deux
+    fichiers, et le travail déjà fait est conservé."""
+    docindex.annuler_construction()
+    return docindex.etat()
+
+
+@app.get("/api/fs/search/semantic")
+def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query("")):
+    """Recherche par le sens (embeddings + FAISS) — voir docindex.py. Ne renvoie
+    que des résultats sous une racine actuellement configurée : une entrée de
+    l'index devenue hors périmètre (fs_roots reconfiguré depuis la construction)
+    est silencieusement écartée, jamais exposée."""
+    dossier = None
+    raw = (path or "").strip()
+    if raw:
+        p, _root, _prefix = safe_path(raw)
+        dossier = p
+    brut = docindex.rechercher(q, k=10, dossier=dossier)
+    resultats = []
+    for r in brut["results"]:
+        virtuel = _virtual_for_abs(Path(r["path"]))
+        if virtuel is None:
+            continue
+        resultats.append({**r, "path": virtuel})
+    brut["results"] = resultats
+    brut["mode"] = "semantic"
+    return brut
 
 
 # ---------- Routes Filesystem hors sandbox : sélection d'un dossier ----------
@@ -1052,9 +1125,16 @@ async def privacy_delete():
                     pass
     settings.reset()
     conversations_removed = conversations.delete_all_conversations()
+    # Le texte reconnu sur les documents scannés et l'index sémantique sont des
+    # RECOPIES du contenu de documents personnels : ils relèvent du droit à
+    # l'effacement au même titre que les conversations.
+    ocr_cache_removed = ocr.vider_cache()
+    docindex_removed = docindex.purger_index()
     return {
         "ok": True, "settings_reset": True, "uploads_removed": removed,
         "conversations_removed": conversations_removed,
+        "ocr_cache_removed": ocr_cache_removed,
+        "docindex_removed": docindex_removed,
     }
 
 
