@@ -186,10 +186,10 @@
 
             <div class="doc-actions">
               <button
-                :disabled="creation.enCours"
+                :disabled="!!creation.etape"
                 @click="creerDocument"
               >
-                {{ creation.enCours ? '⏳ Création…' : '✅ Créer le document' }}
+                {{ creation.etape || '✅ Créer le document' }}
               </button>
               <button
                 class="ghost"
@@ -397,7 +397,7 @@ const modeleAbsent = computed(() => modeleEtat.value.disponible === false)
 const creation = reactive({
   index: null, type: 'circulaire', titre: '', objet: '',
   destinataire: '', signature: '', participants: '',
-  enCours: false, erreur: '',
+  etape: '', erreur: '',
 })
 const documentCree = ref(null)
 const apercuOuvert = ref(false)
@@ -449,12 +449,58 @@ async function chargerEtatModele() {
   }
 }
 
+// Rédaction dirigée : la réponse d'Olivia, telle qu'affichée dans la conversation,
+// est une lettre complète (objet, appel, corps, formule de politesse, signature).
+// Le document produit par docgen.py pose déjà ces éléments lui-même (voir
+// PROFILS) : les garder ferait doublon. Un nettoyage par expressions régulières
+// existe côté serveur (`_degarnir`) mais reste approximatif — chaque
+// reformulation invente sa propre clôture. On demande donc au modèle de
+// reformuler SON PROPRE texte en corps seul avant de le transmettre : mesuré à
+// l'usage, ça élimine fiablement objet/appel/clôture/signature/titre en
+// quelques secondes. `_degarnir` reste le filet de sécurité si cet appel
+// échoue ou si le modèle laisse malgré tout un résidu.
+const DIRECTIVE_REDACTION = (texte) => (
+  "Reformule le texte suivant pour qu'il devienne UNIQUEMENT le corps d'un document " +
+  "administratif déjà mis en forme : retire tout titre, tout objet, toute formule " +
+  "d'ouverture (Madame/Monsieur ou équivalent), toute formule de politesse de clôture " +
+  "et toute signature — le document les ajoute déjà lui-même séparément, les répéter " +
+  'ferait doublon. Commence directement par la première phrase utile du message. Garde ' +
+  'le contenu en paragraphes clairs, sans aucune mise en forme (pas de gras, pas de ' +
+  "markdown), sans commentaire ni note. Réponds uniquement par le texte reformulé.\n\n" +
+  `Texte à reformuler :\n${texte}`
+)
+
+/** Repli sur le texte d'origine si la réécriture échoue : jamais bloquant. */
+async function redigerCorps(texteOriginal) {
+  if (!chat.currentModel || !texteOriginal.trim()) return texteOriginal
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: chat.currentModel,
+        messages: [{ role: 'user', content: DIRECTIVE_REDACTION(texteOriginal) }],
+        stream: false,
+      }),
+    })
+    if (!r.ok) return texteOriginal
+    const data = await r.json()
+    const reecrit = (data?.message?.content || '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+    return reecrit || texteOriginal
+  } catch {
+    return texteOriginal
+  }
+}
+
 async function creerDocument() {
   const message = chat.messages[creation.index]
   if (!message) return
-  creation.enCours = true
   creation.erreur = ''
   try {
+    creation.etape = '⏳ Rédaction…'
+    const corps = await redigerCorps(message.content || '')
+    creation.etape = '⏳ Création…'
     const r = await fetch('/api/documents/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -467,7 +513,7 @@ async function creerDocument() {
         participants: creation.type === 'compte_rendu'
           ? creation.participants.split('\n').map((s) => s.trim()).filter(Boolean)
           : [],
-        texte: message.content || '',
+        texte: corps,
       }),
     })
     const data = await r.json().catch(() => null)
@@ -478,7 +524,7 @@ async function creerDocument() {
   } catch (e) {
     creation.erreur = `Création impossible : ${e.message}`
   } finally {
-    creation.enCours = false
+    creation.etape = ''
   }
 }
 
