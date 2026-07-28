@@ -128,13 +128,22 @@ export const useChatStore = defineStore('chat', () => {
   // sans se casser (les routes peuvent être absentes d'une ancienne version).
   const historyUnavailable = ref(false)
 
-  async function loadModels() {
+  /**
+   * `recommandes` : noms de modèles déjà triés par pertinence pour l'appareil
+   * de calcul actuel (voir `DEVICE_MODELS` dans backend/settings.py). Sans ce
+   * paramètre, le choix par défaut retomberait sur `availableModels[0]` —
+   * l'ordre renvoyé par Ollama, qui ne reflète ni une recommandation ni même
+   * un ordre stable (un modèle tout juste installé peut apparaître en tête).
+   */
+  async function loadModels(recommandes = []) {
     try {
       const r = await fetch('/api/models')
       const data = await r.json()
       availableModels.value = data.models || []
       if (availableModels.value.length && !currentModel.value) {
-        currentModel.value = availableModels.value[0].name
+        const noms = new Set(availableModels.value.map((m) => m.name))
+        const conseille = recommandes.find((n) => noms.has(n))
+        currentModel.value = conseille || availableModels.value[0].name
       }
     } catch (e) {
       console.error('Impossible de charger les modèles :', e)

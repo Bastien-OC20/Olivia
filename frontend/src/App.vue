@@ -164,7 +164,7 @@ const sideTab = ref('conversations')
 
 onMounted(async () => {
   await settings.load()
-  chat.loadModels()
+  chat.loadModels(settings.data.device_models?.[device.value] || [])
   chat.loadConversations()
 })
 

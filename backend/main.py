@@ -351,6 +351,18 @@ def _mask_secrets(data: dict) -> dict:
 # ---------- Routes Ollama ----------
 @app.get("/api/models")
 async def list_models():
+    """Modèles installés utilisables pour la CONVERSATION.
+
+    Ollama liste tous les modèles installés sans distinction d'usage — un
+    modèle d'embeddings comme bge-m3 (tiré pour la recherche par le sens, voir
+    docindex.py) s'y retrouve mélangé aux modèles de conversation. Envoyé tel
+    quel au front-end, il devenait sélectionnable dans le menu, et pouvait même
+    être choisi par défaut (le premier de la liste) : les réponses de chat
+    échouent ou sont incohérentes avec un modèle qui n'a pas de gabarit de
+    conversation. On filtre donc sur `capabilities`, exposé par Ollama lui-même
+    (« completion » = sait converser), plutôt que sur une liste de noms à
+    maintenir à la main — un futur modèle d'embeddings serait filtré pareil.
+    """
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             r = await client.get(f"{OLLAMA_URL}/api/tags")
@@ -359,6 +371,7 @@ async def list_models():
             return {"models": [
                 {"name": m["name"], "size_gb": round(m.get("size", 0) / 1e9, 2)}
                 for m in data.get("models", [])
+                if "completion" in (m.get("capabilities") or [])
             ]}
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Ollama injoignable : {e}")
