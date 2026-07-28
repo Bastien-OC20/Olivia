@@ -421,7 +421,12 @@ function titreSuggere(texte) {
     if (!nue) continue
     const titre = nue.match(/^#{1,6}\s+(.*)$/)
     if (titre) return titre[1].trim().slice(0, 90)
-    return nue.replace(/\*\*/g, '').split(' ').slice(0, 10).join(' ').slice(0, 90)
+    // La réponse commence parfois par sa propre ligne "Objet : …" — sans ce
+    // retrait, ce champ pré-remplit aussi `creation.objet` (voir
+    // ouvrirCreation), et docgen.py y ajoute SON PROPRE préfixe "Objet : " :
+    // le document afficherait "Objet : Objet : …".
+    const sansObjet = nue.replace(/^objet\s*:\s*/i, '')
+    return sansObjet.replace(/\*\*/g, '').split(' ').slice(0, 10).join(' ').slice(0, 90)
   }
   return ''
 }
