@@ -7,10 +7,17 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Moteur OCR portable (binaire + données de langue, ~190 Mo) : installé
+# localement, jamais versionné — voir README, section OCR.
+tesseract/
+
 # --- Secrets & données locales (RGPD : ne jamais committer) ---
 backend/settings.json
 backend/settings.tmp
 backend/conversations/
+# Texte reconnu sur les documents scannés : recopie du contenu de fichiers
+# personnels, et cache reconstructible — jamais versionné.
+backend/ocr_cache/
 backend/.env
 .env
 *.pem

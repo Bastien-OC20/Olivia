@@ -1,38 +1,15 @@
-"""Stubs OAuth Gmail / Outlook + Calendar ICS.
+"""Lecture d'un calendrier au format .ics (export Google / Outlook / Apple).
 
-Pour activer Gmail OAuth :
-  1. Console Google Cloud → créer une app OAuth → télécharger client_secret.json
-  2. pip install google-auth google-auth-oauthlib google-api-python-client
-  3. flow = InstalledAppFlow.from_client_secrets_file(...)
-     creds = flow.run_local_server(port=0)
-  4. Fournir creds.token à gmail_list_messages()
+Ce module contenait aussi des squelettes OAuth Gmail et Outlook, retirés car non
+fonctionnels. Pour le courrier, le connecteur IMAP (imap_client.py) fonctionne
+réellement et suffit à la plupart des messageries, y compris académiques.
 
-Pour Outlook OAuth :
-  1. Microsoft Entra (Azure AD) → inscrire une app
-  2. pip install msal requests
-  3. MSAL device flow → obtenir access_token
-  4. Fournir à outlook_list_messages()
+Pour les fichiers Google Drive / OneDrive, l'OAuth est inutile : les deux services
+se synchronisent dans un dossier local qu'il suffit de désigner comme dossier de
+travail (Documents → Parcourir). Aucune autorisation à demander, et cela évite la
+validation Google (jetons expirant tous les 7 jours hors app vérifiée) comme le
+consentement administrateur d'un tenant Microsoft.
 """
-from typing import Optional
-
-
-def gmail_list_messages(access_token: Optional[str], max_results: int = 10) -> list[dict]:
-    if not access_token:
-        return [{
-            "warning": "OAuth Gmail non activé. "
-                       "Voir backend/connectors/oauth_providers.py pour la procédure."
-        }]
-    return [{"info": "OAuth Gmail actif — branchement fonctionnel à implémenter côté utilisateur."}]
-
-
-def outlook_list_messages(access_token: Optional[str], max_results: int = 10) -> list[dict]:
-    if not access_token:
-        return [{
-            "warning": "OAuth Outlook non activé. "
-                       "Voir backend/connectors/oauth_providers.py pour la procédure."
-        }]
-    return [{"info": "OAuth Outlook actif — branchement fonctionnel "
-                     "à implémenter côté utilisateur."}]
 
 
 def calendar_list_events(ics_path: str, limit: int = 10) -> list[dict]:

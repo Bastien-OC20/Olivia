@@ -41,6 +41,9 @@ hiddenimports = (
         'multipart',                   # python-multipart (uploads)
         'docx',                        # python-docx (preview .docx)
         'openpyxl',                    # preview .xlsx
+        'pypdf',                       # extraction du texte des .pdf (recherche)
+        'pypdfium2',                   # rendu des .pdf scannés avant OCR (ocr.py)
+        'pypdfium2_raw',               # bibliothèque native livrée avec pypdfium2
         'ics',                         # calendrier .ics
         'email.mime.text', 'email.mime.multipart',
         'imaplib', 'smtplib',
@@ -78,6 +81,7 @@ def _est_donnee_utilisateur(dest: str) -> bool:
     return (
         d.startswith("backend/conversations/")
         or d.startswith("backend/.venv/")
+        or d.startswith("backend/ocr_cache/")
         or d in ("backend/settings.json", "backend/settings.tmp", "backend/.env")
         or "/__pycache__/" in f"/{d}"
     )

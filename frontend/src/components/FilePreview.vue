@@ -209,8 +209,10 @@ const downloadUrl = computed(() => {
   return props.path ? `/api/fs/download?path=${encodeURIComponent(props.path)}` : ''
 })
 
+// Le PDF est injectable depuis que le backend sait en extraire le texte
+// (route /api/fs/text) — son aperçu reste rendu par le navigateur.
 const canInject = computed(() => {
-  return !!data.value && ['text', 'table', 'doc'].includes(data.value.kind)
+  return !!data.value && ['text', 'table', 'doc', 'pdf'].includes(data.value.kind)
 })
 
 function onInject() {

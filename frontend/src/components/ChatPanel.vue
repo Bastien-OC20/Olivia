@@ -1,17 +1,60 @@
 <template>
   <div class="chat">
     <div
-      v-if="localFile"
+      v-if="chat.fileContextPlan.length"
       class="file-banner"
+      aria-live="polite"
     >
-      📄 Contexte actif : <code>{{ localFile.path }}</code>
-      <button
-        class="x"
-        aria-label="Retirer le fichier du contexte"
-        @click="localFile = null"
+      <div class="file-banner-head">
+        <span>
+          📄 {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
+          dans la conversation
+        </span>
+        <button
+          class="x"
+          @click="chat.clearFileContexts()"
+        >
+          Tout retirer
+        </button>
+      </div>
+      <ul class="file-list">
+        <li
+          v-for="doc in chat.fileContextPlan"
+          :key="doc.path"
+        >
+          <span
+            class="file-name"
+            :title="doc.path"
+          >{{ doc.name }}</span>
+          <span
+            v-if="doc.truncated"
+            class="file-cut"
+            :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Olivia.`"
+          >
+            ⚠️ tronqué
+          </span>
+          <button
+            class="x"
+            :aria-label="`Retirer ${doc.name} de la conversation`"
+            @click="chat.removeFileContext(doc.path)"
+          >
+            ✕
+          </button>
+        </li>
+      </ul>
+      <p
+        v-if="documentsTronques"
+        class="file-warn"
       >
-        ✕
-      </button>
+        Certains documents sont trop longs : seul leur début est transmis à Olivia.
+        Retirez-en pour laisser plus de place aux autres.
+      </p>
+      <p
+        v-if="chat.fileContextNotice"
+        class="file-warn"
+      >
+        {{ chat.fileContextNotice }}
+      </p>
     </div>
 
     <div
@@ -156,18 +199,18 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import MessageBubble from './MessageBubble.vue'
 import logoUrl from '../assets/logo-mark.png'
 
-const props = defineProps({ fileContext: { type: Object, default: null } })
 const chat = useChatStore()
 const input = ref('')
 const messagesEl = ref(null)
-const localFile = ref(null)
 // Recherche web : choix explicite de l'utilisatrice, conservé d'un message à l'autre.
 const webSearch = ref(false)
+
+const documentsTronques = computed(() => chat.fileContextPlan.some((d) => d.truncated))
 
 // Exemples concrets pour une assistante de direction en lycée
 const examples = [
@@ -178,10 +221,8 @@ const examples = [
 ]
 
 function useExample(text) {
-  chat.send(text, localFile.value, webSearch.value)
+  chat.send(text, webSearch.value)
 }
-
-watch(() => props.fileContext, (v) => { localFile.value = v })
 
 const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -205,16 +246,26 @@ watch(() => chat.messages[chat.messages.length - 1]?.content, async () => {
 
 function send() {
   if (!input.value.trim()) return
-  chat.send(input.value, localFile.value, webSearch.value)
+  chat.send(input.value, webSearch.value)
   input.value = ''
 }
 </script>
 
 <style scoped>
 .chat { display: flex; flex-direction: column; height: 100%; }
-.file-banner { padding: 8px 16px; background: var(--panel-2); display: flex;
-               align-items: center; gap: 8px; font-size: 13px; }
-.file-banner code { color: var(--accent); }
+.file-banner { padding: 8px 16px; background: var(--panel-2); font-size: 13px; }
+.file-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.file-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex;
+             flex-wrap: wrap; gap: 6px; }
+.file-list li {
+  display: flex; align-items: center; gap: 6px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 12px;
+  max-width: 100%;
+}
+.file-name { color: var(--accent); max-width: 240px; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.file-cut { color: var(--warn); font-size: 11px; }
+.file-warn { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
 .x { background: transparent; padding: 2px 8px; font-size: 12px; }
 .messages { flex: 1; overflow-y: auto; padding: 16px; }
 /* Colonne de lecture centrée (confort de lecture, style Claude Desktop) */

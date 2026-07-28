@@ -118,14 +118,14 @@
           aria-labelledby="tab-documents"
           tabindex="0"
         >
-          <FileExplorer @file-selected="onFileSelected" />
+          <FileExplorer />
         </div>
       </aside>
       <section
         class="content"
         aria-label="Conversation"
       >
-        <ChatPanel :file-context="currentFile" />
+        <ChatPanel />
       </section>
     </main>
 
@@ -149,7 +149,6 @@ import logoUrl from './assets/logo-mark.png'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
-const currentFile = ref(null)
 const settingsMenu = ref(null)
 
 const device = computed(() => settings.data.compute_device || 'gpu')
@@ -183,8 +182,6 @@ function onTabKeydown(e) {
   sideTab.value = sideTabs[next].id
   document.getElementById(`tab-${sideTabs[next].id}`)?.focus()
 }
-
-function onFileSelected(file) { currentFile.value = file }
 
 async function setDevice(d) {
   if (settings.data.compute_device === d) return

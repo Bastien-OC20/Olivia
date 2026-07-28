@@ -11,9 +11,18 @@ from threading import RLock
 # Modèles recommandés selon le périphérique de calcul.
 #   gpu : cible RTX 5060 8 Go (voir README) — modèles quantifiés Q4_K_M
 #   cpu : petits modèles qui restent fluides sans carte graphique
+#
+# Mistral 7B Instruct Q4_K_M est mis en tête sur GPU : modèle européen sous
+# licence Apache 2.0, cohérent avec le positionnement du produit. Réserve mesurée
+# à l'usage : sur de la rédaction administrative française, il adopte un registre
+# plus familier que qwen3 (« Merci et cordialement » là où qwen3 produit
+# « Veuillez agréer… »). qwen3 reste donc disponible juste derrière.
+# Sur CPU, un modèle 7B reste trop lent : qwen3:4b garde la première place.
 DEVICE_MODELS = {
-    "gpu": ["qwen3:8b", "qwen2.5-coder:7b", "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-    "cpu": ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
+    "gpu": ["mistral:7b-instruct-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
+            "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
+    "cpu": ["qwen3:4b", "mistral:7b-instruct-q4_K_M", "qwen3:1.7b",
+            "phi4-mini:3.8b", "gemma2:2b"],
 }
 
 DEFAULTS = {
@@ -26,28 +35,38 @@ DEFAULTS = {
     "simple_mode": True,              # UI épurée par défaut (utilisatrice non technique)
     "search_provider": "duckduckgo",
     "searxng_url": "http://localhost:8888",
+    # Restreint la recherche web aux domaines officiels français (voir
+    # OFFICIAL_DOMAINS dans search.py). Désactivé par défaut : c'est un mode
+    # volontairement plus restrictif, pas le comportement standard.
+    "search_official_only": False,
     # Vide = repli sur la variable d'env BRAVE_API_KEY (compatibilité).
     "search_brave_api_key": "",
+    # Reconnaissance de caractères (OCR) sur les documents scannés et les images.
+    # Activée par défaut : désactivée, la fonction serait invisible pour une
+    # utilisatrice non technique, qui n'irait jamais la chercher dans les
+    # réglages — et un PDF scanné resterait introuvable sans qu'elle sache
+    # pourquoi. Le coût est borné (8 pages par document, 20 s, 2 traitements
+    # simultanés au plus), il n'est payé QUE sur les documents sans couche
+    # texte, le résultat est mis en cache sur disque, et si le moteur n'est pas
+    # installé tout se comporte exactement comme avant.
+    "ocr_enabled": True,
+    # Chemin d'un Tesseract installé ailleurs. Vide = moteur portable livré dans
+    # le dossier tesseract/ de l'application, sinon celui trouvé dans le PATH.
+    "ocr_tesseract_path": "",
     # Liste vide = utiliser le défaut (variable d'env FS_ROOT, sinon ~/Documents).
     # Ne pas pré-remplir : une liste non vide prendrait le pas sur l'env.
     "fs_roots": [],
     "privacy_consent": False,          # RGPD : consentement au stockage local
     "connectors": {
+        # Uniquement des connecteurs qui fonctionnent réellement. Les squelettes
+        # (OAuth Gmail/Outlook, École Directe, Service-Public) ont été retirés.
+        # Les clés correspondantes qui traîneraient dans un settings.json existant
+        # sont simplement conservées et ignorées : _merge n'efface rien.
         "imap": {"enabled": False, "label": "Boîte pro", "host": "", "user": "",
                  "password": "", "folder": "INBOX"},
-        "gmail_oauth": {"enabled": False, "client_id": "", "client_secret_path": ""},
-        "outlook_oauth": {"enabled": False, "client_id": "", "tenant_id": ""},
         "calendar_ics": {"enabled": False, "path": ""},
         "obsidian": {"enabled": False, "vault_path": ""},
         "notion": {"enabled": False, "api_token": ""},
-        # --- Outils métier (scaffold honnête : voir connectors/business_tools.py) ---
-        "ecole_directe": {"enabled": False, "base_url": "https://api.ecoledirecte.com",
-                          "username": "", "password": ""},
-        "service_public": {
-            "enabled": False, "label": "Service-Public / gouv.fr",
-            "base_url": "https://www.service-public.fr", "client_id": "",
-            "note": "FranceConnect nécessite un enregistrement partenaire officiel",
-        },
     },
 }
 

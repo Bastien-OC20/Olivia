@@ -15,7 +15,7 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 - Effectue des recherches web à la demande (bouton 🌐 du chat) et cite ses sources
   (SearXNG / Brave / DuckDuckGo, avec repli automatique entre moteurs)
 - Bascule le calcul **GPU ↔ CPU** et adapte les modèles recommandés
-- Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier, outils métier)
+- Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier)
 - Respecte les mesures techniques **RGPD** (export / suppression des données, consentement) et **RGAA/WCAG AA** (ARIA, clavier, contrastes)
 - Lanceur automatique (`.py` multi-OS + `.exe` Windows autonome via PyInstaller)
 
@@ -145,18 +145,26 @@ type de bus.
 | `-Replace` | Efface intégralement le dossier et repart à neuf. **Destructif** : conversations et réglages perdus, modèles recopiés (plusieurs minutes). |
 
 En mode `-Update`, la synchronisation est un miroir — les fichiers des anciennes
-versions sont supprimés — avec trois éléments sanctuarisés, car ils vivent sur le
+versions sont supprimés — avec quatre éléments sanctuarisés, car ils vivent sur le
 disque portable et n'existent pas dans le build :
 
 | Préservé | Pourquoi |
 |---|---|
 | `ai-webapp\ollama\` | moteur + modèles (~9 Go) : les réécraser à chaque déploiement serait absurde |
+| `ai-webapp\tesseract\` | moteur OCR (~190 Mo) |
 | `..\backend\conversations\` | l'historique de l'utilisatrice |
 | `..\backend\settings.json` | ses réglages, dont la clé du moteur de recherche |
 
-Le moteur et les modèles ne sont pas dans le build : ils sont copiés depuis
-`ollama/` du projet uniquement s'ils manquent à destination — première installation
-ou réinstallation.
+Les deux moteurs ne sont pas dans le build : ils sont copiés depuis `ollama/` et
+`tesseract/` du projet uniquement s'ils manquent à destination — première
+installation ou réinstallation.
+
+> PyInstaller est lancé **depuis la racine du projet** par le script : `build.spec`
+> désigne ses sources en relatif (`backend`, `frontend/dist`), et ces chemins sont
+> résolus par rapport au répertoire courant. Lancé d'ailleurs, il produit un
+> exécutable **sans interface** et déverse son build dans le mauvais dossier — panne
+> silencieuse constatée en conditions réelles. Le script vérifie désormais que
+> l'interface est bien embarquée et échoue sinon.
 
 Deux garde-fous refusent d'écrire au mauvais endroit : lecteur absent (disque non
 branché), et dossier non vide qui ne ressemble pas à une installation Olivia —
@@ -241,6 +249,69 @@ les réglages avancés.
 > et sans récursion. Tout le reste (`/api/fs/list`, `read`, `preview`, `download`,
 > `upload`) reste strictement borné aux dossiers configurés par `safe_path()`.
 
+## 🔎 Retrouver une information dans ses documents
+
+Onglet **📁 Documents**, champ de recherche. On écrit **simplement les mots à
+retrouver** — ni regex, ni casse, ni accents à respecter : « eleve » trouve « élève ».
+
+La recherche lit **à l'intérieur** des fichiers : Word (y compris le contenu des
+tableaux), Excel (toutes les feuilles), PDF, CSV et texte. Les résultats sont groupés
+par document avec des extraits, et chacun peut être **ajouté à la conversation** —
+plusieurs à la fois. Olivia s'appuie alors dessus et précise de quel document vient
+chaque information.
+
+Le contexte d'un modèle local étant limité, ce qui est transmis est borné (8 000
+caractères pour un document seul, 24 000 au total, 10 documents au maximum). **Toute
+coupe est signalée** dans le bandeau par une mention « ⚠️ tronqué » : Olivia ne doit
+jamais répondre sur un extrait partiel sans que cela se voie.
+
+Un dossier volumineux est exploré dans des limites de temps et de nombre de fichiers ;
+quand elles se déclenchent, l'interface indique que le résultat est partiel.
+
+### 🔍 Documents scannés — reconnaissance de caractères (OCR)
+
+Un PDF passé au scanner ou reçu par fax est fait d'**images** : il n'y a aucun texte
+à extraire, et sans OCR le document resterait introuvable. Olivia détecte ces
+documents et les fait lire par **Tesseract**, en local, en français.
+
+Concerne les PDF sans couche texte et les images (`.png`, `.jpg`, `.tif`…). Un PDF
+qui contient déjà du texte n'est **jamais** envoyé à l'OCR : ce serait payer plusieurs
+secondes pour rien.
+
+- **Traitement local**, en sous-processus : aucune donnée ne sort de la machine.
+- **Résultat mis en cache** sur disque (`(chemin, mtime, taille)`) : compter environ
+  1,5 s par page à la première lecture, puis quasi instantané.
+- **Bornes** : 8 pages par document, 20 s, 2 reconnaissances simultanées. Un PDF de
+  300 pages ne bloquera pas une recherche ; quand une borne coupe, c'est signalé.
+- Les résultats issus de l'OCR sont **marqués dans l'interface** — une transcription
+  automatique n'est jamais fiable à 100 %, et il faut le savoir avant de recopier une
+  date ou un numéro de circulaire dans un courrier officiel.
+
+Réglages dans **Paramètres → Documents** : activation, état du moteur, et chemin
+d'un Tesseract installé ailleurs.
+
+**Installation du moteur** — il n'est pas fourni par `pip` :
+
+```powershell
+# Build Windows de référence : https://github.com/UB-Mannheim/tesseract
+# Installer, puis copier dans le projet le binaire, ses DLL et tessdata\ :
+#   D:\Olivia\tesseract\tesseract.exe
+#   D:\Olivia\tesseract\tessdata\fra.traineddata
+```
+
+Le français (`fra.traineddata`, ~14 Mo) vient du dépôt officiel
+`tesseract-ocr/tessdata` : l'installation par défaut ne pose que l'anglais.
+Le dossier `tesseract/` (~190 Mo) est **ignoré par Git**, et
+`deploy-portable.ps1` le copie sur le disque portable comme il le fait pour Ollama.
+
+> **Sans moteur installé, rien ne casse** : les documents scannés restent
+> consultables à l'écran, ils ne sortent simplement pas dans les recherches, et
+> Paramètres → Documents l'indique clairement.
+>
+> ⚠️ **Limites réelles** : un document manuscrit, une page très inclinée ou une
+> photocopie de mauvaise qualité donneront un texte partiel ou faux. L'OCR aide à
+> *retrouver* un document, il ne remplace pas sa lecture.
+
 ## 📎 Fichiers : import, téléchargement, prévisualisation
 
 - **Importer** : bouton « ⬆ Importer un fichier » dans l'explorateur (déposé sous `_uploads/`
@@ -262,14 +333,35 @@ le nombre d'e-mails **non lus** (rafraîchi toutes les 60 s).
 |---|---|---|
 | **IMAP (boîte pro)** | ✅ Fonctionnel + notifications non-lus | Serveur + email + mot de passe d'application |
 | **Calendrier .ics** | ✅ Fonctionnel | Chemin d'un fichier .ics exporté |
-| **OAuth Gmail / Outlook** | 🟡 Squelette | client_id / client_secret / tenant_id |
 | **Obsidian / Notion** | 🟡 Squelette | Chemin du coffre / token |
-| **École Directe** (outil métier) | 🟡 Squelette | Identifiant/mot de passe — ⚠️ pas d'API publique officielle |
-| **Service-Public / gouv.fr** (outil métier) | 🟡 Squelette | ⚠️ FranceConnect exige une habilitation partenaire officielle |
 
-> **Honnêteté technique** : École Directe et FranceConnect n'ont pas d'intégration « clé en
-> main ». Ces connecteurs valident la configuration et exposent un statut clair, mais l'appel
-> réel doit être branché par vos soins (voir `backend/connectors/business_tools.py`).
+### Google Drive, OneDrive : pas de connecteur, et c'est voulu
+
+Ces deux services **se synchronisent déjà dans un dossier local** du poste. Il suffit
+de désigner ce dossier via **Documents → Parcourir** : Olivia y accède comme à
+n'importe quel dossier de travail. Aucune autorisation à demander, rien à configurer.
+
+C'est aussi ce qui évite deux impasses réelles :
+
+- **Google** — lire les mails est un *scope restreint*. Hors application vérifiée, les
+  jetons expirent **tous les 7 jours** : l'utilisatrice devrait se reconnecter chaque
+  semaine. La vérification impose un audit de sécurité payant.
+- **Microsoft** — Graph est techniquement plus simple, mais dans un lycée le tenant
+  appartient à l'académie : le **consentement d'un administrateur** est requis.
+
+Pour le courrier, **IMAP** est le connecteur réellement opérationnel, et il est accepté
+par la plupart des messageries académiques (avec un mot de passe d'application).
+
+### Connecteurs retirés
+
+Les squelettes **OAuth Gmail/Outlook**, **École Directe** et **Service-Public /
+FranceConnect** ont été supprimés de l'interface et du code. Visibles dans les
+réglages, ils laissaient croire à des fonctionnalités disponibles alors qu'aucun
+appel réel n'existait derrière. École Directe n'expose d'ailleurs pas d'API publique
+officielle, et FranceConnect exige une habilitation partenaire délivrée par l'État.
+
+Les clés correspondantes qui subsisteraient dans un `settings.json` existant sont
+simplement ignorées : la fusion des paramètres n'efface rien.
 
 ## 🔒 RGPD — vos données
 
@@ -332,6 +424,31 @@ depuis **Paramètres → Recherche web** (champ + bouton « 🔍 Tester »).
 | **SearXNG** | Docker — voir ci-dessous | Élevée, et 100 % auto-hébergé |
 | **Brave Search** | Une clé d'API, collée dans **Paramètres → Recherche web** | Élevée, **sans Docker** |
 | **DuckDuckGo** | Aucun | Moyenne (scraping HTML, bloqué après quelques requêtes rapprochées) |
+
+### Mode « sources officielles »
+
+**Paramètres → Recherche web → « Privilégier les sites officiels »** (désactivé par
+défaut) restreint la recherche aux domaines de l'administration française :
+`education.gouv.fr`, `eduscol.education.fr`, `legifrance.gouv.fr`, `service-public.fr`,
+`gouv.fr`, `onisep.fr`.
+
+Utile pour les questions de règle ou de procédure, où une réponse fondée sur un forum
+ou un site commercial est pire que pas de réponse.
+
+Le mécanisme repose sur **deux barrières**, et la seconde est la vraie garantie :
+
+1. la requête envoyée au moteur est complétée d'une restriction `site:` ;
+2. les résultats reçus sont **refiltrés par domaine** — rien ne garantit qu'un moteur
+   honore `site:`, et le filtre rejette aussi les domaines sosies du type
+   `education.gouv.fr.exemple.com`.
+
+La demande est volontairement élargie avant filtrage : sans cela, sur 5 résultats
+demandés il n'en resterait qu'un ou deux après tri.
+
+**Aucun repli silencieux** : si aucune source officielle ne répond, Olivia renvoie une
+liste vide et le dit, plutôt que de proposer un lien non officiel. En contrepartie, une
+question hors du champ administratif remonte des liens officiels mais hors sujet — le
+modèle est instruit de signaler que les résultats ne permettent pas de répondre.
 
 ### Repli automatique entre moteurs
 
@@ -410,12 +527,13 @@ ai-webapp/
 │   ├── settings.py        ← persistance JSON + CPU/GPU + modèles par périphérique
 │   ├── conversations.py   ← historique : un JSON par conversation, écriture atomique
 │   ├── search.py          ← recherche web pluggable + cascade de repli entre moteurs
-│   ├── documents.py       ← prévisualisation txt/csv/xlsx/docx/img/pdf
+│   ├── documents.py       ← prévisualisation + extraction de texte (docx/xlsx/pdf/csv)
+│   ├── docsearch.py       ← recherche en langage courant dans les documents
+│   ├── ocr.py             ← reconnaissance de caractères (documents scannés)
 │   ├── connectors/
 │   │   ├── __init__.py
 │   │   ├── imap_client.py      ← IMAP + comptage des non-lus
-│   │   ├── oauth_providers.py  ← stubs OAuth Gmail/Outlook + lecteur .ics
-│   │   └── business_tools.py   ← stubs École Directe + Service-Public/gouv.fr
+│   │   └── oauth_providers.py  ← lecteur de calendrier .ics
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/

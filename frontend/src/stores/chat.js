@@ -1,10 +1,52 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 // Recherche web : nombre de résultats injectés et longueur max de la requête
 // envoyée au moteur (une demande de chat peut être un paragraphe entier).
 const WEB_SEARCH_LIMIT = 5
 const WEB_QUERY_MAX = 300
+
+// ---------- Contexte documentaire ----------
+// Un petit modèle local n'a qu'une fenêtre de contexte limitée : on borne donc
+// ce qui est injecté, par document ET au total. Quand un document est coupé,
+// l'interface DOIT le dire (voir `fileContextPlan`) — Olivia ne doit jamais
+// répondre sur un extrait partiel sans que cela se voie.
+const DOC_MAX = 10                 // nombre de documents dans la conversation
+const DOC_CHARS_MAX = 8000         // par document (un seul document : inchangé)
+const DOC_CHARS_TOTAL = 24000      // budget global, tous documents confondus
+const DOC_CHARS_MIN = 1200         // part plancher pour qu'un document reste utile
+
+/** Répartit le budget de contexte entre les documents retenus. */
+function planDocuments(docs) {
+  if (!docs.length) return []
+  const part = Math.max(DOC_CHARS_MIN, Math.floor(DOC_CHARS_TOTAL / docs.length))
+  const budget = Math.min(DOC_CHARS_MAX, part)
+  return docs.map((d) => {
+    const full = d.content || ''
+    const kept = full.slice(0, budget)
+    return {
+      path: d.path,
+      name: d.name || d.path,
+      chars: full.length,
+      keptChars: kept.length,
+      content: kept,
+      // `sourceTruncated` : le document était déjà trop long côté serveur.
+      truncated: kept.length < full.length || !!d.sourceTruncated,
+    }
+  })
+}
+
+/** Bloc de contexte injecté avant la demande : un document par section. */
+function withDocuments(plan) {
+  const blocs = plan.map((d) => {
+    const fin = d.truncated ? '\n[… suite du document non transmise …]' : ''
+    return `--- Document : ${d.name} (${d.path}) ---\n${d.content}${fin}`
+  }).join('\n\n')
+  const pluriel = plan.length > 1 ? 's' : ''
+  return `Voici le contenu de ${plan.length} document${pluriel} fourni${pluriel} par ` +
+    `l'utilisatrice. Appuie-toi dessus si c'est pertinent, et précise de quel ` +
+    `document vient chaque information.\n\n${blocs}`
+}
 
 async function fetchWebResults(query, signal) {
   const r = await fetch('/api/search', {
@@ -46,6 +88,38 @@ export const useChatStore = defineStore('chat', () => {
   const currentModel = ref('')
   const availableModels = ref([])
   const abortController = ref(null)
+
+  // Documents joints à la conversation (plusieurs, contrairement à l'ancien
+  // « contexte actif » qui n'en acceptait qu'un).
+  const fileContexts = ref([])
+  const fileContextPlan = computed(() => planDocuments(fileContexts.value))
+  const fileContextNotice = ref('')
+
+  /** Ajoute un document au contexte (sans doublon). Renvoie false si refusé. */
+  function addFileContext(doc) {
+    if (!doc || !doc.path) return false
+    if (fileContexts.value.some((d) => d.path === doc.path)) {
+      fileContextNotice.value = `« ${doc.name || doc.path} » est déjà dans la conversation.`
+      return true
+    }
+    if (fileContexts.value.length >= DOC_MAX) {
+      fileContextNotice.value = `Maximum ${DOC_MAX} documents à la fois — retirez-en un.`
+      return false
+    }
+    fileContexts.value.push(doc)
+    fileContextNotice.value = ''
+    return true
+  }
+
+  function removeFileContext(path) {
+    fileContexts.value = fileContexts.value.filter((d) => d.path !== path)
+    fileContextNotice.value = ''
+  }
+
+  function clearFileContexts() {
+    fileContexts.value = []
+    fileContextNotice.value = ''
+  }
 
   // Historique des conversations (persistées côté backend).
   const conversations = ref([])
@@ -188,7 +262,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function send(userMessage, fileContext = null, useWebSearch = false) {
+  async function send(userMessage, useWebSearch = false) {
     if (isStreaming.value || !currentModel.value) return
     messages.value.push({ role: 'user', content: userMessage })
     isStreaming.value = true
@@ -227,13 +301,11 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
 
-    // Contexte RAG : si un fichier est sélectionné, on injecte son contenu (tronqué à 8 Ko)
+    // Contexte documentaire : tous les documents joints, dans la limite du budget.
     const ollamaMessages = []
-    if (fileContext) {
-      ollamaMessages.push({
-        role: 'user',
-        content: `Voici le contenu du fichier "${fileContext.path}". Réponds en t'appuyant dessus si pertinent :\n\n\`\`\`\n${(fileContext.content || '').slice(0, 8000)}\n\`\`\``
-      })
+    const plan = fileContextPlan.value
+    if (plan.length) {
+      ollamaMessages.push({ role: 'user', content: withDocuments(plan) })
     }
     for (const m of messages.value) {
       if (m === assistantMsg) continue
@@ -306,6 +378,8 @@ export const useChatStore = defineStore('chat', () => {
 
   return { messages, isStreaming, isSearching, currentModel, availableModels,
            conversations, currentId, historyUnavailable,
+           fileContexts, fileContextPlan, fileContextNotice,
+           addFileContext, removeFileContext, clearFileContexts,
            loadModels, send, stop, clear,
            loadConversations, openConversation, newConversation,
            renameConversation, deleteConversation }

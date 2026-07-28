@@ -10,6 +10,11 @@ Retourne une liste uniforme de {title, url, snippet}.
 provider demandé puis, s'il échoue ou ne renvoie rien, les autres moteurs
 réellement disponibles — pensée pour les machines sans Docker (SearXNG
 indisponible) où DuckDuckGo reste parfois bloqué par sa protection anti-robot.
+
+Mode « Recherche officielle uniquement » (settings.search_official_only) :
+restreint la recherche aux domaines officiels français listés dans
+OFFICIAL_DOMAINS (education.gouv.fr, Légifrance, Service-Public…). Voir
+`_restrict_query_to_official()` et `_is_official_url()`.
 """
 import os
 import re
@@ -18,9 +23,23 @@ import httpx
 from html import unescape
 from urllib.parse import unquote
 
+from .settings import settings as _app_settings
+
 # Ordre de tentative par défaut de la cascade (le provider demandé est
 # toujours essayé en premier, puis les autres dans cet ordre).
 _ALL_PROVIDERS = ("searxng", "duckduckgo", "brave")
+
+# Domaines considérés comme sources officielles françaises pour le mode
+# « Recherche officielle uniquement » (Paramètres → Recherche web). Liste
+# volontairement centralisée ici pour rester facile à ajuster.
+OFFICIAL_DOMAINS = (
+    "education.gouv.fr",
+    "eduscol.education.fr",
+    "legifrance.gouv.fr",
+    "service-public.fr",
+    "gouv.fr",
+    "onisep.fr",
+)
 
 # DuckDuckGo bloque plus volontiers les clients qui s'annoncent comme robots
 # (l'ancien "Mozilla/5.0 (compatible; LocalAI/2.0)" en est un exemple type).
@@ -47,6 +66,43 @@ def _unwrap_ddg_url(href: str) -> str:
     if m:
         return unquote(m.group(1))
     return f"https:{href}" if href.startswith("//") else href
+
+
+def _restrict_query_to_official(query: str) -> str:
+    """Ajoute une restriction `site:` aux domaines officiels, groupés en OR.
+
+    Cette syntaxe (`(site:a OR site:b OR ...)`) est comprise à la fois par
+    DuckDuckGo et par les moteurs sous-jacents de SearXNG qui supportent
+    l'opérateur `site:` (Google notamment) — SearXNG se contente de
+    répercuter la requête telle quelle. Brave Search ne propose PAS de
+    paramètre d'API dédié à la restriction de domaine malgré ce qu'on
+    pourrait attendre d'une API moderne (vérifié dans sa documentation) : il
+    comprend le même opérateur `site:` inclus dans le texte de la requête,
+    donc la même syntaxe s'applique aux trois moteurs.
+    """
+    sites = " OR ".join(f"site:{d}" for d in OFFICIAL_DOMAINS)
+    return f"{query} ({sites})"
+
+
+def _result_domain(url: str) -> str:
+    """Extrait l'hôte d'une URL de résultat, sans le préfixe `www.`."""
+    m = re.match(r"^https?://([^/]+)", url or "")
+    host = m.group(1).lower() if m else ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _is_official_url(url: str) -> bool:
+    """Vrai si l'URL appartient à un domaine officiel (ou un sous-domaine).
+
+    Sert de garde-fou indépendant de la restriction `site:` envoyée au
+    moteur : certains moteurs sous-jacents de SearXNG ignorent cet
+    opérateur et renverraient sinon des résultats non officiels sans que
+    personne ne s'en aperçoive.
+    """
+    domain = _result_domain(url)
+    if not domain:
+        return False
+    return any(domain == d or domain.endswith("." + d) for d in OFFICIAL_DOMAINS)
 
 
 async def search_searxng(query: str, base_url: str = "http://localhost:8888", limit: int = 5):
@@ -197,11 +253,24 @@ async def web_search(provider: str, query: str, **kwargs) -> tuple[str, list[dic
     """Cascade de recherche : essaie `provider`, puis les autres moteurs
     réellement disponibles si celui-ci échoue ou ne renvoie rien.
 
-    kwargs reconnus : `limit`, `searxng_url`, `brave_api_key`.
+    kwargs reconnus : `limit`, `searxng_url`, `brave_api_key`, `official_only`.
+
+    `official_only` restreint la recherche aux domaines officiels français
+    (OFFICIAL_DOMAINS) : la requête envoyée à chaque moteur est complétée
+    d'une restriction `site:`, et les résultats sont en plus filtrés après
+    coup pour ignorer tout ce qui n'appartient pas à ces domaines (certains
+    moteurs sous-jacents de SearXNG n'honorent pas cet opérateur). Si
+    `official_only` n'est pas fourni explicitement, il est lu depuis les
+    paramètres persistés (`search_official_only`) — c'est le cas normal
+    quand l'appel vient de la route /api/search, qui ne le transmet pas.
 
     Renvoie `(provider_effectif, résultats)` — le provider qui a réellement
-    répondu, pas forcément celui demandé. Lève RuntimeError si tous les
-    moteurs disponibles ont échoué, avec le détail de chaque tentative.
+    répondu, pas forcément celui demandé. Un résultat vide (y compris,
+    en mode officiel, l'absence de toute source officielle) n'est PAS une
+    erreur : on ne se rabat jamais silencieusement sur des résultats non
+    officiels, l'absence de résultat est renvoyée telle quelle pour que ce
+    soit visible. Lève RuntimeError seulement si tous les moteurs
+    disponibles ont échoué (panne réelle), avec le détail de chaque tentative.
     """
     if provider not in _ALL_PROVIDERS:
         raise ValueError(f"Provider inconnu : {provider}")
@@ -213,11 +282,23 @@ async def web_search(provider: str, query: str, **kwargs) -> tuple[str, list[dic
     # existantes qui la définissaient déjà).
     brave_key = kwargs.get("brave_api_key") or os.getenv("BRAVE_API_KEY", "")
 
+    official_only = kwargs.get("official_only")
+    if official_only is None:
+        official_only = bool(_app_settings.get().get("search_official_only", False))
+
+    query_to_send = _restrict_query_to_official(query) if official_only else query
+
     # Le provider demandé passe en premier, puis les autres moteurs, dans
     # l'ordre par défaut. Brave n'est tenté que si une clé est disponible :
     # inutile d'ajouter une tentative vouée à l'échec à la cascade.
     order = [provider] + [p for p in _ALL_PROVIDERS if p != provider]
     order = [p for p in order if p != "brave" or brave_key]
+
+    # En mode officiel, le filtrage a lieu APRÈS la réponse du moteur : demander
+    # `limit` résultats n'en laisserait qu'une poignée une fois le tri fait. On
+    # élargit donc la demande pour retrouver le nombre voulu de sources
+    # officielles, avant de retailler à `limit`.
+    fetch_limit = limit * 4 if official_only else limit
 
     errors = []
     # Moteur ayant répondu correctement mais sans résultat : une requête sans
@@ -227,19 +308,21 @@ async def web_search(provider: str, query: str, **kwargs) -> tuple[str, list[dic
     for p in order:
         try:
             if p == "searxng":
-                results = await search_searxng(query, searxng_url, limit)
+                results = await search_searxng(query_to_send, searxng_url, fetch_limit)
             elif p == "duckduckgo":
-                results = await search_duckduckgo(query, limit)
+                results = await search_duckduckgo(query_to_send, fetch_limit)
             else:
-                results = await search_brave(query, brave_key, limit)
+                results = await search_brave(query_to_send, brave_key, fetch_limit)
         except Exception as e:
             errors.append(f"{p} : {e}")
             continue
+        if official_only:
+            results = [r for r in results if _is_official_url(r.get("url", ""))][:limit]
         if results:
             return p, results
         if empty_provider is None:
             empty_provider = p
-        errors.append(f"{p} : aucun résultat")
+        errors.append(f"{p} : aucun résultat" + (" officiel" if official_only else ""))
 
     if empty_provider is not None:
         return empty_provider, []

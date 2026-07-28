@@ -79,6 +79,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $dist = Join-Path $root 'dist\ai-webapp'
 $ollamaSource = Join-Path $root 'ollama'
+$tesseractSource = Join-Path $root 'tesseract'
 $chrono = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($Update -and $Replace) {
@@ -174,6 +175,10 @@ if (-not $ollamaSource -or -not (Test-Path $ollamaSource)) {
     Write-Host "  Attention : '$ollamaSource' est absent du projet." -ForegroundColor Yellow
     Write-Host '  Une premiere installation ne pourra pas embarquer le moteur.' -ForegroundColor Yellow
 }
+if (-not (Test-Path $tesseractSource)) {
+    Write-Host "  Attention : '$tesseractSource' est absent du projet." -ForegroundColor Yellow
+    Write-Host '  Les PDF scannes ne seront pas cherchables sur le disque portable.' -ForegroundColor Yellow
+}
 
 if ([string]::IsNullOrWhiteSpace($Destination)) {
     $Destination = Select-Destination
@@ -267,8 +272,21 @@ if ($SkipExe) {
         throw "Venv backend introuvable ($python). Lancez d'abord : python launch.py"
     }
     $env:PYTHONIOENCODING = 'utf-8'   # console Windows cp1252 : evite un plantage
-    & $python -m PyInstaller (Join-Path $root 'build.spec') --clean --noconfirm
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller a echoue (code $LASTEXITCODE)." }
+    # PyInstaller DOIT etre lance depuis la racine : build.spec designe ses
+    # sources en relatif ('backend', 'frontend/dist'), et ces chemins sont
+    # resolus par rapport au repertoire COURANT, pas a l'emplacement du .spec.
+    # Lance d'ailleurs, il produit un exe sans interface et deverse son build
+    # dans le dossier courant — panne silencieuse, constatee en conditions
+    # reelles : la synchronisation copiait alors l'ancien build sans rien signaler.
+    Push-Location $root
+    try {
+        & $python -m PyInstaller 'build.spec' --clean --noconfirm
+        if ($LASTEXITCODE -ne 0) { throw "PyInstaller a echoue (code $LASTEXITCODE)." }
+    } finally { Pop-Location }
+    if (-not (Test-Path (Join-Path $dist '_internal\frontend\dist\index.html'))) {
+        throw ("Le binaire produit n'embarque pas l'interface. Verifiez que " +
+               "frontend\dist existe (npm run build) et relancez.")
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $app | Out-Null
@@ -292,6 +310,26 @@ if (Test-Path (Join-Path $ollamaDest 'ollama.exe')) {
     Write-Host '  Olivia demarrera, mais ne pourra pas repondre sans moteur.' -ForegroundColor Yellow
 }
 
+# --- 3 bis. Moteur de reconnaissance de caracteres (OCR) -------------------
+# Meme logique que pour Ollama : binaire portable absent du build, copie depuis
+# le projet uniquement s'il manque a destination. Il doit lui aussi atterrir
+# DANS ai-webapp\, backend/ocr.py le cherchant a cote de l'executable.
+# Sans lui, les PDF scannes restent introuvables dans la recherche — mais tout
+# le reste fonctionne : son absence n'est pas bloquante.
+$tesseractDest = Join-Path $app 'tesseract'
+$exeOcr = if ($IsLinux -or $IsMacOS) { 'tesseract' } else { 'tesseract.exe' }
+if (Test-Path (Join-Path $tesseractDest $exeOcr)) {
+    Write-Etape 'Moteur OCR : deja present, conserve'
+} elseif (Test-Path (Join-Path $tesseractSource $exeOcr)) {
+    $taille = Get-TailleGo $tesseractSource
+    Write-Etape "Copie du moteur OCR ($taille Go)"
+    & robocopy $tesseractSource $tesseractDest /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy (tesseract) a echoue (code $LASTEXITCODE)." }
+} else {
+    Write-Etape 'Moteur OCR : absent du projet, etape ignoree'
+    Write-Host '  Les PDF scannes ne seront pas cherchables sur ce disque.' -ForegroundColor Yellow
+}
+
 # --- 4. Application --------------------------------------------------------
 Write-Etape "Synchronisation de l'application vers $app"
 
@@ -309,6 +347,7 @@ if ($installExistante) {
 # les donnees du disque portable, absentes du build (voir en-tete).
 $exclusionsDossiers = @(
     $ollamaDest,
+    $tesseractDest,
     $dossierConv
 )
 $exclusionsFichiers = @(
@@ -329,6 +368,8 @@ $controles = [ordered]@{
     'interface buildee' = Join-Path $app '_internal\frontend\dist\index.html'
     'moteur ollama'     = Join-Path $ollamaDest 'ollama.exe'
     'modeles'           = Join-Path $ollamaDest 'models'
+    'moteur OCR'        = Join-Path $tesseractDest $exeOcr
+    'langue OCR (fra)'  = Join-Path $tesseractDest 'tessdata\fra.traineddata'
     'lanceur (.bat)'    = Join-Path $Destination 'Lancer-Olivia.bat'
 }
 $manquants = @()

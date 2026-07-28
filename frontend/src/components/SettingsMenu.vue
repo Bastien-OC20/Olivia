@@ -112,23 +112,6 @@
                 (<code>num_gpu=0</code>). Modifiable aussi depuis la barre du haut.
               </p>
             </div>
-            <div
-              v-if="!simple"
-              class="field"
-            >
-              <label for="f-fsroots">📁 Dossiers de documents accessibles</label>
-              <textarea
-                id="f-fsroots"
-                v-model="fsRootsText"
-                rows="3"
-                placeholder="C:\Users\vous\Documents"
-              />
-              <p class="hint">
-                Un dossier par ligne. Ajoutez un libellé après une barre verticale :
-                C:\Dossier | Mes documents. Olivia ne peut lire et écrire que dans ces dossiers.
-                Laissez vide pour utiliser Documents. Appliqué après Enregistrer.
-              </p>
-            </div>
             <div class="field">
               <label for="f-temp">Température : {{ Number(settings.data.temperature).toFixed(2) }}</label>
               <input
@@ -151,6 +134,77 @@
                 rows="5"
                 placeholder="Laisse vide pour utiliser uniquement les directives de style/ton."
               />
+            </div>
+          </section>
+
+          <!-- DOCUMENTS -->
+          <section
+            v-if="tab === 'documents'"
+            aria-label="Documents"
+          >
+            <div
+              v-if="!simple"
+              class="field"
+            >
+              <label for="f-fsroots">📁 Dossiers de documents accessibles</label>
+              <textarea
+                id="f-fsroots"
+                v-model="fsRootsText"
+                rows="3"
+                placeholder="C:\Users\vous\Documents"
+              />
+              <p class="hint">
+                Un dossier par ligne. Ajoutez un libellé après une barre verticale :
+                C:\Dossier | Mes documents. Olivia ne peut lire et écrire que dans ces dossiers.
+                Laissez vide pour utiliser Documents. Appliqué après Enregistrer.
+              </p>
+            </div>
+
+            <h3>🔎 Documents scannés</h3>
+            <div class="field">
+              <label class="checkbox">
+                <input
+                  v-model="settings.data.ocr_enabled"
+                  type="checkbox"
+                >
+                Lire le texte des documents scannés et des images
+              </label>
+              <p class="hint">
+                Une circulaire passée au scanner ou un courrier reçu par fax est un
+                document fait d'images : sans cette option, son texte n'apparaît dans
+                aucune recherche. Olivia le déchiffre alors sur cette machine, sans
+                rien envoyer sur Internet. C'est plus lent la première fois (environ
+                une à trois secondes par page), puis le résultat est mémorisé.
+                La lecture automatique n'est jamais parfaite : les résultats obtenus
+                ainsi sont signalés par la mention « texte reconnu ».
+                Appliqué après <b>Enregistrer</b>.
+              </p>
+            </div>
+            <p
+              v-if="ocrState"
+              class="hint ocr-state"
+              aria-live="polite"
+            >
+              {{ ocrState.disponible ? '✅' : '⚠️' }} {{ ocrState.message }}
+              <template v-if="ocrState.chemin">
+                <br>
+                <code>{{ ocrState.chemin }}</code>
+              </template>
+            </p>
+            <div
+              v-if="!simple"
+              class="field"
+            >
+              <label for="f-ocr-path">Chemin du moteur de reconnaissance (facultatif)</label>
+              <input
+                id="f-ocr-path"
+                v-model="settings.data.ocr_tesseract_path"
+                placeholder="Laisser vide : moteur livré dans le dossier tesseract/"
+              >
+              <p class="hint">
+                Utile seulement si Tesseract est installé ailleurs sur le poste.
+                Olivia cherche d'abord le moteur livré avec elle, puis celui du système.
+              </p>
             </div>
           </section>
 
@@ -200,6 +254,25 @@
               <p class="hint">
                 Définissez la variable d'environnement
                 <code>BRAVE_API_KEY=votre-clé</code> avant de lancer le backend.
+              </p>
+            </div>
+
+            <div class="field">
+              <label class="checkbox">
+                <input
+                  v-model="settings.data.search_official_only"
+                  type="checkbox"
+                >
+                Privilégier les sites officiels (education.gouv.fr, Légifrance,
+                Service-Public…)
+              </label>
+              <p class="hint">
+                Limite la recherche aux sites de l'administration française
+                (education.gouv.fr, eduscol, Légifrance, Service-Public.fr, gouv.fr,
+                Onisep). Si aucun de ces sites n'a de réponse, Olivia l'indique
+                clairement au lieu de proposer un résultat non officiel. Prend effet
+                après <b>Enregistrer</b> — le bouton « 🔍 Tester » ci-dessous applique
+                ce réglage une fois enregistré.
               </p>
             </div>
 
@@ -308,55 +381,6 @@
               Production : lib <code>keyring</code> (coffre OS) prévue dans requirements.txt.
             </p>
 
-            <h3>🎓 Outil métier — École Directe</h3>
-            <label class="checkbox">
-              <input
-                v-model="settings.data.connectors.ecole_directe.enabled"
-                type="checkbox"
-              >
-              Activer École Directe
-            </label>
-            <div class="field">
-              <label>Identifiant</label>
-              <input
-                v-model="settings.data.connectors.ecole_directe.username"
-                autocomplete="off"
-              >
-            </div>
-            <div class="field">
-              <label>Mot de passe</label>
-              <input
-                v-model="settings.data.connectors.ecole_directe.password"
-                type="password"
-                autocomplete="off"
-              >
-            </div>
-            <p class="warn">
-              🟡 Squelette : École Directe n'a pas d'API publique officielle. L'appel réel
-              (API non officielle) reste à implémenter côté utilisateur.
-            </p>
-
-            <h3>🏛️ Outil métier — Service-Public / gouv.fr</h3>
-            <label class="checkbox">
-              <input
-                v-model="settings.data.connectors.service_public.enabled"
-                type="checkbox"
-              >
-              Activer Service-Public / gouv.fr
-            </label>
-            <div class="field">
-              <label>URL de base</label>
-              <input v-model="settings.data.connectors.service_public.base_url">
-            </div>
-            <div class="field">
-              <label>client_id (FranceConnect)</label>
-              <input v-model="settings.data.connectors.service_public.client_id">
-            </div>
-            <p class="warn">
-              🟡 Squelette : FranceConnect exige un enregistrement partenaire officiel
-              (habilitation + secrets délivrés par l'État).
-            </p>
-
             <h3>📅 Calendrier (.ics local)</h3>
             <label class="checkbox">
               <input
@@ -373,39 +397,11 @@
               >
             </div>
 
-            <h3>🔐 OAuth Gmail</h3>
-            <label class="checkbox">
-              <input
-                v-model="settings.data.connectors.gmail_oauth.enabled"
-                type="checkbox"
-              >
-              Activer Gmail OAuth
-            </label>
-            <div class="field">
-              <label>client_id</label>
-              <input v-model="settings.data.connectors.gmail_oauth.client_id">
-            </div>
-            <div class="field">
-              <label>Chemin de client_secret.json</label>
-              <input v-model="settings.data.connectors.gmail_oauth.client_secret_path">
-            </div>
-
-            <h3>🔐 OAuth Microsoft / Outlook</h3>
-            <label class="checkbox">
-              <input
-                v-model="settings.data.connectors.outlook_oauth.enabled"
-                type="checkbox"
-              >
-              Activer Outlook OAuth
-            </label>
-            <div class="field">
-              <label>client_id</label>
-              <input v-model="settings.data.connectors.outlook_oauth.client_id">
-            </div>
-            <div class="field">
-              <label>tenant_id</label>
-              <input v-model="settings.data.connectors.outlook_oauth.tenant_id">
-            </div>
+            <p class="hint">
+              💡 Google Drive et OneDrive ne nécessitent aucune connexion : ils se
+              synchronisent déjà dans un dossier de l'ordinateur. Désignez-le simplement
+              via <strong>Documents → Parcourir</strong>.
+            </p>
 
             <h3>📝 Obsidian</h3>
             <label class="checkbox">
@@ -518,6 +514,7 @@ const tab = ref('reasoning')
 const simple = computed(() => settings.data.simple_mode !== false)
 const allTabs = [
   { id: 'reasoning', label: 'Préférences', simple: true },
+  { id: 'documents', label: 'Documents', simple: true },
   { id: 'search', label: 'Recherche web', simple: false },
   { id: 'connectors', label: 'Connexions', simple: false },
   { id: 'privacy', label: 'Confidentialité', simple: true },
@@ -560,9 +557,36 @@ const privacyMsg = ref('')
 const modalEl = ref(null)
 const closeBtn = ref(null)
 
+// État du moteur de reconnaissance de caractères (onglet Documents). Le back-end
+// le calcule en inspectant le disque : présence du binaire, langues installées.
+// Rechargé à chaque ouverture ET après enregistrement, car le chemin du moteur
+// est lui-même un réglage : sans cela, l'utilisatrice corrigerait le chemin sans
+// jamais voir si sa correction a pris.
+const ocrState = ref(null)
+
+async function loadOcrState() {
+  try {
+    const r = await fetch('/api/ocr/status')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    ocrState.value = await r.json()
+  } catch (e) {
+    // Un back-end plus ancien n'expose pas cette route : on l'annonce sans
+    // casser l'affichage du reste des réglages.
+    ocrState.value = {
+      disponible: false,
+      chemin: '',
+      message: `État du moteur de reconnaissance indisponible (${e.message}).`,
+    }
+  }
+}
+
 // Accessibilité : au focus à l'ouverture de la modale
 watch(() => settings.open, async (o) => {
-  if (o) { await nextTick(); closeBtn.value?.focus() }
+  if (o) {
+    loadOcrState()
+    await nextTick()
+    closeBtn.value?.focus()
+  }
 })
 
 async function testSearch() {
@@ -620,6 +644,7 @@ async function save() {
     alert('Enregistrement impossible : ' + (result?.error || 'erreur inconnue'))
     return
   }
+  loadOcrState()   // le chemin du moteur a pu changer
   settings.hide()
 }
 

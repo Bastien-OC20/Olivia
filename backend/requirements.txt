@@ -8,6 +8,11 @@ python-multipart>=0.0.12
 ics>=0.7.2
 python-docx>=1.1
 openpyxl>=3.1
+pypdf>=4.0
+# Rasterisation des PDF scannés avant reconnaissance de caractères (voir ocr.py).
+# Choisi contre pdf2image : le moteur de rendu est embarqué dans la roue Python,
+# donc AUCUN binaire externe à installer (pdf2image exigerait Poppler).
+pypdfium2>=4.30
 # Optionnel (décommentez si vous branchez OAuth réel) :
 # google-auth>=2.35
 # google-auth-oauthlib>=1.2

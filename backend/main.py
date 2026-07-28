@@ -10,7 +10,8 @@ Routes principales :
   POST /api/chat                         : appel Ollama non-stream
   GET  /api/fs/list                      : liste un dossier (sandboxé)
   GET  /api/fs/read                      : lit un fichier texte (sandboxé, filtré)
-  GET  /api/fs/search                    : recherche regex dans un dossier
+  GET  /api/fs/text                      : texte brut d'un document (docx/xlsx/pdf/texte)
+  GET  /api/fs/search                    : recherche en langage courant (docx/xlsx/pdf/texte)
   GET  /api/fs/preview                   : prévisualisation (txt/csv/xlsx/docx/img/pdf)
   POST /api/fs/upload                    : upload d'un fichier (sandboxé, filtré)
   GET  /api/fs/download                  : téléchargement d'un fichier (sandboxé)
@@ -50,15 +51,13 @@ from pydantic import BaseModel
 from .settings import settings, style_directives
 from .search import web_search
 from . import documents
+from . import docsearch
+from . import ocr
 from . import conversations
 from .connectors import (
     read_inbox,
     unread_count,
-    gmail_list_messages,
-    outlook_list_messages,
     calendar_list_events,
-    ecole_directe_status,
-    service_public_status,
 )
 
 # ---------- Configuration runtime ----------
@@ -70,6 +69,11 @@ UPLOAD_SUBDIR = "_uploads"                       # RGPD : zone de données cré�
 MAX_FILE_SIZE = 1_000_000                         # 1 Mo pour la lecture texte
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024                # 25 Mo pour l'upload
 API_TOKEN = os.getenv("API_TOKEN", "")           # sécurité optionnelle (jeton local)
+
+# Connecteurs réellement implémentés. Sert de filtre : un settings.json créé par
+# une version antérieure peut contenir des clés de connecteurs depuis retirés
+# (OAuth Gmail/Outlook, École Directe, Service-Public) — elles sont ignorées.
+CONNECTEURS_SUPPORTES = {"imap", "calendar_ics", "obsidian", "notion"}
 
 ALLOWED_EXT = {".txt", ".md", ".py", ".js", ".ts", ".vue", ".json",
                ".yaml", ".yml", ".csv", ".html", ".css", ".log", ".sh"}
@@ -409,7 +413,10 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
         raise HTTPException(404, f"Dossier introuvable : {p}")
     if not p.is_dir():
         raise HTTPException(400, f"Pas un dossier : {p}")
-    idx = int(_R_PREFIX_RE.match(prefix).group(1))
+    m = _R_PREFIX_RE.match(prefix)
+    if not m:
+        raise HTTPException(400, f"Préfixe invalide : {prefix}")
+    idx = int(m.group(1))
     root_label = entries[idx][1] or root.name
     return {
         "root": str(root), "current": raw, "items": _list_dir_items(p, root, prefix),
@@ -443,6 +450,34 @@ async def fs_preview(path: str = Query(...)):
     result["path"] = rel
     result["name"] = p.name
     return result
+
+
+# Budget de texte injecté dans la conversation pour UN document. Au-delà, le
+# contenu est coupé et l'interface doit le dire (voir `truncated`).
+MAX_TEXT_CHARS = 60_000
+
+
+@app.get("/api/fs/text")
+def fs_text(path: str = Query(...)):
+    """Texte brut d'un document (Word, Excel, PDF, texte, CSV), pour la conversation.
+
+    Complète `/api/fs/preview`, qui produit un aperçu structuré destiné à
+    l'affichage : ici on veut le contenu lisible par le modèle.
+    """
+    p, root, prefix = safe_path(path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, f"Fichier introuvable : {p}")
+    if p.suffix.lower() not in documents.SEARCHABLE_EXT:
+        raise HTTPException(400, f"Ce type de fichier ne contient pas de texte : {p.suffix}")
+    content = documents.extract_text(p)
+    truncated = len(content) > MAX_TEXT_CHARS
+    return {
+        "path": _virtual_path(p, root, prefix),
+        "name": p.name,
+        "content": content[:MAX_TEXT_CHARS],
+        "truncated": truncated,
+        "empty": not content.strip(),
+    }
 
 
 @app.get("/api/fs/download")
@@ -499,13 +534,39 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     return {"path": _virtual_path(dest, root, prefix), "name": safe_name, "size": size}
 
 
-@app.get("/api/fs/search")
-async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
-    try:
-        pattern = re.compile(q, re.IGNORECASE)
-    except re.error:
-        raise HTTPException(400, "Motif regex invalide")
+def _iter_searchable_files(targets):
+    """Parcourt les dossiers autorisés et produit (chemin absolu, chemin virtuel).
 
+    Sécurité : `os.walk` ne suit pas les liens symboliques, et chaque fichier
+    retenu est en plus revérifié comme étant bien sous sa racine — un lien
+    pointant hors du périmètre ne peut donc pas être lu.
+    """
+    for search_dir, root, prefix in targets:
+        for dirpath, dirnames, filenames in os.walk(search_dir):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")
+                           and d.lower() not in docsearch.IGNORED_DIRS]
+            base = Path(dirpath)
+            for name in filenames:
+                fp = base / name
+                try:
+                    reel = fp.resolve()
+                    reel.relative_to(root)
+                except (OSError, ValueError):
+                    continue
+                yield fp, _virtual_path(fp, root, prefix)
+
+
+# Route volontairement synchrone (def et non async def) : l'extraction de texte
+# est un travail CPU/disque bloquant. FastAPI l'exécute alors dans son pool de
+# threads, ce qui évite de figer le reste de l'application pendant une recherche.
+@app.get("/api/fs/search")
+def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
+    """Recherche en langage courant dans le contenu des documents.
+
+    La requête est une phrase ordinaire (jamais une expression régulière) ;
+    la comparaison ignore la casse et les accents ; les résultats sont groupés
+    par document et classés par pertinence. Voir `docsearch.py`.
+    """
     raw = (path or "").strip()
     if raw == "":
         targets = [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots())]
@@ -515,33 +576,7 @@ async def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
             raise HTTPException(400, "Le chemin doit être un dossier")
         targets = [(p, root, prefix)]
 
-    results = []
-    truncated = False
-    for search_dir, root, prefix in targets:
-        if truncated:
-            break
-        for fp in search_dir.rglob("*"):
-            if not fp.is_file() or fp.suffix.lower() not in ALLOWED_EXT:
-                continue
-            if fp.stat().st_size > MAX_FILE_SIZE:
-                continue
-            try:
-                text = fp.read_text(errors="ignore")
-            except Exception:
-                continue
-            for i, line in enumerate(text.splitlines(), 1):
-                if pattern.search(line):
-                    results.append({
-                        "file": _virtual_path(fp, root, prefix),
-                        "line": i,
-                        "snippet": line.strip()[:200],
-                    })
-                    if len(results) >= 200:
-                        truncated = True
-                        break
-            if truncated:
-                break
-    return {"query": q, "results": results, "truncated": truncated}
+    return docsearch.search(_iter_searchable_files(targets), q)
 
 
 # ---------- Routes Filesystem hors sandbox : sélection d'un dossier ----------
@@ -648,6 +683,17 @@ def _strip_masked(patch: dict):
             del patch[k]
 
 
+# ---------- Route Reconnaissance de caractères (documents scannés) ----------
+@app.get("/api/ocr/status")
+def ocr_status():
+    """État du moteur de reconnaissance, affiché dans Paramètres → Documents.
+
+    Route volontairement synchrone : elle touche le disque (présence du binaire,
+    langues installées). Elle ne déclenche aucune reconnaissance.
+    """
+    return ocr.etat()
+
+
 # ---------- Route Recherche web ----------
 @app.post("/api/search")
 async def do_search(body: dict):
@@ -737,16 +783,10 @@ async def connectors_status():
         mail(c.get("imap", {})),
         simple("calendar_ics", "Calendrier", "📅", c.get("calendar_ics", {}),
                lambda x: bool(x.get("path"))),
-        simple("gmail_oauth", "Gmail OAuth", "🔐", c.get("gmail_oauth", {}),
-               lambda x: bool(x.get("client_id"))),
-        simple("outlook_oauth", "Outlook OAuth", "🔐", c.get("outlook_oauth", {}),
-               lambda x: bool(x.get("client_id"))),
         simple("obsidian", "Obsidian", "📝", c.get("obsidian", {}),
                lambda x: bool(x.get("vault_path"))),
         simple("notion", "Notion", "🔗", c.get("notion", {}),
                lambda x: bool(x.get("api_token"))),
-        ecole_directe_status(c.get("ecole_directe", {})) | {"icon": "🎓"},
-        service_public_status(c.get("service_public", {})) | {"icon": "🏛️"},
     ]
     return {"connectors": out}
 
@@ -775,15 +815,6 @@ async def connectors_imap(limit: int = 10):
         return {"enabled": True, "messages": msgs}
     except Exception as e:
         raise HTTPException(502, f"Erreur IMAP : {e}")
-
-
-@app.get("/api/connectors/oauth/{provider}/preview")
-async def connectors_oauth(provider: str, access_token: str = ""):
-    if provider == "gmail":
-        return {"provider": "gmail", "messages": gmail_list_messages(access_token)}
-    if provider == "outlook":
-        return {"provider": "outlook", "messages": outlook_list_messages(access_token)}
-    raise HTTPException(400, f"Provider OAuth inconnu : {provider}")
 
 
 @app.get("/api/connectors/calendar/preview")
@@ -846,8 +877,12 @@ async def health():
         "compute_device": s.get("compute_device", "gpu"),
         "frontend_ui": FRONTEND_DIST.exists(),
         "api_token_required": bool(API_TOKEN),
+        # Restreint aux connecteurs réellement supportés : un settings.json ancien
+        # peut contenir des clés de connecteurs retirés (OAuth, École Directe…),
+        # et les annoncer ici laisserait croire qu'ils sont encore actifs.
         "active_connectors": [k for k, v in s.get("connectors", {}).items()
-                              if isinstance(v, dict) and v.get("enabled")],
+                              if k in CONNECTEURS_SUPPORTES
+                              and isinstance(v, dict) and v.get("enabled")],
     }
 
 

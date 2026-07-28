@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+// Doit rester aligné sur DEVICE_MODELS de backend/settings.py.
 const DEVICE_MODELS = {
-  gpu: ["qwen3:8b", "qwen2.5-coder:7b", "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-  cpu: ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
+  gpu: ["mistral:7b-instruct-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
+        "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
+  cpu: ["qwen3:4b", "mistral:7b-instruct-q4_K_M", "qwen3:1.7b",
+        "phi4-mini:3.8b", "gemma2:2b"],
 }
 
 const DEFAULTS = {
@@ -16,17 +19,19 @@ const DEFAULTS = {
   simple_mode: true,
   search_provider: "duckduckgo",
   searxng_url: "http://localhost:8888",
+  search_official_only: false,
+  // Reconnaissance de caractères sur les documents scannés (voir backend/ocr.py).
+  // Activée par défaut, comme côté backend : sans cela un PDF passé au scanner
+  // resterait introuvable sans que l'utilisatrice comprenne pourquoi.
+  ocr_enabled: true,
+  ocr_tesseract_path: "",
   fs_roots: [],
   privacy_consent: false,
   connectors: {
     imap: { enabled: false, label: "Boîte pro", host: "", user: "", password: "", folder: "INBOX" },
-    gmail_oauth: { enabled: false, client_id: "", client_secret_path: "" },
-    outlook_oauth: { enabled: false, client_id: "", tenant_id: "" },
     calendar_ics: { enabled: false, path: "" },
     obsidian: { enabled: false, vault_path: "" },
     notion: { enabled: false, api_token: "" },
-    ecole_directe: { enabled: false, base_url: "https://api.ecoledirecte.com", username: "", password: "" },
-    service_public: { enabled: false, label: "Service-Public / gouv.fr", base_url: "https://www.service-public.fr", client_id: "" },
   }
 }
 
