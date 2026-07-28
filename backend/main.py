@@ -590,6 +590,10 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     except Exception as e:
         dest.unlink(missing_ok=True)
         raise HTTPException(500, f"Erreur d'upload : {e}")
+    # Le fichier vient d'apparaître : sans ce déclenchement, il resterait
+    # introuvable par la recherche par le sens jusqu'au prochain démarrage ou
+    # clic manuel sur « Construire l'index ». Tâche de fond, jamais bloquant.
+    _indexer_automatiquement()
     return {"path": _virtual_path(dest, root, prefix), "name": safe_name, "size": size}
 
 
@@ -657,6 +661,28 @@ def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
 
 
 # ---------- Routes Recherche par le sens (embeddings + index vectoriel) ----------
+def _indexer_automatiquement() -> None:
+    """Lance une mise à jour de l'index sémantique en tâche de fond, sans jamais
+    bloquer l'appelant : au démarrage de l'application (rattrape les documents
+    ajoutés pendant qu'Olivia n'était pas lancée) et après chaque import réussi
+    (`/api/fs/upload`), pour qu'un fichier tout juste déposé soit cherchable par
+    le sens sans action manuelle.
+
+    Ne fait rien si le modèle bge-m3 n'est pas installé : lancer quand même la
+    construction échouerait fichier par fichier sans jamais aboutir — mieux vaut
+    ne pas occuper un thread pour ça. `lancer_construction()` refuse par ailleurs
+    silencieusement si une construction tourne déjà (verrou), donc un import
+    pendant une construction en cours ne fait qu'attendre le prochain passage.
+    """
+    if docindex.etat().get("modele_disponible"):
+        docindex.lancer_construction(_iter_searchable_files(_resolve_search_targets("")))
+
+
+@app.on_event("startup")
+def _demarrer_indexation_semantique():
+    _indexer_automatiquement()
+
+
 @app.get("/api/docindex/status")
 def docindex_status():
     """État de l'index sémantique (embeddings bge-m3 + FAISS). Voir docindex.etat()."""

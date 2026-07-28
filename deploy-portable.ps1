@@ -397,9 +397,18 @@ $nbConversations = if (Test-Path $dossierConv) {
     @(Get-ChildItem $dossierConv -Filter '*.json' -ErrorAction SilentlyContinue).Count
 } else { 0 }
 
+# Caches derives du contenu des documents (texte OCR, index vectoriel de la
+# recherche par le sens) : absents du build PyInstaller (voir build.spec), et
+# reconstructibles, mais un /MIR sans exclusion les effacerait a CHAQUE mise a
+# jour de l'application, forcant une re-reconnaissance OCR ou une reindexation
+# complete pour rien. Meme logique de protection que conversations/settings.
+$ocrCacheDest = Join-Path $app '_internal\backend\ocr_cache'
+$docindexDest = Join-Path $app '_internal\backend\docindex'
+
 if ($installExistante) {
     Write-Host "  Preserve : conversations\ ($nbConversations enregistrees)"
     Write-Host '  Preserve : settings.json'
+    Write-Host '  Preserve : ocr_cache\ et docindex\ (caches reconstructibles)'
 }
 
 # /MIR purge les fichiers des anciennes versions ; /XD et /XF sanctuarisent
@@ -408,7 +417,9 @@ $exclusionsDossiers = @(
     $ollamaDest,
     $tesseractDest,
     $modeleWordDest,
-    $dossierConv
+    $dossierConv,
+    $ocrCacheDest,
+    $docindexDest
 )
 $exclusionsFichiers = @(
     (Join-Path $app '_internal\backend\settings.json')

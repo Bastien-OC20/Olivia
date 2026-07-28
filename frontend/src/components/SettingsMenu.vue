@@ -210,10 +210,12 @@
             <h3>🧠 Recherche par le sens</h3>
             <p class="hint">
               En plus de la recherche par mots-clés, Olivia peut retrouver un document
-              d'après l'idée qu'il contient, même si les mots exacts diffèrent. Cela
-              demande de construire une fois un index de vos documents, à partir du
-              modèle local <code>bge-m3</code> (via Ollama, sans rien envoyer sur
-              Internet). Reconstruisez l'index après un ajout important de documents.
+              d'après l'idée qu'il contient, même si les mots exacts diffèrent. L'index
+              se construit et se met à jour tout seul (au démarrage d'Olivia, et après
+              chaque import de fichier), à partir du modèle local <code>bge-m3</code>
+              (via Ollama, sans rien envoyer sur Internet). Le bouton ci-dessous ne sert
+              qu'à forcer une mise à jour immédiate — par exemple après avoir modifié des
+              documents en dehors d'Olivia.
             </p>
             <p
               v-if="docIndexState"
