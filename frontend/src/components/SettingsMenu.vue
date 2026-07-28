@@ -264,6 +264,49 @@
                 <b>Enregistrer</b>.
               </p>
             </div>
+
+            <h3>✒️ Formules utilisées dans les documents</h3>
+            <p class="hint">
+              Olivia les insère dans les courriers, convocations et comptes rendus
+              qu'elle produit. Laissez un champ vide pour garder la formule d'usage
+              indiquée en exemple. Appliqué après <b>Enregistrer</b>.
+            </p>
+            <div class="field">
+              <label for="f-docgen-appel">Appel</label>
+              <input
+                id="f-docgen-appel"
+                v-model="settings.data.docgen_appel"
+                placeholder="Madame, Monsieur,"
+              >
+            </div>
+            <div class="field">
+              <label for="f-docgen-politesse">Formule de politesse</label>
+              <textarea
+                id="f-docgen-politesse"
+                v-model="settings.data.docgen_formule_politesse"
+                rows="2"
+                placeholder="Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées."
+              />
+            </div>
+            <div class="field">
+              <label for="f-docgen-lieu">Ville (pour la formule « Fait à … »)</label>
+              <input
+                id="f-docgen-lieu"
+                v-model="settings.data.docgen_lieu"
+                placeholder="Marseille"
+              >
+            </div>
+            <div class="field">
+              <label for="f-docgen-signature">Signature par défaut</label>
+              <input
+                id="f-docgen-signature"
+                v-model="settings.data.docgen_signature"
+                placeholder="La direction"
+              >
+              <p class="hint">
+                Reprise si aucune signature n'est saisie au moment de créer le document.
+              </p>
+            </div>
           </section>
 
           <!-- RECHERCHE WEB -->

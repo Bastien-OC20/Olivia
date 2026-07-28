@@ -27,6 +27,10 @@ const DEFAULTS = {
   // Modèle Word de l'établissement (voir backend/docgen.py). Vide = modèle par
   // défaut dans modeles/, à côté de l'application.
   docgen_template_path: "",
+  docgen_appel: "",
+  docgen_formule_politesse: "",
+  docgen_lieu: "",
+  docgen_signature: "",
   fs_roots: [],
   privacy_consent: false,
   connectors: {

@@ -854,6 +854,20 @@ async def documents_generate(demande: DemandeDocument):
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
 
     charge = demande.model_dump()
+    # Priorité : champ rempli dans la demande > réglage de l'utilisatrice >
+    # défaut codé dans docgen.TEXTES. On ne remplace QUE les champs laissés
+    # vides par la requête — une valeur saisie dans le formulaire doit primer.
+    s = settings.get()
+    for champ, cle_reglage in (
+        ("appel", "docgen_appel"),
+        ("formule_politesse", "docgen_formule_politesse"),
+        ("lieu", "docgen_lieu"),
+        ("signature", "docgen_signature"),
+    ):
+        if not str(charge.get(champ) or "").strip():
+            valeur = str(s.get(cle_reglage) or "").strip()
+            if valeur:
+                charge[champ] = valeur
     try:
         infos = docgen.generer(charge, dest)
     except ValueError as e:

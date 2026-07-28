@@ -70,6 +70,15 @@ DEFAULTS = {
     # versionné ni embarqué dans l'.exe, le logo appartenant au lycée. S'il manque,
     # les documents sont tout de même produits, sans l'en-tête, avec un avertissement.
     "docgen_template_path": "",
+    # Formules d'usage des documents produits (appel, politesse, lieu, signature).
+    # Vide = repli sur les valeurs par défaut de backend/docgen.py (TEXTES) : un
+    # établissement scolaire générique, mais pas forcément celui du lycée de
+    # l'utilisatrice. Exposées ici précisément pour qu'elle les corrige sans
+    # toucher au code — c'est la raison d'être de ces réglages.
+    "docgen_appel": "",
+    "docgen_formule_politesse": "",
+    "docgen_lieu": "",
+    "docgen_signature": "",
     # Liste vide = utiliser le défaut (variable d'env FS_ROOT, sinon ~/Documents).
     # Ne pas pré-remplir : une liste non vide prendrait le pas sur l'env.
     "fs_roots": [],
@@ -117,7 +126,9 @@ class Settings:
                 saved = json.load(f)
         except Exception:
             return merged
-        return _merge(merged, saved)
+        result = _merge(merged, saved)
+        result["device_models"] = _deep_default()["device_models"]
+        return result
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +143,15 @@ class Settings:
 
     def update(self, patch: dict) -> dict:
         with self._lock:
+            # device_models est calculé par le code (DEVICE_MODELS ci-dessus), pas
+            # un choix utilisateur. Le front-end le renvoie pourtant tel quel à
+            # chaque "Enregistrer" (il fait partie de son état local) : sans ce
+            # filtre, la liste se fige à la version du bundle chargé au moment de
+            # la sauvegarde, et un changement de modèle recommandé (ex. Mistral
+            # Nemo) ne prend alors plus jamais effet sur une installation existante.
+            patch.pop("device_models", None)
             _merge(self._data, patch)
+            self._data["device_models"] = _deep_default()["device_models"]
             self._save()
             return self.get()
 
