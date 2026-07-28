@@ -368,6 +368,27 @@ if (Test-Path (Join-Path $tesseractDest $exeOcr)) {
     Write-Host '  Les PDF scannes ne seront pas cherchables sur ce disque.' -ForegroundColor Yellow
 }
 
+# --- 3 quater. Modele Word de l'etablissement -------------------------------
+# Contrairement a ollama/tesseract (gros fichiers statiques, copies une seule
+# fois), ce modele est petit (quelques dizaines de Ko) et peut changer d'une
+# fabrication a l'autre (nouvelle charte, nouveau logo) : on le MIROIRE a
+# chaque deploiement plutot que de le copier une seule fois. Absent du build
+# PyInstaller (voir build.spec) : le logo appartient a l'etablissement, il n'a
+# pas a etre embarque dans un binaire qui pourrait circuler hors de cet usage.
+# Sans lui, backend/docgen.py degrade proprement : les documents sont quand
+# meme crees, sans logo ni en-tete, avec un avertissement explicite renvoye
+# a l'interface — ce n'est donc jamais une raison d'echouer le deploiement.
+$modeleWordSource = Join-Path $root 'modeles'
+$modeleWordDest = Join-Path $app 'modeles'
+if (Test-Path $modeleWordSource) {
+    Write-Etape 'Modele Word de l''etablissement : synchronisation'
+    & robocopy $modeleWordSource $modeleWordDest /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy (modele etablissement) a echoue (code $LASTEXITCODE)." }
+} else {
+    Write-Etape 'Modele Word de l''etablissement : absent du projet, etape ignoree'
+    Write-Host '  Les documents seront generes sans logo ni en-tete.' -ForegroundColor Yellow
+}
+
 # --- 4. Application --------------------------------------------------------
 Write-Etape "Synchronisation de l'application vers $app"
 
@@ -386,6 +407,7 @@ if ($installExistante) {
 $exclusionsDossiers = @(
     $ollamaDest,
     $tesseractDest,
+    $modeleWordDest,
     $dossierConv
 )
 $exclusionsFichiers = @(
