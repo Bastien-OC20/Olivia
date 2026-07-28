@@ -3,10 +3,9 @@ import { ref } from 'vue'
 
 // Doit rester aligné sur DEVICE_MODELS de backend/settings.py.
 const DEVICE_MODELS = {
-  gpu: ["mistral:7b-instruct-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
+  gpu: ["mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
         "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-  cpu: ["qwen3:4b", "mistral:7b-instruct-q4_K_M", "qwen3:1.7b",
-        "phi4-mini:3.8b", "gemma2:2b"],
+  cpu: ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
 }
 
 const DEFAULTS = {
@@ -25,6 +24,9 @@ const DEFAULTS = {
   // resterait introuvable sans que l'utilisatrice comprenne pourquoi.
   ocr_enabled: true,
   ocr_tesseract_path: "",
+  // Modèle Word de l'établissement (voir backend/docgen.py). Vide = modèle par
+  // défaut dans modeles/, à côté de l'application.
+  docgen_template_path: "",
   fs_roots: [],
   privacy_consent: false,
   connectors: {

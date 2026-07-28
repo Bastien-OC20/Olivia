@@ -43,6 +43,11 @@
 .PARAMETER Replace
     Réinstallation complète sans question. Efface tout le dossier de destination.
 
+.PARAMETER SyncModeles
+    Copie vers le disque portable les modèles de langue présents dans le projet
+    et absents de la destination. Sans ce commutateur, l'écart est seulement
+    signalé : la copie se compte en gigaoctets, elle ne doit pas être implicite.
+
 .PARAMETER SkipFrontend
     Ne pas rebuilder l'interface (si frontend/dist est déjà à jour).
 
@@ -70,6 +75,7 @@ param(
     [string]$Destination,
     [switch]$Update,
     [switch]$Replace,
+    [switch]$SyncModeles,
     [switch]$SkipFrontend,
     [switch]$SkipExe,
     [switch]$Force
@@ -316,6 +322,38 @@ if (Test-Path (Join-Path $ollamaDest 'ollama.exe')) {
 # DANS ai-webapp\, backend/ocr.py le cherchant a cote de l'executable.
 # Sans lui, les PDF scannes restent introuvables dans la recherche — mais tout
 # le reste fonctionne : son absence n'est pas bloquante.
+# --- 3 ter. Modeles de langue ----------------------------------------------
+# Le dossier ollama\ etant PRESERVE d'une mise a jour a l'autre (on ne recopie
+# pas 9 Go a chaque fois), un modele telecharge depuis dans le projet n'atteint
+# JAMAIS le disque portable. La cle proposerait alors un modele qui n'y est pas
+# installe. On compare donc les modeles presents de part et d'autre, et on
+# signale l'ecart — la copie reste explicite (-SyncModeles), car elle se compte
+# en gigaoctets.
+$modelesSource = Join-Path $ollamaSource 'models\manifests\registry.ollama.ai\library'
+$modelesDest = Join-Path $ollamaDest 'models\manifests\registry.ollama.ai\library'
+function Get-Modeles([string]$chemin) {
+    if (-not (Test-Path $chemin)) { return @() }
+    return @(Get-ChildItem $chemin -Directory -ErrorAction SilentlyContinue |
+             Select-Object -Expand Name)
+}
+$modelesManquants = @(Get-Modeles $modelesSource |
+                      Where-Object { $_ -notin (Get-Modeles $modelesDest) })
+if ($modelesManquants.Count -gt 0) {
+    if ($SyncModeles) {
+        $taille = Get-TailleGo (Join-Path $ollamaSource 'models')
+        Write-Etape ("Synchronisation des modeles ({0}) - {1} Go au total, patientez" -f
+                     ($modelesManquants -join ', '), $taille)
+        & robocopy (Join-Path $ollamaSource 'models') (Join-Path $ollamaDest 'models') `
+            /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy (modeles) a echoue (code $LASTEXITCODE)." }
+    } else {
+        Write-Etape 'Modeles : ecart detecte'
+        Write-Host ("  Absents du disque portable : {0}" -f ($modelesManquants -join ', ')) `
+                   -ForegroundColor Yellow
+        Write-Host '  Relancez avec -SyncModeles pour les copier.' -ForegroundColor Yellow
+    }
+}
+
 $tesseractDest = Join-Path $app 'tesseract'
 $exeOcr = if ($IsLinux -or $IsMacOS) { 'tesseract' } else { 'tesseract.exe' }
 if (Test-Path (Join-Path $tesseractDest $exeOcr)) {

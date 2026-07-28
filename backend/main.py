@@ -17,6 +17,9 @@ Routes principales :
   GET  /api/fs/download                  : téléchargement d'un fichier (sandboxé)
   GET  /api/fs/drives                    : lecteurs disponibles (hors sandbox, dossiers only)
   GET  /api/fs/browse                    : sous-dossiers d'un chemin absolu (hors sandbox)
+  GET  /api/documents/status             : état du modèle Word de l'établissement
+  POST /api/documents/modele             : (re)fabrique le modèle depuis un document réel
+  POST /api/documents/generate           : produit un document Word (sandboxé)
   POST /api/search                       : recherche web via provider configuré
   GET  /api/connectors/status            : état stylisable de tous les connecteurs
   GET  /api/connectors/mail/unread       : nombre d'e-mails non lus (notifications)
@@ -52,6 +55,8 @@ from .settings import settings, style_directives
 from .search import web_search
 from . import documents
 from . import docsearch
+from . import docgen
+from . import docmodele
 from . import ocr
 from . import conversations
 from .connectors import (
@@ -77,9 +82,19 @@ CONNECTEURS_SUPPORTES = {"imap", "calendar_ics", "obsidian", "notion"}
 
 ALLOWED_EXT = {".txt", ".md", ".py", ".js", ".ts", ".vue", ".json",
                ".yaml", ".yml", ".csv", ".html", ".css", ".log", ".sh"}
-# Extensions acceptées à l'upload / preview (plus large que la lecture texte brute)
-UPLOAD_EXT = ALLOWED_EXT | {".docx", ".xlsx", ".xlsm", ".pdf",
-                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+# Extensions acceptées à l'upload / preview (plus large que la lecture texte brute).
+# Un secrétariat reçoit des formats qu'aucune bibliothèque du projet ne sait lire —
+# .xls d'un export de logiciel scolaire, .doc ancien, .odt d'un poste LibreOffice.
+# Les refuser à l'import serait absurde : le dossier de travail est celui de
+# l'utilisatrice, elle doit pouvoir y déposer ses fichiers même si Olivia ne sait
+# pas encore les ouvrir. L'aperçu annoncera alors « format non prévisualisable ».
+BUREAUTIQUE_EXT = {".docx", ".doc", ".xlsx", ".xlsm", ".xls", ".pptx", ".ppt",
+                   ".odt", ".ods", ".odp", ".rtf", ".pdf"}
+# .tif/.tiff : formats de sortie courants des scanners et des télécopieurs — et
+# l'OCR sait déjà les lire (voir OCR_IMAGE_EXT dans documents.py).
+IMAGE_UPLOAD_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp",
+                    ".tif", ".tiff"}
+UPLOAD_EXT = ALLOWED_EXT | BUREAUTIQUE_EXT | IMAGE_UPLOAD_EXT
 
 # Origines CORS autorisées : uniquement le poste local (dev Vite + prod servie).
 ALLOWED_ORIGINS = [
@@ -151,6 +166,38 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: Optional[float] = None
     stream: Optional[bool] = True
+
+
+class BlocContenu(BaseModel):
+    """Un bloc de contenu déjà structuré (voir backend/docgen.py)."""
+    type: str = "paragraphe"
+    texte: str = ""
+    niveau: int = 1
+    items: list[str] = []
+    lignes: list[list[str]] = []
+
+
+class DemandeDocument(BaseModel):
+    """Demande de production d'un document Word.
+
+    `contenu` (blocs structurés) l'emporte sur `texte` (réponse brute d'Olivia,
+    structurée côté serveur). Dans les deux cas c'est le CONTENU qui arrive ici :
+    la mise en forme est décidée par `docgen`, jamais par le modèle.
+    """
+    type: str = "circulaire"
+    titre: str = ""
+    objet: str = ""
+    texte: str = ""
+    contenu: list[BlocContenu] = []
+    destinataire: str = ""
+    lieu: str = ""
+    date: str = ""
+    participants: list[str] = []
+    appel: str = ""
+    formule_politesse: str = ""
+    signature: str = ""
+    dossier: str = ""
+    nom_fichier: str = ""
 
 
 # ---------- Sécurité : anti path-traversal ----------
@@ -496,7 +543,14 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
         raise HTTPException(400, "Nom de fichier invalide")
     ext = Path(safe_name).suffix.lower()
     if ext not in UPLOAD_EXT:
-        raise HTTPException(400, f"Type de fichier non autorisé : {ext or 'inconnu'}")
+        # Message explicite : « type non autorisé » sans dire lesquels le sont
+        # laisse l'utilisatrice sans solution.
+        courants = ".pdf, .docx, .xlsx, .xls, .csv, .txt, images (.png, .jpg, .tif)"
+        raise HTTPException(
+            400,
+            f"Format « {ext or 'inconnu'} » non accepté à l'import. "
+            f"Formats courants acceptés : {courants}.",
+        )
 
     raw = (path or "").strip()
     if raw == "":
@@ -692,6 +746,131 @@ def ocr_status():
     langues installées). Elle ne déclenche aucune reconnaissance.
     """
     return ocr.etat()
+
+
+# ---------- Routes Production de documents Word ----------
+# Caractères refusés par Windows dans un nom de fichier, plus les séparateurs :
+# le nom vient de l'interface, donc de l'utilisatrice, donc potentiellement de la
+# réponse d'un modèle. On n'en garde qu'un nom de fichier nu.
+_CAR_INTERDITS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Noms réservés MS-DOS : un fichier « CON.docx » est impossible à créer.
+_NOMS_RESERVES = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | \
+                 {f"LPT{i}" for i in range(1, 10)}
+MAX_NOM_FICHIER = 120
+
+
+def _nom_document_sain(brut: str, defaut: str = "document") -> str:
+    """Nom de fichier .docx assaini : basename seul, sans caractère interdit.
+
+    Même esprit que `fs_upload` : on ne fait jamais confiance au nom reçu. Toute
+    tentative de traversée (`../`, `C:\\...`, séparateur) est écrasée ici, et
+    `safe_path()` reste le garde-fou sur le dossier de destination.
+    """
+    nom = Path((brut or "").strip()).name
+    nom = _CAR_INTERDITS.sub(" ", nom)
+    nom = re.sub(r"\s+", " ", nom).strip(" .")
+    if nom.lower().endswith(".docx"):
+        nom = nom[:-5].strip(" .")
+    if not nom or nom in {".", ".."}:
+        nom = defaut
+    if nom.upper() in _NOMS_RESERVES:
+        nom = f"_{nom}"
+    return f"{nom[:MAX_NOM_FICHIER]}.docx"
+
+
+def _destination_libre(dossier: Path, nom: str) -> Path:
+    """Chemin non existant : on n'écrase JAMAIS un document déjà là."""
+    base, ext = os.path.splitext(nom)
+    candidat = dossier / nom
+    i = 2
+    while candidat.exists():
+        candidat = dossier / f"{base} ({i}){ext}"
+        i += 1
+        if i > 500:
+            raise HTTPException(409, "Trop de documents portent déjà ce nom.")
+    return candidat
+
+
+@app.get("/api/documents/status")
+def documents_status():
+    """État du modèle Word de l'établissement (Paramètres → Documents)."""
+    etat = docmodele.etat()
+    etat["types"] = [{"id": k, "libelle": v["libelle"]} for k, v in docgen.PROFILS.items()]
+    return etat
+
+
+@app.post("/api/documents/modele")
+async def documents_modele(body: dict):
+    """(Re)fabrique le modèle de l'établissement à partir d'un document réel.
+
+    `source` est un chemin virtuel `rN/...` : la lecture reste sandboxée. Le
+    modèle produit est écrit hors du sandbox, dans `modeles/`, à côté de
+    l'application — il n'a pas à traîner dans les documents de l'utilisatrice.
+    """
+    source = (body.get("source") or "").strip()
+    if not source:
+        raise HTTPException(400, "Chemin du document source manquant")
+    p, _root, _prefix = safe_path(source)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, f"Document introuvable : {source}")
+    try:
+        infos = docmodele.construire_modele(p)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Fabrication du modèle impossible : {e}")
+    return {"ok": True, "modele": infos, "etat": docmodele.etat()}
+
+
+@app.post("/api/documents/generate")
+async def documents_generate(demande: DemandeDocument):
+    """Produit un document Word dans le dossier de travail de l'utilisatrice."""
+    if demande.type not in docgen.PROFILS:
+        raise HTTPException(400, f"Type de document inconnu : {demande.type}")
+
+    raw = (demande.dossier or "").strip()
+    if raw == "":
+        root = get_fs_roots()[0]
+        prefix = "r0"
+        dossier = root
+    else:
+        dossier, root, prefix = safe_path(raw)
+    if dossier.exists() and not dossier.is_dir():
+        raise HTTPException(400, "La destination n'est pas un dossier")
+    dossier.mkdir(parents=True, exist_ok=True)
+    dossier = dossier.resolve()
+    try:
+        dossier.relative_to(root)          # revérifie le sandbox après création
+    except ValueError:
+        raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
+
+    profil = docgen.PROFILS[demande.type]
+    defaut = demande.titre.strip() or profil["titre_defaut"]
+    nom = _nom_document_sain(demande.nom_fichier or defaut, profil["libelle"])
+    dest = _destination_libre(dossier, nom)
+    try:
+        dest.resolve().parent.relative_to(root)
+    except ValueError:
+        raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
+
+    charge = demande.model_dump()
+    try:
+        infos = docgen.generer(charge, dest)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(500, f"Création du document impossible : {e}")
+
+    return {
+        "path": _virtual_path(dest, root, prefix),
+        "name": dest.name,
+        "size": dest.stat().st_size,
+        "type": infos["type"],
+        "libelle": infos["libelle"],
+        "titre": infos["titre"],
+        "avertissement": infos["avertissement"],
+    }
 
 
 # ---------- Route Recherche web ----------

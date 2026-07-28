@@ -206,6 +206,64 @@
                 Olivia cherche d'abord le moteur livré avec elle, puis celui du système.
               </p>
             </div>
+
+            <h3>📄 Documents Word créés par Olivia</h3>
+            <p
+              v-if="modeleEtat"
+              class="hint"
+              aria-live="polite"
+            >
+              {{ modeleEtat.disponible ? '✅' : '⚠️' }} {{ modeleEtat.message }}
+              <template v-if="modeleEtat.chemin">
+                <br>
+                <code>{{ modeleEtat.chemin }}</code>
+              </template>
+            </p>
+            <div class="field">
+              <label for="f-modele-source">Reprendre l'en-tête d'un document existant</label>
+              <input
+                id="f-modele-source"
+                v-model="modeleSource"
+                placeholder="r0/documents/Circulaire de rentrée.docx"
+              >
+              <p class="hint">
+                Indiquez un document Word de l'établissement (chemin affiché sous son
+                nom dans 📁 Documents). Olivia en retire tout le texte et n'en garde
+                que l'identité : logo, en-tête, pied de page, polices et marges. C'est
+                ce modèle qui habille ensuite les circulaires, courriers, convocations
+                et comptes rendus. À refaire le jour où la charte du lycée change.
+              </p>
+              <div class="row">
+                <button
+                  :disabled="!modeleSource.trim() || modeleEnCours"
+                  @click="fabriquerModele"
+                >
+                  {{ modeleEnCours ? '⏳ Fabrication…' : '🏗 Fabriquer le modèle' }}
+                </button>
+              </div>
+              <p
+                v-if="modeleMsg"
+                class="hint"
+                aria-live="polite"
+              >
+                {{ modeleMsg }}
+              </p>
+            </div>
+            <div
+              v-if="!simple"
+              class="field"
+            >
+              <label for="f-modele-path">Emplacement du modèle (facultatif)</label>
+              <input
+                id="f-modele-path"
+                v-model="settings.data.docgen_template_path"
+                placeholder="Laisser vide : modeles/modele-etablissement.docx"
+              >
+              <p class="hint">
+                Utile seulement si le modèle est rangé ailleurs. Appliqué après
+                <b>Enregistrer</b>.
+              </p>
+            </div>
           </section>
 
           <!-- RECHERCHE WEB -->
@@ -580,10 +638,54 @@ async function loadOcrState() {
   }
 }
 
+// État du modèle Word de l'établissement (onglet Documents). Même motif que
+// l'OCR : c'est le back-end qui inspecte le disque, et l'état est rechargé après
+// chaque fabrication — sinon l'utilisatrice ne verrait pas si elle a réussi.
+const modeleEtat = ref(null)
+const modeleSource = ref('')
+const modeleEnCours = ref(false)
+const modeleMsg = ref('')
+
+async function loadModeleState() {
+  try {
+    const r = await fetch('/api/documents/status')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    modeleEtat.value = await r.json()
+  } catch (e) {
+    modeleEtat.value = {
+      disponible: false,
+      chemin: '',
+      message: `État du modèle de documents indisponible (${e.message}).`,
+    }
+  }
+}
+
+async function fabriquerModele() {
+  modeleEnCours.value = true
+  modeleMsg.value = ''
+  try {
+    const r = await fetch('/api/documents/modele', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: modeleSource.value.trim() }),
+    })
+    const data = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+    modeleMsg.value = 'Modèle fabriqué : le texte du document d\'origine a été retiré, '
+      + 'seule son identité visuelle est conservée.'
+    await loadModeleState()
+  } catch (e) {
+    modeleMsg.value = `Fabrication impossible : ${e.message}`
+  } finally {
+    modeleEnCours.value = false
+  }
+}
+
 // Accessibilité : au focus à l'ouverture de la modale
 watch(() => settings.open, async (o) => {
   if (o) {
     loadOcrState()
+    loadModeleState()
     await nextTick()
     closeBtn.value?.focus()
   }

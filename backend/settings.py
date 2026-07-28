@@ -12,17 +12,27 @@ from threading import RLock
 #   gpu : cible RTX 5060 8 Go (voir README) — modèles quantifiés Q4_K_M
 #   cpu : petits modèles qui restent fluides sans carte graphique
 #
-# Mistral 7B Instruct Q4_K_M est mis en tête sur GPU : modèle européen sous
-# licence Apache 2.0, cohérent avec le positionnement du produit. Réserve mesurée
-# à l'usage : sur de la rédaction administrative française, il adopte un registre
-# plus familier que qwen3 (« Merci et cordialement » là où qwen3 produit
-# « Veuillez agréer… »). qwen3 reste donc disponible juste derrière.
-# Sur CPU, un modèle 7B reste trop lent : qwen3:4b garde la première place.
+# Choix arbitrés sur mesure, pas sur réputation — consigne : « rédige le corps
+# d'une convocation au conseil de classe », prompt système d'Olivia inchangé.
+#
+# GPU : Mistral Nemo (12B, Mistral AI + NVIDIA, Apache 2.0, conçu multilingue).
+#   Français administratif juste (« Madame, Monsieur, … Nous vous prions de bien
+#   vouloir »), et surtout une sortie en PROSE PURE : qwen3:8b, aussi bon en
+#   français, ajoute un méta-titre et des `**gras**` Markdown qui atterrissent
+#   tels quels dans le document Word produit. 34 s contre 36 s, donc à égalité.
+#
+# Mistral 7B Instruct a été RETIRÉ des recommandations : même avec une consigne
+#   impérative « écris exclusivement en français », il rédige en anglais, ou
+#   bascule en anglais en cours de document. Un courrier officiel bilingue
+#   partirait aux familles sans que personne ne le remarque. Il reste
+#   sélectionnable s'il est installé, mais n'est plus proposé.
+#
+# CPU : un 12B y serait inutilisable (plusieurs minutes par réponse). qwen3:4b
+#   garde la première place : français correct, aucun anglicisme constaté.
 DEVICE_MODELS = {
-    "gpu": ["mistral:7b-instruct-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
+    "gpu": ["mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
             "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-    "cpu": ["qwen3:4b", "mistral:7b-instruct-q4_K_M", "qwen3:1.7b",
-            "phi4-mini:3.8b", "gemma2:2b"],
+    "cpu": ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
 }
 
 DEFAULTS = {
@@ -53,6 +63,13 @@ DEFAULTS = {
     # Chemin d'un Tesseract installé ailleurs. Vide = moteur portable livré dans
     # le dossier tesseract/ de l'application, sinon celui trouvé dans le PATH.
     "ocr_tesseract_path": "",
+    # Modèle Word portant l'identité de l'établissement (logo, en-tête, styles),
+    # utilisé pour produire circulaires, courriers, convocations et comptes rendus.
+    # Vide = modeles/modele-etablissement.docx, à côté de l'application. Ce modèle
+    # se fabrique depuis un vrai document (voir backend/docmodele.py) : il n'est ni
+    # versionné ni embarqué dans l'.exe, le logo appartenant au lycée. S'il manque,
+    # les documents sont tout de même produits, sans l'en-tête, avec un avertissement.
+    "docgen_template_path": "",
     # Liste vide = utiliser le défaut (variable d'env FS_ROOT, sinon ~/Documents).
     # Ne pas pré-remplir : une liste non vide prendrait le pas sur l'env.
     "fs_roots": [],

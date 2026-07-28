@@ -107,6 +107,136 @@
               </li>
             </ol>
           </details>
+
+          <!-- Transformer une réponse d'Olivia en document Word. C'est le geste
+               attendu par un secrétariat : la réponse existe, il ne reste qu'à
+               la mettre en page. Toujours visible, y compris en mode simple. -->
+          <button
+            v-if="peutCreerDocument(m, i)"
+            class="doc-open"
+            @click="ouvrirCreation(i)"
+          >
+            📄 Créer un document Word
+          </button>
+
+          <div
+            v-if="creation.index === i"
+            class="doc-form"
+          >
+            <fieldset class="doc-types">
+              <legend>Type de document</legend>
+              <button
+                v-for="t in typesDocument"
+                :key="t.id"
+                type="button"
+                class="doc-type"
+                :class="{ on: creation.type === t.id }"
+                :aria-pressed="creation.type === t.id"
+                @click="creation.type = t.id"
+              >
+                {{ t.libelle }}
+              </button>
+            </fieldset>
+
+            <label :for="`doc-titre-${i}`">Titre</label>
+            <input
+              :id="`doc-titre-${i}`"
+              v-model="creation.titre"
+              placeholder="Titre du document"
+            >
+
+            <template v-if="besoinObjet">
+              <label :for="`doc-objet-${i}`">Objet</label>
+              <input
+                :id="`doc-objet-${i}`"
+                v-model="creation.objet"
+                placeholder="Ex. : conseil de classe du 12 octobre"
+              >
+              <label :for="`doc-dest-${i}`">Destinataire</label>
+              <textarea
+                :id="`doc-dest-${i}`"
+                v-model="creation.destinataire"
+                rows="2"
+                placeholder="Aux responsables légaux&#10;des élèves de seconde"
+              />
+              <label :for="`doc-signature-${i}`">Signature</label>
+              <input
+                :id="`doc-signature-${i}`"
+                v-model="creation.signature"
+                placeholder="Ex. : La Proviseure"
+              >
+            </template>
+
+            <template v-if="creation.type === 'compte_rendu'">
+              <label :for="`doc-part-${i}`">Participants</label>
+              <textarea
+                :id="`doc-part-${i}`"
+                v-model="creation.participants"
+                rows="2"
+                placeholder="Un participant par ligne"
+              />
+            </template>
+
+            <p
+              v-if="modeleAbsent"
+              class="doc-warn"
+            >
+              ⚠️ {{ modeleEtat.message }}
+            </p>
+
+            <div class="doc-actions">
+              <button
+                :disabled="creation.enCours"
+                @click="creerDocument"
+              >
+                {{ creation.enCours ? '⏳ Création…' : '✅ Créer le document' }}
+              </button>
+              <button
+                class="ghost"
+                @click="creation.index = null"
+              >
+                Annuler
+              </button>
+            </div>
+            <p
+              v-if="creation.erreur"
+              class="doc-warn"
+              aria-live="polite"
+            >
+              ⚠️ {{ creation.erreur }}
+            </p>
+          </div>
+
+          <div
+            v-if="documentCree && documentCree.index === i"
+            class="doc-done"
+            aria-live="polite"
+          >
+            <p>
+              ✅ <strong>{{ documentCree.name }}</strong> créé dans vos documents.
+            </p>
+            <p
+              v-if="documentCree.avertissement"
+              class="doc-warn"
+            >
+              ⚠️ {{ documentCree.avertissement }}
+            </p>
+            <div class="doc-actions">
+              <button @click="apercuOuvert = !apercuOuvert">
+                {{ apercuOuvert ? 'Masquer l’aperçu' : '👁 Aperçu' }}
+              </button>
+              <a
+                class="doc-dl"
+                :href="`/api/fs/download?path=${encodeURIComponent(documentCree.path)}`"
+                download
+              >⬇ Télécharger</a>
+            </div>
+            <FilePreview
+              v-if="apercuOuvert"
+              :path="documentCree.path"
+              @close="apercuOuvert = false"
+            />
+          </div>
         </div>
         <div
           v-if="chat.messages.length === 0"
@@ -199,9 +329,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, reactive } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import MessageBubble from './MessageBubble.vue'
+import FilePreview from './FilePreview.vue'
 import logoUrl from '../assets/logo-mark.png'
 
 const chat = useChatStore()
@@ -249,6 +380,109 @@ function send() {
   chat.send(input.value, webSearch.value)
   input.value = ''
 }
+
+// ---------- Production de documents Word ----------
+// Le texte de la réponse EST le contenu : aucun appel supplémentaire au modèle.
+// La mise en page (styles, en-tête, logo) est faite côté serveur par docgen.
+const TYPES_REPLI = [
+  { id: 'circulaire', libelle: 'Circulaire' },
+  { id: 'courrier', libelle: 'Courrier aux familles' },
+  { id: 'convocation', libelle: 'Convocation' },
+  { id: 'compte_rendu', libelle: 'Compte rendu' },
+]
+const typesDocument = ref(TYPES_REPLI)
+const modeleEtat = ref({ disponible: true, message: '' })
+const modeleAbsent = computed(() => modeleEtat.value.disponible === false)
+
+const creation = reactive({
+  index: null, type: 'circulaire', titre: '', objet: '',
+  destinataire: '', signature: '', participants: '',
+  enCours: false, erreur: '',
+})
+const documentCree = ref(null)
+const apercuOuvert = ref(false)
+
+const besoinObjet = computed(
+  () => creation.type === 'courrier' || creation.type === 'convocation'
+)
+
+/** Bouton proposé sur une réponse d'Olivia terminée et non vide. */
+function peutCreerDocument(m, i) {
+  if (m.role !== 'assistant') return false
+  if (chat.isStreaming && i === chat.messages.length - 1) return false
+  return (m.content || '').trim().length > 0
+}
+
+/** Titre pré-rempli : premier titre Markdown, sinon début de la réponse. */
+function titreSuggere(texte) {
+  const propre = (texte || '').replace(/<think>[\s\S]*?<\/think>/gi, '')
+  for (const ligne of propre.split('\n')) {
+    const nue = ligne.trim()
+    if (!nue) continue
+    const titre = nue.match(/^#{1,6}\s+(.*)$/)
+    if (titre) return titre[1].trim().slice(0, 90)
+    return nue.replace(/\*\*/g, '').split(' ').slice(0, 10).join(' ').slice(0, 90)
+  }
+  return ''
+}
+
+function ouvrirCreation(i) {
+  creation.index = i
+  creation.erreur = ''
+  creation.titre = titreSuggere(chat.messages[i]?.content)
+  creation.objet = creation.objet || creation.titre
+  documentCree.value = null
+  apercuOuvert.value = false
+}
+
+async function chargerEtatModele() {
+  try {
+    const r = await fetch('/api/documents/status')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json()
+    modeleEtat.value = data
+    if (Array.isArray(data.types) && data.types.length) typesDocument.value = data.types
+  } catch (e) {
+    // Un back-end plus ancien n'expose pas cette route : le bouton reste utile,
+    // il échouera proprement s'il n'y a vraiment rien en face.
+    console.warn('État du modèle de document indisponible :', e.message)
+  }
+}
+
+async function creerDocument() {
+  const message = chat.messages[creation.index]
+  if (!message) return
+  creation.enCours = true
+  creation.erreur = ''
+  try {
+    const r = await fetch('/api/documents/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: creation.type,
+        titre: creation.titre,
+        objet: besoinObjet.value ? creation.objet : '',
+        destinataire: besoinObjet.value ? creation.destinataire : '',
+        signature: besoinObjet.value ? creation.signature : '',
+        participants: creation.type === 'compte_rendu'
+          ? creation.participants.split('\n').map((s) => s.trim()).filter(Boolean)
+          : [],
+        texte: message.content || '',
+      }),
+    })
+    const data = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+    documentCree.value = { ...data, index: creation.index }
+    creation.index = null
+    apercuOuvert.value = false
+  } catch (e) {
+    creation.erreur = `Création impossible : ${e.message}`
+  } finally {
+    creation.enCours = false
+  }
+}
+
+onMounted(chargerEtatModele)
 </script>
 
 <style scoped>
@@ -288,6 +522,40 @@ function send() {
 .sources li { margin-bottom: 4px; line-height: 1.4; }
 .sources a { color: var(--accent); }
 .searching { font-size: 13px; color: var(--muted); padding: 4px 0; }
+
+/* Production de documents Word */
+.doc-open {
+  margin-top: 6px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); font-size: 13px; padding: 5px 12px;
+}
+.doc-open:hover { border-color: var(--accent); }
+.doc-form {
+  margin-top: 8px; padding: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+}
+.doc-form label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+.doc-form input, .doc-form textarea {
+  width: 100%; font-family: inherit; font-size: 13px;
+}
+.doc-types { border: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-types legend { padding: 0 0 6px; color: var(--muted); font-size: 12px; }
+.doc-type {
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  font-size: 13px; padding: 5px 10px;
+}
+.doc-type.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.doc-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.doc-actions .ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+.doc-warn { margin: 8px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
+.doc-done {
+  margin-top: 8px; padding: 12px; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
+}
+.doc-done p { margin: 0; line-height: 1.5; }
+.doc-dl {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--accent);
+  color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 13px; text-decoration: none;
+}
 .welcome { text-align: center; color: var(--muted); padding: 32px 20px; max-width: 620px; margin: 0 auto; }
 .welcome-logo { width: 84px; height: 84px; border-radius: 16px; background: #fff; padding: 6px; }
 .welcome h2 { color: var(--text); font-size: 20px; margin: 8px 0 4px; }

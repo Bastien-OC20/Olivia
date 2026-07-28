@@ -11,6 +11,15 @@ __pycache__/
 # localement, jamais versionné — voir README, section OCR.
 tesseract/
 
+# Documents réels de l'établissement (RGPD : données personnelles —
+# élèves, personnels, comptes rendus). Servent de jeu d'essai et de
+# modèles de mise en page. Ne JAMAIS committer.
+documents/
+
+# Modèles de documents dérivés de la charte de l'établissement (logo,
+# ours, polices). Propriété du lycée, générés localement : jamais versionnés.
+modeles/
+
 # --- Secrets & données locales (RGPD : ne jamais committer) ---
 backend/settings.json
 backend/settings.tmp
