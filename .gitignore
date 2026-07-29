@@ -48,6 +48,12 @@ dist/
 build/
 *.spec.bak
 
+# Sortie de l'installeur Windows (Setup.exe + tranches .bin, ~11 Go avec les
+# modèles embarqués) : reconstructible via ISCC "installer Olivia/olivia.iss",
+# jamais versionnée. Le script .iss lui-même reste suivi.
+installer Olivia/Sortie/
+installer Olivia/*.log
+
 # --- Node / frontend ---
 node_modules/
 frontend/dist/
