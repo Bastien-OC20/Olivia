@@ -9,30 +9,54 @@ from pathlib import Path
 from threading import RLock
 
 # Modèles recommandés selon le périphérique de calcul.
-#   gpu : cible RTX 5060 8 Go (voir README) — modèles quantifiés Q4_K_M
-#   cpu : petits modèles qui restent fluides sans carte graphique
+#   gpu : cible RTX 5060 8 Go (voir README) — modèle quantifié Q4_K_M
+#   cpu : petit modèle qui reste fluide sans carte graphique
+#
+# UN SEUL modèle par périphérique, décision du 29/07/2026 : Olivia vise des
+# collectivités, associations et PME qui n'ont pas de compétence technique en
+# interne — une liste de choix, aussi « recommandée » soit-elle, est un risque
+# (un mauvais choix silencieux) et une charge de test qui grandit avec chaque
+# modèle ajouté. Mieux vaut UN modèle par profil, éprouvé sur le cas d'usage
+# réel, que plusieurs options non toutes vérifiées avec la même rigueur.
 #
 # Choix arbitrés sur mesure, pas sur réputation — consigne : « rédige le corps
-# d'une convocation au conseil de classe », prompt système d'Olivia inchangé.
+# d'une convocation au conseil de classe », prompt système d'Olivia inchangé
+# (dont `reasoning_style="detailed"` + `tone="teacher"`, le réglage le plus
+# exigeant testé, qui a justement révélé la plupart des échecs ci-dessous).
 #
 # GPU : Mistral Nemo (12B, Mistral AI + NVIDIA, Apache 2.0, conçu multilingue).
 #   Français administratif juste (« Madame, Monsieur, … Nous vous prions de bien
-#   vouloir »), et surtout une sortie en PROSE PURE : qwen3:8b, aussi bon en
-#   français, ajoute un méta-titre et des `**gras**` Markdown qui atterrissent
-#   tels quels dans le document Word produit. 34 s contre 36 s, donc à égalité.
+#   vouloir »), sortie en PROSE PURE (pas de Markdown parasite), réponse
+#   correcte et complète en 12 s même avec le réglage « détaillé ». Alternatives
+#   écartées : `qwen3:8b` ajoute un méta-titre et des `**gras**` Markdown qui
+#   atterrissent tels quels dans le document Word produit ; `mistral:7b`
+#   (instruct) bascule en anglais en cours de document, ou part carrément hors
+#   sujet (voir CPU ci-dessous, même modèle) — un courrier bilingue ou erroné
+#   partirait aux familles sans que personne ne le remarque.
 #
-# Mistral 7B Instruct a été RETIRÉ des recommandations : même avec une consigne
-#   impérative « écris exclusivement en français », il rédige en anglais, ou
-#   bascule en anglais en cours de document. Un courrier officiel bilingue
-#   partirait aux familles sans que personne ne le remarque. Il reste
-#   sélectionnable s'il est installé, mais n'est plus proposé.
-#
-# CPU : un 12B y serait inutilisable (plusieurs minutes par réponse). qwen3:4b
-#   garde la première place : français correct, aucun anglicisme constaté.
+# CPU : `gemma2:2b` (Google, Apache 2.0). Un 12B y serait inutilisable
+#   (plusieurs minutes par réponse). Seul candidat, sur SIX testés le
+#   29/07/2026 sur le même prompt en CPU forcé, à produire une vraie réponse
+#   correcte : le plus rapide (≈ 15 tokens/s) ET le seul dont le fond soit
+#   juste. Recalé :
+#   - `qwen3:4b` / `qwen3:1.7b` : boucle de méta-réflexion SANS FIN, EN
+#     ANGLAIS (« Okay, the user wants me to draft... »), reproduit avec et
+#     sans `think:false` — jamais de réponse produite. Cause probable d'un
+#     plantage machine constaté en test (15+ min à pleine charge CPU).
+#   - `phi4-mini:3.8b` et `gemma2:9b` : répondent en français mais hors sujet
+#     — rédigent un TUTORIEL (« voici comment structurer... ») au lieu de la
+#     convocation elle-même. `gemma2:9b` est en plus 3× plus lent que `2b`.
+#   - `mistral:7b-instruct` : confond totalement le sujet (rédige un compte
+#     rendu de cours d'histoire-géo au lieu d'une convocation aux parents),
+#     et le plus lent de tous les candidats testés (≈ 6 tokens/s).
+#   - `llama3.2:3b` : répond sur le bon sujet mais s'adresse aux « élèves »
+#     au lieu des parents, avec une faute de code-switching anglais
+#     (« Je vous addressed »).
+#   Retester si un meilleur candidat apparaît — même protocole obligatoire :
+#   `num_gpu: 0`, `num_predict` plafonné, même prompt de référence.
 DEVICE_MODELS = {
-    "gpu": ["mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
-            "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
-    "cpu": ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
+    "gpu": ["mistral-nemo:12b-instruct-2407-q4_K_M"],
+    "cpu": ["gemma2:2b"],
 }
 
 DEFAULTS = {
