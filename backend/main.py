@@ -79,6 +79,16 @@ UPLOAD_SUBDIR = "_uploads"                       # RGPD : zone de données cré�
 MAX_FILE_SIZE = 1_000_000                         # 1 Mo pour la lecture texte
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024                # 25 Mo pour l'upload
 API_TOKEN = os.getenv("API_TOKEN", "")           # sécurité optionnelle (jeton local)
+# Garde-fou de génération : borne le nombre de tokens qu'une réponse peut
+# produire, quel que soit le modèle. Sans cette limite, un modèle qui part en
+# boucle (constaté avec certains modèles Qwen3 combinés au style « détaillé »,
+# voir DEVICE_MODELS dans settings.py) peut tourner des dizaines de minutes à
+# pleine charge sans jamais s'arrêter — source probable d'un plantage machine
+# en test. 4096 tokens couvrent largement le plus long document produit par
+# Olivia (circulaire, compte rendu détaillé) sans jamais tronquer une réponse
+# légitime, tout en bornant le pire cas à quelques minutes même sur un modèle
+# lent en CPU.
+MAX_TOKENS_REPONSE = 4096
 
 # Connecteurs réellement implémentés. Sert de filtre : un settings.json créé par
 # une version antérieure peut contenir des clés de connecteurs depuis retirés
@@ -380,7 +390,7 @@ async def list_models():
 def _build_options(temperature: float | None) -> dict:
     s = settings.get()
     eff_temp = s.get("temperature", 0.7) if temperature is None else temperature
-    options = {"temperature": eff_temp}
+    options = {"temperature": eff_temp, "num_predict": MAX_TOKENS_REPONSE}
     # CPU/GPU : num_gpu=0 force le calcul CPU ; sinon Ollama utilise le GPU auto.
     if s.get("compute_device") == "cpu":
         options["num_gpu"] = 0
