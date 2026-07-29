@@ -313,7 +313,13 @@
                 <b>Enregistrer</b>.
               </p>
             </div>
+          </section>
 
+          <!-- FORMULES DE POLITESSE -->
+          <section
+            v-if="tab === 'formules'"
+            aria-label="Formules de politesse"
+          >
             <h3>✒️ Formules utilisées dans les documents</h3>
             <p class="hint">
               Olivia les insère dans les courriers, convocations et comptes rendus
@@ -665,6 +671,7 @@ const simple = computed(() => settings.data.simple_mode !== false)
 const allTabs = [
   { id: 'reasoning', label: 'Préférences', simple: true },
   { id: 'documents', label: 'Documents', simple: true },
+  { id: 'formules', label: 'Formules', simple: true },
   { id: 'search', label: 'Recherche web', simple: false },
   { id: 'connectors', label: 'Connexions', simple: false },
   { id: 'privacy', label: 'Confidentialité', simple: true },
