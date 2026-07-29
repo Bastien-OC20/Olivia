@@ -97,3 +97,7 @@ desktop.ini
 *.pptx
 *.potx
 *.pdf
+
+# Dossier de travail de la présentation commerciale/interne (captures
+# d'écran + .pptx) : contenu généré, jamais versionné.
+presentation/
