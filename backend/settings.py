@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 from threading import RLock
 
-from . import profiles
+from . import hardware, profiles
 
 # Modèles recommandés selon le périphérique de calcul.
 #   gpu : cible RTX 5060 8 Go (voir README) — modèle quantifié Q4_K_M
@@ -158,6 +158,14 @@ class Settings:
     def _load(self) -> dict:
         merged = _deep_default()
         if not self.path.exists():
+            # Tout premier lancement de cette organisation (jamais configurée) :
+            # on choisit un "compute_device" adapté au poste plutôt que le "gpu"
+            # codé en dur ci-dessus, qui a rendu Olivia inutilisable (45 min de
+            # réponse) sur un poste sans carte graphique dédiée. Ne s'applique
+            # qu'ici : un réglage déjà enregistré, même s'il vaut "gpu" à tort,
+            # a pu être choisi consciemment depuis (bouton ⚡/🧩 de la topbar) et
+            # ne doit jamais être corrigé sous le pied de l'utilisatrice.
+            merged["compute_device"] = hardware.detect_default_device()
             return merged
         try:
             with open(self.path, encoding="utf-8") as f:
