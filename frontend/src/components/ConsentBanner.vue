@@ -46,8 +46,13 @@ function openPrivacy() { emit('open-privacy') }
 </script>
 
 <style scoped>
+/* Volontairement dans le flux (PAS position:fixed) : `.layout` (App.vue) est un
+   flex-column sur toute la hauteur de l'écran, donc cette barre y prend sa place
+   comme n'importe quel enfant et réduit d'autant la hauteur du panneau de
+   conversation au-dessus. En position fixe, la bannière flottait par-dessus le
+   bas de l'écran et interceptait silencieusement les clics sur le champ de
+   saisie et le bouton « Envoyer » du chat, sans aucun retour visuel. */
 .consent {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 1500;
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   padding: 14px 20px; background: var(--panel);
   border-top: 1px solid var(--border);
