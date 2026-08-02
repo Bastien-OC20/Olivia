@@ -14,7 +14,11 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 - Laisse **choisir son dossier de travail à la souris** (parcours des lecteurs)
 - Effectue des recherches web à la demande (bouton 🌐 du chat) et cite ses sources
   (SearXNG / Brave / DuckDuckGo, avec repli automatique entre moteurs)
-- Bascule le calcul **GPU ↔ CPU** et adapte les modèles recommandés
+- Bascule le calcul **GPU ↔ CPU** — **détecté automatiquement** au premier lancement
+  (VRAM d'une carte NVIDIA), avec bascule manuelle toujours possible
+- **Comptes par organisation** : connexion requise pour utiliser l'interface,
+  données cloisonnées par organisation ; création de compte réservée au service
+  informatique (`backend/manage_users.py`), pas d'inscription en libre-service
 - Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier)
 - Respecte les mesures techniques **RGPD** (export / suppression des données, consentement) et **RGAA/WCAG AA** (ARIA, clavier, contrastes)
 - Lanceur automatique (`.py` multi-OS + `.exe` Windows autonome via PyInstaller)
@@ -31,6 +35,28 @@ Pour les afficher : **⚙️ Paramètres → 🔧 Réglages avancés**. Un clic 
 **« ← Revenir au mode simple »** rétablit l'affichage épuré. Le choix est mémorisé.
 Idéal : le service informatique passe une fois en mode avancé pour tout configurer,
 puis laisse Olivia en mode simple pour l'assistante de direction.
+
+## 🔐 Comptes et organisations
+
+Se connecter est **obligatoire** pour utiliser l'interface (écran dédié,
+`frontend/src/components/LoginView.vue`). Chaque compte appartient à exactement une
+**organisation** (mairie, association, PME, établissement) : conversations, réglages et
+index documentaire sont cloisonnés dans `backend/profiles/<profile_id>/` — un
+identifiant deviné d'une autre organisation ne donne accès à rien.
+
+**Créer une organisation et un compte** — volontairement en ligne de commande et non
+dans l'interface (même logique que les connecteurs OAuth : préparé une fois par le
+service informatique, pas par l'utilisatrice finale) :
+
+```bash
+python backend/manage_users.py create-profile "Nom de l'organisation"
+python backend/manage_users.py create-user <identifiant> <mot-de-passe> <id-du-profil>
+python backend/manage_users.py list-profiles
+```
+
+Aucune commande de suppression n'existe à ce jour : le retrait d'un compte ou d'une
+organisation se fait en éditant `backend/profiles/registry.json` / `users.json` et en
+supprimant le dossier `backend/profiles/<profile_id>/` correspondant.
 
 ## 🚀 Démarrage rapide
 
@@ -152,8 +178,9 @@ disque portable et n'existent pas dans le build :
 |---|---|
 | `ai-webapp\ollama\` | moteur + modèles (~9 Go) : les réécraser à chaque déploiement serait absurde |
 | `ai-webapp\tesseract\` | moteur OCR (~190 Mo) |
-| `..\backend\conversations\` | l'historique de l'utilisatrice |
-| `..\backend\settings.json` | ses réglages, dont la clé du moteur de recherche |
+| `..\backend\profiles\` | comptes, organisations, sessions et **conversations** (cloisonnées par organisation) |
+| `..\backend\settings.json` | réglages du mode mono-organisation historique |
+| `..\backend\ocr_cache\`, `..\backend\docindex\` | caches reconstructibles (OCR, index de recherche par le sens) — non destructeurs à perdre, mais coûteux à refaire |
 
 Les deux moteurs ne sont pas dans le build : ils sont copiés depuis `ollama/` et
 `tesseract/` du projet uniquement s'ils manquent à destination — première
@@ -194,20 +221,30 @@ Icône personnalisée : placez `ai-webapp.ico` à la racine et décommentez la l
 
 ## 🎮 CPU / GPU et modèles
 
-Un sélecteur **GPU / CPU** est présent dans la barre du haut (et dans Paramètres) :
+Un sélecteur **⚡ Rapide (GPU) / 🧩 Standard (CPU)** est présent dans la barre du haut
+(et dans Paramètres) :
 - **GPU** : Ollama utilise la carte automatiquement.
 - **CPU** : le backend force `num_gpu=0` à chaque requête.
 
-Le choix filtre les **modèles recommandés** dans le sélecteur de modèle et bascule
-automatiquement vers un modèle adapté si le modèle courant ne l'est pas. Listes par défaut
-(modifiables) :
+**Un seul modèle par périphérique** (`backend/settings.py`, `DEVICE_MODELS`), pas une
+liste de choix : pour une utilisatrice non technique, une liste — même « recommandée » —
+est un risque de mauvaise sélection silencieuse, et une charge de test qui grandit avec
+chaque modèle ajouté. Les deux modèles retenus ont été choisis après comparaison sur un
+prompt de référence en conditions réelles, pas sur leur réputation :
 
-| Périphérique | Modèles recommandés |
-|---|---|
-| GPU (ex. RTX 5060 8 Go) | `qwen3:8b`, `qwen2.5-coder:7b`, `llama3.3:8b`, `qwen2.5-vl:7b`, `phi4-mini:3.8b` |
-| CPU / bureautique | `qwen3:4b` (~2,5 Go), `qwen3:1.7b` (~1,4 Go, très léger), `phi4-mini:3.8b`, `gemma2:2b` |
+| Périphérique | Modèle | Taille |
+|---|---|---|
+| GPU (cible : RTX 5060 8 Go) | `mistral-nemo:12b-instruct-2407-q4_K_M` | ~7,5 Go |
+| CPU / bureautique | `gemma2:2b` | ~1,6 Go |
 
-Les modèles recommandés non installés apparaissent grisés avec la commande `ollama pull`.
+**Détection automatique au premier lancement** (`backend/hardware.py`) : une organisation
+**jamais configurée** interroge `nvidia-smi` et retient `gpu` si une carte NVIDIA d'au
+moins ~8 Go de VRAM est détectée, `cpu` sinon (y compris si `nvidia-smi` est absent —
+c'est le repli sûr). Objectif : éviter qu'un poste sans carte graphique dédiée hérite du
+modèle GPU par défaut — vécu en conditions réelles, une réponse de `mistral-nemo` peut y
+prendre **45 minutes**. Une organisation déjà configurée n'est **jamais** re-détectée
+automatiquement : le réglage enregistré (via ⚡/🧩) prévaut toujours, y compris si la
+clé/l'installation change ensuite de machine.
 
 ## 💬 Historique des conversations
 
@@ -215,8 +252,9 @@ La barre latérale a deux onglets : **💬 Conversations** et **📁 Documents**
 
 Chaque conversation est enregistrée automatiquement **à la fin de chaque réponse**
 (y compris après un « ⏸ Stop », la réponse partielle est conservée), dans
-`backend/conversations/<id>.json` — un fichier par conversation, écriture atomique.
-Le dossier est ignoré par Git. On peut rouvrir, **renommer** et **supprimer** une
+`backend/profiles/<profile_id>/conversations/<id>.json` — cloisonnée **par
+organisation**, un fichier par conversation, écriture atomique. Le dossier
+`backend/profiles/` est ignoré par Git. On peut rouvrir, **renommer** et **supprimer** une
 conversation depuis la liste ; « ＋ Nouvelle conversation » repart de zéro sans
 créer d'entrée tant que rien n'a été échangé.
 
@@ -395,9 +433,11 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 - **CORS restreint** au poste local (plus de wildcard).
 - Écoute sur `127.0.0.1` par défaut.
 - Upload : allowlist d'extensions, nom assaini, taille max, sandbox.
-- **Comptes et sessions** : `POST /api/auth/login` ouvre une session (cookie `olivia_session`,
-  `HttpOnly`, `SameSite=Lax`, 8 h) ; `POST /api/auth/logout` la ferme ; `GET /api/auth/me` renvoie
-  le compte et l'organisation connectés. Les comptes se créent avec
+- **Comptes et sessions** — écran de connexion dans l'interface (voir
+  [🔐 Comptes et organisations](#-comptes-et-organisations)) : `POST /api/auth/login` ouvre une
+  session (cookie `olivia_session`, `HttpOnly`, `SameSite=Lax`, 8 h) ; `POST /api/auth/logout` la
+  ferme ; `GET /api/auth/me` renvoie le compte et l'organisation connectés, et sert à l'interface
+  à savoir si elle doit afficher l'écran de connexion. Les comptes se créent avec
   `python backend/manage_users.py` (mots de passe dérivés en PBKDF2-HMAC-SHA256 salé, jamais
   stockés en clair). Remplace l'ancien jeton statique partagé `API_TOKEN` / `X-API-Token`, qui
   n'identifiait personne.
@@ -513,8 +553,10 @@ Assemblé dynamiquement à chaque requête ; pas besoin de redémarrer Ollama.
 
 ## ⚠️ Notes VRAM (cible RTX 5060 8 Go)
 
-`qwen3:8b` (~5,2 Go), `qwen2.5-coder:7b` (~5 Go), `phi4-mini:3.8b` (~2,5 Go),
-`llama3.3:8b` (~5,5 Go), `qwen2.5-vl:7b` (~6 Go). Quantification Q4_K_M recommandée.
+`mistral-nemo:12b-instruct-2407-q4_K_M` (~7,5 Go, quantification Q4_K_M) est le seul
+modèle GPU retenu (voir [🎮 CPU / GPU et modèles](#-cpu--gpu-et-modèles)). En dessous de
+~8 Go de VRAM détectés, `backend/hardware.py` bascule automatiquement sur `gemma2:2b`
+(CPU, ~1,6 Go) au premier lancement d'une organisation.
 
 ## 📁 Arborescence
 
@@ -527,12 +569,18 @@ ai-webapp/
 ├── portable/              ← lanceur .bat et notice copiés sur le disque portable
 ├── .gitignore
 ├── backend/
-│   ├── main.py            ← FastAPI : chat + fs + upload/download/preview + settings + search + connectors + RGPD
-│   ├── settings.py        ← persistance JSON + CPU/GPU + modèles par périphérique
-│   ├── conversations.py   ← historique : un JSON par conversation, écriture atomique
+│   ├── main.py            ← FastAPI : auth + chat + fs + upload/download/preview + settings + search + connectors + RGPD
+│   ├── settings.py        ← persistance JSON par organisation + CPU/GPU + modèle par périphérique
+│   ├── hardware.py        ← détection VRAM (nvidia-smi) pour le choix GPU/CPU par défaut
+│   ├── profiles.py        ← registre des organisations, cloisonnement par dossier
+│   ├── users.py           ← comptes (mots de passe PBKDF2-HMAC-SHA256 salés)
+│   ├── sessions.py        ← sessions par cookie (jetons opaques, TTL 8 h)
+│   ├── manage_users.py    ← CLI de provisionnement (organisations + comptes)
+│   ├── conversations.py   ← historique par organisation : un JSON par conversation, écriture atomique
 │   ├── search.py          ← recherche web pluggable + cascade de repli entre moteurs
 │   ├── documents.py       ← prévisualisation + extraction de texte (docx/xlsx/pdf/csv)
 │   ├── docsearch.py       ← recherche en langage courant dans les documents
+│   ├── docindex.py        ← index sémantique FAISS (embeddings bge-m3 via Ollama)
 │   ├── ocr.py             ← reconnaissance de caractères (documents scannés)
 │   ├── connectors/
 │   │   ├── __init__.py
@@ -544,8 +592,9 @@ ai-webapp/
     ├── package.json, vite.config.js, index.html
     └── src/
         ├── main.js, App.vue, style.css
-        ├── stores/ (chat.js, settings.js)
+        ├── stores/ (chat.js, settings.js, auth.js)
         └── components/
+            ├── LoginView.vue        ← écran de connexion (pas d'inscription)
             ├── ModelPicker.vue      ← sélecteur device-aware
             ├── FileExplorer.vue     ← arbre + upload + recherche + sélecteur de dossier
             ├── FolderPickerModal.vue ← parcours des lecteurs pour ajouter un dossier
