@@ -94,5 +94,13 @@ export const useSettingsStore = defineStore('settings', () => {
   function show() { open.value = true }
   function hide() { open.value = false }
 
-  return { data, open, saving, load, save, show, hide }
+  /** Revient aux valeurs par défaut (déconnexion). Les réglages appartiennent à
+   *  l'organisation et contiennent des secrets (identifiants de connecteurs) :
+   *  ceux du compte précédent ne doivent pas rester en mémoire pour le suivant. */
+  function reset() {
+    data.value = JSON.parse(JSON.stringify(DEFAULTS))
+    open.value = false
+  }
+
+  return { data, open, saving, load, save, show, hide, reset }
 })

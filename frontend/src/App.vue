@@ -1,5 +1,13 @@
 <template>
-  <div class="layout">
+  <!-- Tant que `connecte` vaut null, la question n'est pas tranchée : on
+       n'affiche rien plutôt qu'une application qui déclencherait aussitôt une
+       rafale de 401 dans chacun de ses panneaux. -->
+  <LoginView v-if="auth.connecte === false" />
+
+  <div
+    v-else-if="auth.connecte"
+    class="layout"
+  >
     <a
       href="#contenu"
       class="skip-link"
@@ -64,6 +72,14 @@
         @click="chat.clear()"
       >
         Effacer
+      </button>
+      <button
+        class="ghost"
+        :title="`Connectée comme ${auth.identite?.username || ''}`"
+        aria-label="Se déconnecter"
+        @click="deconnexion"
+      >
+        Se déconnecter
       </button>
     </header>
 
@@ -135,9 +151,11 @@
 </template>
 
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
+import { useAuthStore } from './stores/auth.js'
+import LoginView from './components/LoginView.vue'
 import ModelPicker from './components/ModelPicker.vue'
 import FileExplorer from './components/FileExplorer.vue'
 import ChatPanel from './components/ChatPanel.vue'
@@ -149,6 +167,7 @@ import logoUrl from './assets/logo-mark.png'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
+const auth = useAuthStore()
 const settingsMenu = ref(null)
 
 const device = computed(() => settings.data.compute_device || 'gpu')
@@ -162,11 +181,36 @@ const sideTabs = [
 ]
 const sideTab = ref('conversations')
 
-onMounted(async () => {
+onMounted(() => {
+  auth.surveillerExpiration()
+  auth.verifier()
+})
+
+// Le chargement suit l'état de la session plutôt qu'un évènement émis par
+// l'écran de connexion : quand `connexion()` bascule `connecte` à vrai, Vue
+// démonte LoginView avant que celui-ci n'ait pu émettre quoi que ce soit — un
+// `@connecte` ne partait jamais. Ici, une seule voie sert les deux cas (cookie
+// encore valide au démarrage, et connexion réussie).
+watch(() => auth.connecte, (ouverte) => { if (ouverte) demarrer() })
+
+/** Charge les données de l'organisation connectée. Pas de `location.reload()` :
+ *  l'application est déjà montée, un rechargement ne ferait que refaire ces
+ *  trois appels en repartant de zéro. */
+async function demarrer() {
   await settings.load()
   chat.loadModels(settings.data.device_models?.[device.value] || [])
   chat.loadConversations()
-})
+}
+
+async function deconnexion() {
+  await auth.deconnexion()
+  // Le poste peut être partagé : rien du compte précédent ne doit rester à
+  // l'écran ni en mémoire pour la personne qui se connectera ensuite.
+  chat.clear()
+  chat.clearFileContexts()
+  chat.conversations = []
+  settings.reset()
+}
 
 // Navigation clavier attendue pour un role="tablist" (flèches, Début, Fin).
 function onTabKeydown(e) {
