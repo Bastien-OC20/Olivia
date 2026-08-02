@@ -2,9 +2,12 @@
 FastAPI backend pour Olivia (assistante locale).
 
 Routes principales :
+  POST /api/auth/login                   : ouvre une session (cookie HttpOnly)
+  POST /api/auth/logout                  : ferme la session courante
+  GET  /api/auth/me                      : compte et organisation connectés
   GET  /api/health                       : diagnostic de service
   GET  /api/models                       : liste des modèles Ollama installés
-  GET  /api/settings                     : retourne settings.json (secrets masqués)
+  GET  /api/settings                     : retourne les réglages du profil (secrets masqués)
   PUT  /api/settings                     : patch partiel des paramètres
   POST /api/chat/stream                  : appel Ollama SSE (token par token)
   POST /api/chat                         : appel Ollama non-stream
@@ -29,14 +32,19 @@ Routes principales :
   GET  /api/connectors/mail/unread       : nombre d'e-mails non lus (notifications)
   GET  /api/connectors/imap/preview      : aperçu boîte mail
   GET  /api/connectors/calendar/preview  : aperçu calendrier .ics
-  GET  /api/privacy/export               : RGPD — export de toutes les données locales
-  POST /api/privacy/delete               : RGPD — suppression des données locales
+  GET  /api/privacy/export               : RGPD — export des données de l'organisation
+  POST /api/privacy/delete               : RGPD — suppression des données de l'organisation
   GET  /api/conversations                : liste des conversations (métadonnées)
   GET  /api/conversations/{conv_id}      : conversation complète
   POST /api/conversations                : crée une conversation
   PUT  /api/conversations/{conv_id}      : met à jour une conversation
   DELETE /api/conversations/{conv_id}    : supprime une conversation
   /ui                                    : interface Vue buildée (frontend/dist)
+
+CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service) et
+/api/auth/login, toute route /api/* exige une session ouverte et ne travaille que
+sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
+identifiant d'organisation n'est jamais accepté depuis le client.
 """
 import os
 import re
@@ -46,7 +54,9 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Request
+from fastapi import (
+    Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     StreamingResponse, JSONResponse, FileResponse, RedirectResponse, PlainTextResponse,
@@ -55,7 +65,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from .settings import settings, style_directives
+from .settings import reglages, style_directives
 from .search import web_search
 from . import documents
 from . import docsearch
@@ -64,6 +74,9 @@ from . import docgen
 from . import docmodele
 from . import ocr
 from . import conversations
+from . import profiles
+from . import sessions
+from . import users
 from .connectors import (
     read_inbox,
     unread_count,
@@ -78,7 +91,6 @@ FS_ROOT_DEFAULT = Path(os.getenv("FS_ROOT", os.path.expanduser("~/Documents"))).
 UPLOAD_SUBDIR = "_uploads"                       # RGPD : zone de données créée par l'app
 MAX_FILE_SIZE = 1_000_000                         # 1 Mo pour la lecture texte
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024                # 25 Mo pour l'upload
-API_TOKEN = os.getenv("API_TOKEN", "")           # sécurité optionnelle (jeton local)
 # Garde-fou de génération : borne le nombre de tokens qu'une réponse peut
 # produire, quel que soit le modèle. Sans cette limite, un modèle qui part en
 # boucle (constaté avec certains modèles Qwen3 combinés au style « détaillé »,
@@ -89,11 +101,6 @@ API_TOKEN = os.getenv("API_TOKEN", "")           # sécurité optionnelle (jeton
 # légitime, tout en bornant le pire cas à quelques minutes même sur un modèle
 # lent en CPU.
 MAX_TOKENS_REPONSE = 4096
-
-# Connecteurs réellement implémentés. Sert de filtre : un settings.json créé par
-# une version antérieure peut contenir des clés de connecteurs depuis retirés
-# (OAuth Gmail/Outlook, École Directe, Service-Public) — elles sont ignorées.
-CONNECTEURS_SUPPORTES = {"imap", "calendar_ics", "obsidian", "notion"}
 
 ALLOWED_EXT = {".txt", ".md", ".py", ".js", ".ts", ".vue", ".json",
                ".yaml", ".yml", ".csv", ".html", ".css", ".log", ".sh"}
@@ -149,18 +156,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return resp
 
 
-class ApiTokenMiddleware(BaseHTTPMiddleware):
-    """Si API_TOKEN est défini dans l'environnement, exige X-API-Token sur /api/*."""
-    async def dispatch(self, request: Request, call_next):
-        if API_TOKEN and request.url.path.startswith("/api/") \
-                and request.url.path != "/api/health":
-            if request.headers.get("X-API-Token") != API_TOKEN:
-                return JSONResponse({"detail": "Jeton API invalide ou manquant"}, status_code=401)
-        return await call_next(request)
-
+# Note : un middleware exigeait auparavant un jeton statique partagé (API_TOKEN /
+# en-tête X-API-Token) sur /api/*. Il a été retiré avec l'arrivée des sessions :
+# un secret unique commun à tout le monde n'identifie personne, et il ne pouvait
+# donc pas servir de base au cloisonnement par organisation. L'authentification
+# passe désormais par /api/auth/login et le cookie de session (voir plus bas).
 
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(ApiTokenMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -215,9 +217,101 @@ class DemandeDocument(BaseModel):
     nom_fichier: str = ""
 
 
+# ---------- Authentification : session et profil courant ----------
+# Une session Olivia = un cookie contenant un jeton opaque (voir sessions.py).
+# HttpOnly : le jeton reste inaccessible à tout script de la page, donc une
+# éventuelle faille XSS ne permet pas de l'exfiltrer.
+# Pas de `secure=True` : le déploiement de référence est un poste ou un serveur
+# de réseau local SANS TLS, où un cookie Secure ne serait jamais renvoyé — à
+# passer à True le jour où Olivia est exposée en HTTPS.
+# SameSite=Lax : un site tiers ne peut pas déclencher de requête authentifiée en
+# POST/PUT/DELETE ; CORS est par ailleurs déjà restreint au poste local.
+COOKIE_SESSION = "olivia_session"
+
+
+class DemandeConnexion(BaseModel):
+    username: str
+    password: str
+
+
+def _identite(user: dict) -> dict:
+    """Vue publique d'un compte : jamais le hash, jamais d'horodatage interne."""
+    profil = profiles.get_profile(user.get("profile_id", ""))
+    return {
+        "user_id": user.get("id", ""),
+        "username": user.get("username", ""),
+        "profile_id": user.get("profile_id", ""),
+        "profile_name": profil["name"] if profil else "",
+    }
+
+
+def get_current_session(request: Request) -> dict:
+    """Session résolue depuis le cookie, ou 401 si absente/invalide/expirée."""
+    session = sessions.resolve_session(request.cookies.get(COOKIE_SESSION, ""))
+    if session is None:
+        raise HTTPException(401, "Session absente, invalide ou expirée")
+    return session
+
+
+def get_current_profile(request: Request) -> str:
+    """Identifiant du profil (organisation) de la session courante, ou 401.
+
+    C'est LE point d'entrée du cloisonnement : toute route touchant à des données
+    d'organisation doit passer par Depends(get_current_profile) et n'utiliser que
+    ce profile_id — jamais un identifiant fourni par le client, qui pourrait
+    désigner l'organisation d'à côté.
+    """
+    profile_id = get_current_session(request).get("profile_id", "")
+    if not profiles.is_valid_id(profile_id):
+        raise HTTPException(401, "Session rattachée à un profil invalide")
+    return profile_id
+
+
+@app.post("/api/auth/login")
+async def auth_login(demande: DemandeConnexion, response: Response):
+    """Vérifie les identifiants et ouvre une session."""
+    user = users.verify_credentials(demande.username, demande.password)
+    if user is None:
+        # Message volontairement unique : ne dit pas si le compte existe.
+        raise HTTPException(401, "Identifiant ou mot de passe incorrect")
+    token = sessions.create_session(user["id"], user["profile_id"])
+    response.set_cookie(
+        COOKIE_SESSION, token,
+        max_age=sessions.SESSION_TTL_SECONDS,
+        httponly=True, samesite="lax", secure=False, path="/",
+    )
+    return _identite(user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    """Ferme la session courante. Idempotent : réussit même sans session valide,
+    pour qu'un cookie périmé n'empêche jamais de se déconnecter."""
+    sessions.delete_session(request.cookies.get(COOKIE_SESSION, ""))
+    response.delete_cookie(COOKIE_SESSION, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+async def auth_me(session: dict = Depends(get_current_session)):
+    """Compte et organisation de la session courante."""
+    user = users.get_user(session.get("user_id", ""))
+    if user is None:
+        # Session valide mais compte supprimé entre-temps : à traiter comme une
+        # session morte, pas comme une erreur serveur.
+        raise HTTPException(401, "Compte introuvable")
+    return _identite(user)
+
+
 # ---------- Sécurité : anti path-traversal ----------
-def get_fs_root_entries() -> list[tuple[Path, str]]:
-    """Racines FS effectives avec leur libellé éventuel : liste de tuples
+# Les dossiers documentaires (`fs_roots`) sont un RÉGLAGE, donc désormais propres à
+# une organisation : ces trois fonctions prennent le `profile_id` de la session et
+# ne voient jamais les dossiers d'un autre profil. Un même dossier physique peut
+# être déclaré par deux organisations — c'est le choix de l'exploitant, pas une
+# fuite : Olivia n'ouvre que ce qu'on lui a désigné.
+def get_fs_root_entries(profile_id: str) -> list[tuple[Path, str]]:
+    """Racines FS effectives de cette organisation, avec leur libellé éventuel :
+    liste de tuples
     (chemin résolu, label) issus des dossiers configurés dans les paramètres,
     filtrée aux entrées non vides, valides (dossier existant), résolues et
     dédupliquées par chemin (ordre préservé, on garde la première occurrence
@@ -233,7 +327,7 @@ def get_fs_root_entries() -> list[tuple[Path, str]]:
 
     Lue à chaque appel : un changement de réglage s'applique donc sans redémarrage.
     """
-    s = settings.get()
+    s = reglages(profile_id).get()
     configured = s.get("fs_roots")
     entries: list[tuple[Path, str]] = []
     seen: set[Path] = set()
@@ -271,16 +365,20 @@ def get_fs_root_entries() -> list[tuple[Path, str]]:
     return [(FS_ROOT_DEFAULT, "")]
 
 
-def get_fs_roots() -> list[Path]:
+def get_fs_roots(profile_id: str) -> list[Path]:
     """Racines FS effectives (chemins seuls) — dérivé de get_fs_root_entries()."""
-    return [p for p, _ in get_fs_root_entries()]
+    return [p for p, _ in get_fs_root_entries(profile_id)]
 
 
 _R_PREFIX_RE = re.compile(r"^r(\d+)$")
 
 
-def safe_path(virtual: str) -> tuple[Path, Path, str]:
+def safe_path(profile_id: str, virtual: str) -> tuple[Path, Path, str]:
     """Résout un chemin virtuel `rN/...` vers (chemin_absolu, racine, préfixe 'rN').
+
+    Les `rN` sont indexés sur les racines de CETTE organisation : le même `r0`
+    désigne un dossier différent pour deux profils, et un `rN` que le profil
+    appelant n'a pas configuré répond 404.
 
     Refuse les chemins absolus (403), les préfixes `rN` inconnus (404), et toute
     tentative de sortie de la racine désignée par traversal (403).
@@ -293,7 +391,7 @@ def safe_path(virtual: str) -> tuple[Path, Path, str]:
         )
     first, _, rest = raw.partition("/")
     m = _R_PREFIX_RE.match(first)
-    roots = get_fs_roots()
+    roots = get_fs_roots(profile_id)
     if not m or not (0 <= int(m.group(1)) < len(roots)):
         raise HTTPException(404, "Dossier inconnu")
     idx = int(m.group(1))
@@ -360,8 +458,12 @@ def _mask_secrets(data: dict) -> dict:
 
 # ---------- Routes Ollama ----------
 @app.get("/api/models")
-async def list_models():
+async def list_models(profile_id: str = Depends(get_current_profile)):
     """Modèles installés utilisables pour la CONVERSATION.
+
+    Ne lit aucun réglage, mais reste réservée à une session ouverte comme toute
+    route /api/* : la liste des modèles installés est une information sur la
+    machine, pas une donnée publique.
 
     Ollama liste tous les modèles installés sans distinction d'usage — un
     modèle d'embeddings comme bge-m3 (tiré pour la recherche par le sens, voir
@@ -387,8 +489,8 @@ async def list_models():
             raise HTTPException(502, f"Ollama injoignable : {e}")
 
 
-def _build_options(temperature: float | None) -> dict:
-    s = settings.get()
+def _build_options(profile_id: str, temperature: float | None) -> dict:
+    s = reglages(profile_id).get()
     eff_temp = s.get("temperature", 0.7) if temperature is None else temperature
     options = {"temperature": eff_temp, "num_predict": MAX_TOKENS_REPONSE}
     # CPU/GPU : num_gpu=0 force le calcul CPU ; sinon Ollama utilise le GPU auto.
@@ -397,8 +499,8 @@ def _build_options(temperature: float | None) -> dict:
     return options
 
 
-def _inject_system_prompt(messages: list[ChatMessage]) -> list[dict]:
-    s = settings.get()
+def _inject_system_prompt(profile_id: str, messages: list[ChatMessage]) -> list[dict]:
+    s = reglages(profile_id).get()
     directive = style_directives(s.get("reasoning_style", "balanced"), s.get("tone", "neutral"))
     custom = s.get("system_prompt", "").strip()
     combined = (custom + " " + directive).strip() or "Tu es un assistant IA local."
@@ -408,12 +510,16 @@ def _inject_system_prompt(messages: list[ChatMessage]) -> list[dict]:
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest, profile_id: str = Depends(get_current_profile)):
     body = {
         "model": req.model,
-        "messages": _inject_system_prompt(req.messages),
+        "messages": _inject_system_prompt(profile_id, req.messages),
         "stream": True,
-        "options": _build_options(req.temperature),
+        "options": _build_options(profile_id, req.temperature),
+        # -1 : le modèle reste chargé en mémoire indéfiniment. Poste dédié à
+        # Olivia (pas de partage GPU) : évite de repayer le chargement complet
+        # après chaque pause de plus de 5 min (défaut Ollama).
+        "keep_alive": -1,
     }
 
     async def event_generator():
@@ -432,12 +538,13 @@ async def chat_stream(req: ChatRequest):
 
 
 @app.post("/api/chat")
-async def chat_blocking(req: ChatRequest):
+async def chat_blocking(req: ChatRequest, profile_id: str = Depends(get_current_profile)):
     body = {
         "model": req.model,
-        "messages": _inject_system_prompt(req.messages),
+        "messages": _inject_system_prompt(profile_id, req.messages),
         "stream": False,
-        "options": _build_options(req.temperature),
+        "options": _build_options(profile_id, req.temperature),
+        "keep_alive": -1,
     }
     async with httpx.AsyncClient(timeout=120) as client:
         try:
@@ -450,9 +557,10 @@ async def chat_blocking(req: ChatRequest):
 
 # ---------- Routes Filesystem sandboxées ----------
 @app.get("/api/fs/list")
-async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide = racine)")):
+async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide = racine)"),
+                  profile_id: str = Depends(get_current_profile)):
     raw = (path or "").strip()
-    entries = get_fs_root_entries()
+    entries = get_fs_root_entries(profile_id)
 
     if raw == "":
         if len(entries) == 1:
@@ -483,7 +591,7 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
             "root_label": "Plusieurs dossiers",
         }
 
-    p, root, prefix = safe_path(raw)
+    p, root, prefix = safe_path(profile_id, raw)
     if not p.exists():
         raise HTTPException(404, f"Dossier introuvable : {p}")
     if not p.is_dir():
@@ -500,8 +608,8 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
 
 
 @app.get("/api/fs/read")
-async def fs_read(path: str = Query(...)):
-    p, root, prefix = safe_path(path)
+async def fs_read(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
+    p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     if p.suffix.lower() not in ALLOWED_EXT:
@@ -515,8 +623,8 @@ async def fs_read(path: str = Query(...)):
 
 
 @app.get("/api/fs/preview")
-async def fs_preview(path: str = Query(...)):
-    p, root, prefix = safe_path(path)
+async def fs_preview(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
+    p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     rel = _virtual_path(p, root, prefix)
@@ -533,18 +641,18 @@ MAX_TEXT_CHARS = 60_000
 
 
 @app.get("/api/fs/text")
-def fs_text(path: str = Query(...)):
+def fs_text(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
     """Texte brut d'un document (Word, Excel, PDF, texte, CSV), pour la conversation.
 
     Complète `/api/fs/preview`, qui produit un aperçu structuré destiné à
     l'affichage : ici on veut le contenu lisible par le modèle.
     """
-    p, root, prefix = safe_path(path)
+    p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     if p.suffix.lower() not in documents.SEARCHABLE_EXT:
         raise HTTPException(400, f"Ce type de fichier ne contient pas de texte : {p.suffix}")
-    content = documents.extract_text(p)
+    content = documents.extract_text(profile_id, p)
     truncated = len(content) > MAX_TEXT_CHARS
     return {
         "path": _virtual_path(p, root, prefix),
@@ -556,15 +664,16 @@ def fs_text(path: str = Query(...)):
 
 
 @app.get("/api/fs/download")
-async def fs_download(path: str = Query(...)):
-    p, _root, _prefix = safe_path(path)
+async def fs_download(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
+    p, _root, _prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     return FileResponse(str(p), filename=p.name)
 
 
 @app.post("/api/fs/upload")
-async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
+async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
+                    profile_id: str = Depends(get_current_profile)):
     # Nom de fichier assaini : on ne garde que le basename.
     safe_name = Path(file.filename or "fichier").name
     if not safe_name or safe_name in {".", ".."}:
@@ -582,11 +691,11 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
 
     raw = (path or "").strip()
     if raw == "":
-        root = get_fs_roots()[0]
+        root = get_fs_roots(profile_id)[0]
         prefix = "r0"
         target_dir = root / UPLOAD_SUBDIR
     else:
-        target_dir, root, prefix = safe_path(raw)
+        target_dir, root, prefix = safe_path(profile_id, raw)
     target_dir.mkdir(parents=True, exist_ok=True)
     target_dir = target_dir.resolve()
     try:
@@ -616,7 +725,7 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query("")):
     # Le fichier vient d'apparaître : sans ce déclenchement, il resterait
     # introuvable par la recherche par le sens jusqu'au prochain démarrage ou
     # clic manuel sur « Construire l'index ». Tâche de fond, jamais bloquant.
-    _indexer_automatiquement()
+    _indexer_automatiquement(profile_id)
     return {"path": _virtual_path(dest, root, prefix), "name": safe_name, "size": size}
 
 
@@ -642,25 +751,26 @@ def _iter_searchable_files(targets):
                 yield fp, _virtual_path(fp, root, prefix)
 
 
-def _resolve_search_targets(path: str) -> list[tuple[Path, Path, str]]:
+def _resolve_search_targets(profile_id: str, path: str) -> list[tuple[Path, Path, str]]:
     """Périmètre d'un balayage : (dossier à parcourir, racine, préfixe 'rN').
 
-    Chemin vide = toutes les racines configurées. Sinon un seul sous-dossier,
-    validé par `safe_path()` — le balayage reste donc borné au sandbox.
+    Chemin vide = toutes les racines configurées PAR CETTE ORGANISATION. Sinon un
+    seul sous-dossier, validé par `safe_path()` — le balayage reste donc borné au
+    sandbox du profil appelant.
     """
     raw = (path or "").strip()
     if raw == "":
-        return [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots())]
-    p, root, prefix = safe_path(raw)
+        return [(r, r, f"r{i}") for i, r in enumerate(get_fs_roots(profile_id))]
+    p, root, prefix = safe_path(profile_id, raw)
     if not p.is_dir():
         raise HTTPException(400, "Le chemin doit être un dossier")
     return [(p, root, prefix)]
 
 
-def _virtual_for_abs(p: Path) -> str | None:
+def _virtual_for_abs(profile_id: str, p: Path) -> str | None:
     """Chemin virtuel rN/... pour un chemin absolu, ou None s'il ne tombe sous
-    aucune racine actuellement autorisée."""
-    for i, root in enumerate(get_fs_roots()):
+    aucune racine actuellement autorisée pour cette organisation."""
+    for i, root in enumerate(get_fs_roots(profile_id)):
         try:
             rel = p.resolve().relative_to(root)
         except (OSError, ValueError):
@@ -673,67 +783,93 @@ def _virtual_for_abs(p: Path) -> str | None:
 # est un travail CPU/disque bloquant. FastAPI l'exécute alors dans son pool de
 # threads, ce qui évite de figer le reste de l'application pendant une recherche.
 @app.get("/api/fs/search")
-def fs_search(q: str = Query(..., min_length=1), path: str = Query("")):
+def fs_search(q: str = Query(..., min_length=1), path: str = Query(""),
+              profile_id: str = Depends(get_current_profile)):
     """Recherche en langage courant dans le contenu des documents.
 
     La requête est une phrase ordinaire (jamais une expression régulière) ;
     la comparaison ignore la casse et les accents ; les résultats sont groupés
     par document et classés par pertinence. Voir `docsearch.py`.
     """
-    return docsearch.search(_iter_searchable_files(_resolve_search_targets(path)), q)
+    cibles = _resolve_search_targets(profile_id, path)
+    return docsearch.search(profile_id, _iter_searchable_files(cibles), q)
 
 
 # ---------- Routes Recherche par le sens (embeddings + index vectoriel) ----------
-def _indexer_automatiquement() -> None:
-    """Lance une mise à jour de l'index sémantique en tâche de fond, sans jamais
-    bloquer l'appelant : au démarrage de l'application (rattrape les documents
-    ajoutés pendant qu'Olivia n'était pas lancée) et après chaque import réussi
-    (`/api/fs/upload`), pour qu'un fichier tout juste déposé soit cherchable par
-    le sens sans action manuelle.
+def _indexer_automatiquement(profile_id: str) -> None:
+    """Lance une mise à jour de l'index sémantique d'UNE organisation en tâche de
+    fond, sans jamais bloquer l'appelant : au démarrage de l'application (rattrape
+    les documents ajoutés pendant qu'Olivia n'était pas lancée) et après chaque
+    import réussi (`/api/fs/upload`), pour qu'un fichier tout juste déposé soit
+    cherchable par le sens sans action manuelle.
 
     Ne fait rien si le modèle bge-m3 n'est pas installé : lancer quand même la
     construction échouerait fichier par fichier sans jamais aboutir — mieux vaut
     ne pas occuper un thread pour ça. `lancer_construction()` refuse par ailleurs
-    silencieusement si une construction tourne déjà (verrou), donc un import
-    pendant une construction en cours ne fait qu'attendre le prochain passage.
+    silencieusement si une construction tourne déjà POUR CE PROFIL (verrou par
+    organisation), donc un import pendant une construction en cours ne fait
+    qu'attendre le prochain passage — et n'empêche jamais une autre organisation
+    de construire le sien.
     """
-    if docindex.etat().get("modele_disponible"):
-        docindex.lancer_construction(_iter_searchable_files(_resolve_search_targets("")))
+    if docindex.etat(profile_id).get("modele_disponible"):
+        cibles = _resolve_search_targets(profile_id, "")
+        docindex.lancer_construction(profile_id, _iter_searchable_files(cibles))
 
 
 @app.on_event("startup")
 def _demarrer_indexation_semantique():
-    _indexer_automatiquement()
+    """Rattrapage au démarrage, POUR CHAQUE organisation provisionnée.
+
+    Il n'y a pas de session ouverte à cet instant : on ne peut pas résoudre « le »
+    profil courant, et laisser l'indexation attendre la première connexion
+    priverait la recherche par le sens des documents ajoutés hors ligne. On balaie
+    donc le registre. Chaque profil a son propre verrou et son propre index, donc
+    ces constructions cohabitent ; elles se mettent naturellement en file sur
+    Ollama, qui sert les requêtes d'embeddings une à une.
+    """
+    try:
+        profils = profiles.list_profiles()
+    except Exception:
+        # Registre absent (installation neuve) ou illisible : le démarrage du
+        # service ne doit jamais en dépendre.
+        return
+    for profil in profils:
+        try:
+            _indexer_automatiquement(profil["id"])
+        except Exception:
+            continue
 
 
 @app.get("/api/docindex/status")
-def docindex_status():
+def docindex_status(profile_id: str = Depends(get_current_profile)):
     """État de l'index sémantique (embeddings bge-m3 + FAISS). Voir docindex.etat()."""
-    return docindex.etat()
+    return docindex.etat(profile_id)
 
 
 @app.post("/api/docindex/build")
-def docindex_build(path: str = Query("")):
+def docindex_build(path: str = Query(""), profile_id: str = Depends(get_current_profile)):
     """Démarre (ou signale déjà en cours) la construction/mise à jour de l'index
     sémantique en tâche de fond. Route synchrone : le lancement est instantané,
     le travail réel se fait dans un thread démon (voir docindex.py)."""
-    targets = _resolve_search_targets(path)
-    demarree = docindex.lancer_construction(_iter_searchable_files(targets))
-    etat = docindex.etat()
+    targets = _resolve_search_targets(profile_id, path)
+    demarree = docindex.lancer_construction(profile_id, _iter_searchable_files(targets))
+    etat = docindex.etat(profile_id)
     etat["demarree"] = demarree
     return etat
 
 
 @app.post("/api/docindex/cancel")
-def docindex_cancel():
-    """Interrompt la construction en cours : l'arrêt est effectif entre deux
-    fichiers, et le travail déjà fait est conservé."""
-    docindex.annuler_construction()
-    return docindex.etat()
+def docindex_cancel(profile_id: str = Depends(get_current_profile)):
+    """Interrompt la construction en cours de cette organisation : l'arrêt est
+    effectif entre deux fichiers, et le travail déjà fait est conservé. Une
+    construction lancée par une autre organisation n'est pas touchée."""
+    docindex.annuler_construction(profile_id)
+    return docindex.etat(profile_id)
 
 
 @app.get("/api/fs/search/semantic")
-def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query("")):
+def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query(""),
+                       profile_id: str = Depends(get_current_profile)):
     """Recherche par le sens (embeddings + FAISS) — voir docindex.py. Ne renvoie
     que des résultats sous une racine actuellement configurée : une entrée de
     l'index devenue hors périmètre (fs_roots reconfiguré depuis la construction)
@@ -741,12 +877,12 @@ def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query(""))
     dossier = None
     raw = (path or "").strip()
     if raw:
-        p, _root, _prefix = safe_path(raw)
+        p, _root, _prefix = safe_path(profile_id, raw)
         dossier = p
-    brut = docindex.rechercher(q, k=10, dossier=dossier)
+    brut = docindex.rechercher(profile_id, q, k=10, dossier=dossier)
     resultats = []
     for r in brut["results"]:
-        virtuel = _virtual_for_abs(Path(r["path"]))
+        virtuel = _virtual_for_abs(profile_id, Path(r["path"]))
         if virtuel is None:
             continue
         resultats.append({**r, "path": virtuel})
@@ -767,10 +903,10 @@ def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query(""))
 #   - dossiers uniquement : jamais de fichier, jamais de contenu, jamais de taille ;
 #   - un seul niveau de profondeur par appel (aucune récursion) ;
 #   - les dossiers illisibles (droits système) sont ignorés silencieusement ;
-#   - elles restent soumises comme toute route /api/* à ApiTokenMiddleware
-#     (API_TOKEN) — voir plus haut. Ne pas les exempter de ce middleware.
+#   - elles doivent rester réservées à une session authentifiée comme toute route
+#     /api/* (voir get_current_profile) : ne jamais les en exempter.
 @app.get("/api/fs/drives")
-async def fs_drives():
+async def fs_drives(profile_id: str = Depends(get_current_profile)):
     """Lecteurs disponibles : lettres existantes sous Windows, '/' sous POSIX."""
     drives: list[str] = []
     if os.name == "nt":
@@ -788,7 +924,8 @@ async def fs_drives():
 
 
 @app.get("/api/fs/browse")
-async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sandbox)")):
+async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sandbox)"),
+                    profile_id: str = Depends(get_current_profile)):
     """Sous-dossiers directs d'un chemin absolu — et rien d'autre (voir note ci-dessus)."""
     p = Path(path)
     if not p.is_absolute():
@@ -811,12 +948,13 @@ async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sand
 
 # ---------- Routes Settings ----------
 @app.get("/api/settings")
-async def get_settings():
-    return JSONResponse(_mask_secrets(settings.get()))
+async def get_settings(profile_id: str = Depends(get_current_profile)):
+    """Réglages de l'organisation connectée (jamais ceux d'une autre)."""
+    return JSONResponse(_mask_secrets(reglages(profile_id).get()))
 
 
 @app.put("/api/settings")
-async def update_settings(patch: dict):
+async def update_settings(patch: dict, profile_id: str = Depends(get_current_profile)):
     if not isinstance(patch, dict):
         raise HTTPException(400, "Body doit être un objet JSON")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
@@ -842,8 +980,9 @@ async def update_settings(patch: dict):
                 raise HTTPException(400, f"Dossier introuvable : {v}")
             cleaned.append({"path": v, "label": label})
         patch["fs_roots"] = cleaned
-    settings.update(patch)
-    return JSONResponse(_mask_secrets(settings.get()))
+    reglages_profil = reglages(profile_id)
+    reglages_profil.update(patch)
+    return JSONResponse(_mask_secrets(reglages_profil.get()))
 
 
 def _strip_masked(patch: dict):
@@ -861,13 +1000,16 @@ def _strip_masked(patch: dict):
 
 # ---------- Route Reconnaissance de caractères (documents scannés) ----------
 @app.get("/api/ocr/status")
-def ocr_status():
+def ocr_status(profile_id: str = Depends(get_current_profile)):
     """État du moteur de reconnaissance, affiché dans Paramètres → Documents.
+
+    Le moteur est commun à la machine, mais les deux réglages qui le pilotent
+    (`ocr_enabled`, `ocr_tesseract_path`) sont ceux de l'organisation connectée.
 
     Route volontairement synchrone : elle touche le disque (présence du binaire,
     langues installées). Elle ne déclenche aucune reconnaissance.
     """
-    return ocr.etat()
+    return ocr.etat(profile_id)
 
 
 # ---------- Routes Production de documents Word ----------
@@ -914,15 +1056,15 @@ def _destination_libre(dossier: Path, nom: str) -> Path:
 
 
 @app.get("/api/documents/status")
-def documents_status():
+def documents_status(profile_id: str = Depends(get_current_profile)):
     """État du modèle Word de l'établissement (Paramètres → Documents)."""
-    etat = docmodele.etat()
+    etat = docmodele.etat(profile_id)
     etat["types"] = [{"id": k, "libelle": v["libelle"]} for k, v in docgen.PROFILS.items()]
     return etat
 
 
 @app.post("/api/documents/modele")
-async def documents_modele(body: dict):
+async def documents_modele(body: dict, profile_id: str = Depends(get_current_profile)):
     """(Re)fabrique le modèle de l'établissement à partir d'un document réel.
 
     `source` est un chemin virtuel `rN/...` : la lecture reste sandboxée. Le
@@ -932,31 +1074,32 @@ async def documents_modele(body: dict):
     source = (body.get("source") or "").strip()
     if not source:
         raise HTTPException(400, "Chemin du document source manquant")
-    p, _root, _prefix = safe_path(source)
+    p, _root, _prefix = safe_path(profile_id, source)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Document introuvable : {source}")
     try:
-        infos = docmodele.construire_modele(p)
+        infos = docmodele.construire_modele(p, profile_id=profile_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Fabrication du modèle impossible : {e}")
-    return {"ok": True, "modele": infos, "etat": docmodele.etat()}
+    return {"ok": True, "modele": infos, "etat": docmodele.etat(profile_id)}
 
 
 @app.post("/api/documents/generate")
-async def documents_generate(demande: DemandeDocument):
+async def documents_generate(demande: DemandeDocument,
+                             profile_id: str = Depends(get_current_profile)):
     """Produit un document Word dans le dossier de travail de l'utilisatrice."""
     if demande.type not in docgen.PROFILS:
         raise HTTPException(400, f"Type de document inconnu : {demande.type}")
 
     raw = (demande.dossier or "").strip()
     if raw == "":
-        root = get_fs_roots()[0]
+        root = get_fs_roots(profile_id)[0]
         prefix = "r0"
         dossier = root
     else:
-        dossier, root, prefix = safe_path(raw)
+        dossier, root, prefix = safe_path(profile_id, raw)
     if dossier.exists() and not dossier.is_dir():
         raise HTTPException(400, "La destination n'est pas un dossier")
     dossier.mkdir(parents=True, exist_ok=True)
@@ -979,7 +1122,7 @@ async def documents_generate(demande: DemandeDocument):
     # Priorité : champ rempli dans la demande > réglage de l'utilisatrice >
     # défaut codé dans docgen.TEXTES. On ne remplace QUE les champs laissés
     # vides par la requête — une valeur saisie dans le formulaire doit primer.
-    s = settings.get()
+    s = reglages(profile_id).get()
     for champ, cle_reglage in (
         ("appel", "docgen_appel"),
         ("formule_politesse", "docgen_formule_politesse"),
@@ -991,7 +1134,10 @@ async def documents_generate(demande: DemandeDocument):
             if valeur:
                 charge[champ] = valeur
     try:
-        infos = docgen.generer(charge, dest)
+        # Le modèle Word est résolu ICI, avec le profil connecté : `docgen` n'a pas
+        # de session et retomberait sinon sur l'emplacement par défaut.
+        infos = docgen.generer(charge, dest,
+                               chemin_modele=docmodele.chemin_modele(profile_id))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -1011,17 +1157,20 @@ async def documents_generate(demande: DemandeDocument):
 
 # ---------- Route Recherche web ----------
 @app.post("/api/search")
-async def do_search(body: dict):
+async def do_search(body: dict, profile_id: str = Depends(get_current_profile)):
     query = (body.get("query") or "").strip()
     if not query:
         raise HTTPException(400, "query manquante")
-    s = settings.get()
+    s = reglages(profile_id).get()
     provider = s.get("search_provider", "duckduckgo")
     try:
         used_provider, results = await web_search(
             provider, query,
             searxng_url=s.get("searxng_url", "http://localhost:8888"),
             brave_api_key=s.get("search_brave_api_key", ""),
+            # Transmis explicitement : `search.py` ne lit plus les réglages, qui
+            # appartiennent maintenant à une organisation (voir settings.py).
+            official_only=bool(s.get("search_official_only", False)),
             limit=body.get("limit", 5),
         )
         return {"provider": used_provider, "query": query, "results": results}
@@ -1030,34 +1179,40 @@ async def do_search(body: dict):
 
 
 # ---------- Routes Conversations ----------
+# Les quatre routes portant un {conv_id} répondent 404 — et non 403 — pour la
+# conversation d'une AUTRE organisation : son fichier n'existe pas dans le dossier
+# du profil appelant, donc un identifiant deviné est indiscernable d'un identifiant
+# inventé. C'est exactement l'effet voulu : aucune réponse ne confirme l'existence
+# d'une conversation qu'on n'a pas le droit de voir.
 @app.get("/api/conversations")
-async def list_conversations():
+async def list_conversations(profile_id: str = Depends(get_current_profile)):
     """Liste des conversations (métadonnées seules), triées par date de mise à jour."""
-    return {"conversations": conversations.list_conversations()}
+    return {"conversations": conversations.list_conversations(profile_id)}
 
 
 @app.get("/api/conversations/{conv_id}")
-async def get_conversation(conv_id: str):
+async def get_conversation(conv_id: str, profile_id: str = Depends(get_current_profile)):
     """Conversation complète (messages inclus)."""
-    conv = conversations.get_conversation(conv_id)
+    conv = conversations.get_conversation(profile_id, conv_id)
     if conv is None:
         raise HTTPException(404, "Conversation introuvable")
     return conv
 
 
 @app.post("/api/conversations")
-async def create_conversation(body: dict):
+async def create_conversation(body: dict, profile_id: str = Depends(get_current_profile)):
     """Crée une nouvelle conversation et la renvoie (avec son id)."""
     return conversations.create_conversation(
-        messages=body.get("messages"), title=body.get("title"),
+        profile_id, messages=body.get("messages"), title=body.get("title"),
     )
 
 
 @app.put("/api/conversations/{conv_id}")
-async def update_conversation(conv_id: str, body: dict):
+async def update_conversation(conv_id: str, body: dict,
+                              profile_id: str = Depends(get_current_profile)):
     """Met à jour les messages et/ou le titre d'une conversation existante."""
     conv = conversations.update_conversation(
-        conv_id, messages=body.get("messages"), title=body.get("title"),
+        profile_id, conv_id, messages=body.get("messages"), title=body.get("title"),
     )
     if conv is None:
         raise HTTPException(404, "Conversation introuvable")
@@ -1065,18 +1220,23 @@ async def update_conversation(conv_id: str, body: dict):
 
 
 @app.delete("/api/conversations/{conv_id}")
-async def delete_conversation(conv_id: str):
+async def delete_conversation(conv_id: str, profile_id: str = Depends(get_current_profile)):
     """Supprime une conversation."""
-    if not conversations.delete_conversation(conv_id):
+    if not conversations.delete_conversation(profile_id, conv_id):
         raise HTTPException(404, "Conversation introuvable")
     return {"ok": True}
 
 
 # ---------- Routes Connecteurs ----------
 @app.get("/api/connectors/status")
-async def connectors_status():
-    """État synthétique et stylisable de tous les connecteurs (pour la barre UI)."""
-    c = settings.get().get("connectors", {})
+async def connectors_status(profile_id: str = Depends(get_current_profile)):
+    """État synthétique et stylisable des connecteurs de CETTE organisation.
+
+    Les identifiants de connecteurs (hôte IMAP, comptes, jetons) vivent dans les
+    réglages, donc par profil : deux organisations sur le même poste ne voient
+    jamais la boîte mail l'une de l'autre.
+    """
+    c = reglages(profile_id).get().get("connectors", {})
 
     def mail(cfg):
         return {
@@ -1107,8 +1267,8 @@ async def connectors_status():
 
 
 @app.get("/api/connectors/mail/unread")
-async def connectors_mail_unread():
-    cfg = settings.get().get("connectors", {}).get("imap", {})
+async def connectors_mail_unread(profile_id: str = Depends(get_current_profile)):
+    cfg = reglages(profile_id).get().get("connectors", {}).get("imap", {})
     if not cfg.get("enabled"):
         return {"enabled": False, "count": 0}
     try:
@@ -1120,8 +1280,8 @@ async def connectors_mail_unread():
 
 
 @app.get("/api/connectors/imap/preview")
-async def connectors_imap(limit: int = 10):
-    cfg = settings.get().get("connectors", {}).get("imap", {})
+async def connectors_imap(limit: int = 10, profile_id: str = Depends(get_current_profile)):
+    cfg = reglages(profile_id).get().get("connectors", {}).get("imap", {})
     if not cfg.get("enabled"):
         return {"enabled": False, "messages": []}
     try:
@@ -1133,21 +1293,30 @@ async def connectors_imap(limit: int = 10):
 
 
 @app.get("/api/connectors/calendar/preview")
-async def connectors_calendar():
-    cfg = settings.get().get("connectors", {}).get("calendar_ics", {})
+async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
+    cfg = reglages(profile_id).get().get("connectors", {}).get("calendar_ics", {})
     if not cfg.get("enabled") or not cfg.get("path"):
         return {"enabled": False, "events": []}
     return {"enabled": True, "events": calendar_list_events(cfg.get("path", ""), limit=20)}
 
 
 # ---------- RGPD ----------
+# Ces deux routes n'agissent QUE sur l'organisation connectée. C'est le point le
+# plus sensible du cloisonnement : en mode mono-organisation, elles agissaient sur
+# la totalité du poste, et une demande de droit à l'oubli d'une collectivité
+# effacerait les données de toutes les autres présentes sur la même machine.
+# Toute évolution de ces routes doit préserver cette propriété.
 @app.get("/api/privacy/export")
-async def privacy_export():
-    """Droit d'accès/portabilité : export de toutes les données locales de l'app."""
+async def privacy_export(profile_id: str = Depends(get_current_profile)):
+    """Droit d'accès/portabilité : export des données locales de l'organisation
+    connectée (ses réglages et ses conversations), et d'elle seule."""
+    profil = profiles.get_profile(profile_id)
     payload = {
-        "settings": settings.get(),
-        "conversations": conversations.export_all_conversations(),
-        "note": "Toutes vos données restent sur cette machine. Aucun envoi externe.",
+        "organisation": (profil or {}).get("name", ""),
+        "settings": reglages(profile_id).get(),
+        "conversations": conversations.export_all_conversations(profile_id),
+        "note": "Toutes vos données restent sur cette machine. Aucun envoi externe. "
+                "Cet export ne contient que les données de votre organisation.",
     }
     return JSONResponse(
         payload,
@@ -1156,11 +1325,21 @@ async def privacy_export():
 
 
 @app.post("/api/privacy/delete")
-async def privacy_delete():
-    """Droit à l'effacement : réinitialise les paramètres + purge la zone d'upload de l'app
-    dans chacune des racines documentaires configurées."""
+async def privacy_delete(profile_id: str = Depends(get_current_profile)):
+    """Droit à l'effacement, POUR LA SEULE ORGANISATION CONNECTÉE : réinitialise
+    ses réglages, supprime ses conversations et son index sémantique, purge la zone
+    d'upload de l'app dans chacune de SES racines documentaires, et retire du cache
+    OCR les entrées venues de ces mêmes racines.
+
+    L'ORDRE compte : les dossiers documentaires sont lus AVANT la réinitialisation
+    des réglages, puisque c'est elle qui efface `fs_roots`. Les lire après ne
+    donnerait plus que le dossier par défaut, et la zone d'upload comme le cache
+    OCR de l'organisation resteraient en place — un effacement incomplet, annoncé
+    comme complet.
+    """
+    racines = get_fs_roots(profile_id)
     removed = 0
-    for root in get_fs_roots():
+    for root in racines:
         upload_dir = root / UPLOAD_SUBDIR
         if upload_dir.exists():
             for f in upload_dir.glob("*"):
@@ -1172,13 +1351,15 @@ async def privacy_delete():
                         shutil.rmtree(f)
                 except Exception:
                     pass
-    settings.reset()
-    conversations_removed = conversations.delete_all_conversations()
     # Le texte reconnu sur les documents scannés et l'index sémantique sont des
     # RECOPIES du contenu de documents personnels : ils relèvent du droit à
-    # l'effacement au même titre que les conversations.
-    ocr_cache_removed = ocr.vider_cache()
-    docindex_removed = docindex.purger_index()
+    # l'effacement au même titre que les conversations. Le cache OCR étant commun
+    # au poste, il est filtré sur les racines de cette organisation (voir
+    # ocr.vider_cache) ; l'index, lui, est déjà propre au profil.
+    ocr_cache_removed = ocr.vider_cache(racines)
+    docindex_removed = docindex.purger_index(profile_id)
+    reglages(profile_id).reset()
+    conversations_removed = conversations.delete_all_conversations(profile_id)
     return {
         "ok": True, "settings_reset": True, "uploads_removed": removed,
         "conversations_removed": conversations_removed,
@@ -1190,21 +1371,23 @@ async def privacy_delete():
 # ---------- Health ----------
 @app.get("/api/health")
 async def health():
-    s = settings.get()
+    """Diagnostic de SERVICE, volontairement laissé sans authentification.
+
+    Choix assumé du cloisonnement : cette route ne rapporte plus `fs_roots`,
+    `compute_device` ni la liste des connecteurs actifs. Ces trois informations
+    sont devenues des réglages d'organisation, et /api/health n'a pas de session
+    donc pas d'organisation à désigner — les servir aurait exigé soit d'en choisir
+    une arbitrairement (faux), soit d'agréger tous les profils (fuite : les
+    dossiers documentaires d'une collectivité, lisibles sans être connecté).
+    Elle répond donc à la seule question qui la justifie : « le service est-il
+    debout, et avec quoi parle-t-il ? ». Les informations retirées restent
+    disponibles, authentifiées, sur /api/settings et /api/connectors/status.
+    """
     return {
         "status": "ok",
         "version": app.version,
         "ollama": OLLAMA_URL,
-        "fs_roots": [{"path": str(p), "label": label} for p, label in get_fs_root_entries()],
-        "compute_device": s.get("compute_device", "gpu"),
         "frontend_ui": FRONTEND_DIST.exists(),
-        "api_token_required": bool(API_TOKEN),
-        # Restreint aux connecteurs réellement supportés : un settings.json ancien
-        # peut contenir des clés de connecteurs retirés (OAuth, École Directe…),
-        # et les annoncer ici laisserait croire qu'ils sont encore actifs.
-        "active_connectors": [k for k, v in s.get("connectors", {}).items()
-                              if k in CONNECTEURS_SUPPORTES
-                              and isinstance(v, dict) and v.get("enabled")],
     }
 
 

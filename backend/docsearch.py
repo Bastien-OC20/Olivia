@@ -114,12 +114,19 @@ def motif_litteral(mot: str) -> re.Pattern:
 
 
 # ---------- Cache d'extraction ----------
-def _texte_indexe(path: Path, mtime_ns: int, size: int) -> tuple[str, str, dict]:
+def _texte_indexe(profile_id: str, path: Path, mtime_ns: int,
+                  size: int) -> tuple[str, str, dict]:
     """(texte d'origine, texte normalisé, provenance) — extrait une fois par version.
 
     La provenance ({"ocr": bool, "notice": str}) vient de `documents` : elle dit
     si le texte a été reconnu automatiquement sur un document scanné, ce que
     l'interface doit signaler.
+
+    Le cache est COMMUN à toutes les organisations, pour la même raison que le
+    cache OCR (voir l'en-tête de ocr.py) : sa clé est (chemin, date, taille), donc
+    deux organisations ne s'y croisent que sur un fichier auquel elles ont déjà
+    accès toutes les deux. `profile_id` ne sert qu'à décider si la reconnaissance
+    de caractères est active, jamais à choisir ce qui est lu.
     """
     cle = (str(path), mtime_ns, size)
     with _cache_lock:
@@ -127,7 +134,7 @@ def _texte_indexe(path: Path, mtime_ns: int, size: int) -> tuple[str, str, dict]
         if hit is not None:
             _cache.move_to_end(cle)
             return hit
-    brut, meta = documents.extract_text_meta(path)
+    brut, meta = documents.extract_text_meta(profile_id, path)
     valeur = (brut, fold(brut), meta)
     _ranger_en_cache(cle, valeur)
     return valeur
@@ -210,12 +217,13 @@ def _fenetre(ligne: str, premier: int) -> str:
 
 
 # ---------- Recherche ----------
-def _analyser_document(path: Path, nom: str, termes: list[str], phrase: str,
-                       mtime_ns: int, size: int) -> tuple[int, list[str], dict] | None:
+def _analyser_document(profile_id: str, path: Path, nom: str, termes: list[str],
+                       phrase: str, mtime_ns: int,
+                       size: int) -> tuple[int, list[str], dict] | None:
     """Score, extraits et provenance d'un document, ou None s'il ne contient pas
     tous les mots."""
     nom_plie = fold(nom)
-    orig, plie, meta = _texte_indexe(path, mtime_ns, size)
+    orig, plie, meta = _texte_indexe(profile_id, path, mtime_ns, size)
     score = 0
     for t in termes:
         dans_nom = nom_plie.count(t)
@@ -230,10 +238,13 @@ def _analyser_document(path: Path, nom: str, termes: list[str], phrase: str,
     return score, _extraits(orig, plie, termes), meta
 
 
-def search(fichiers, requete: str) -> dict:
+def search(profile_id: str, fichiers, requete: str) -> dict:
     """Fouille les fichiers fournis et renvoie les documents pertinents.
 
-    `fichiers` : itérable de tuples (chemin absolu, chemin virtuel affiché).
+    `fichiers` : itérable de tuples (chemin absolu, chemin virtuel affiché). Le
+    cloisonnement se joue chez l'appelant, qui n'y met que les dossiers
+    (`fs_roots`) de l'organisation concernée ; `profile_id` sert ici à lire le
+    réglage de reconnaissance de caractères de cette même organisation.
     Les bornes atteintes sont signalées dans la réponse : l'utilisatrice doit
     savoir qu'un résultat est partiel.
     """
@@ -259,7 +270,7 @@ def search(fichiers, requete: str) -> dict:
             tronque = True
             raison = f"recherche interrompue après {int(MAX_SECONDS)} secondes"
             break
-        if not documents.est_cherchable(path.suffix):
+        if not documents.est_cherchable(profile_id, path.suffix):
             continue
         try:
             st = path.stat()
@@ -270,7 +281,7 @@ def search(fichiers, requete: str) -> dict:
             continue
         examines += 1
         try:
-            trouve = _analyser_document(path, path.name, termes, phrase,
+            trouve = _analyser_document(profile_id, path, path.name, termes, phrase,
                                         st.st_mtime_ns, st.st_size)
         except Exception:
             continue                      # un document abîmé n'arrête pas la recherche

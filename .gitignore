@@ -24,6 +24,10 @@ modeles/
 backend/settings.json
 backend/settings.tmp
 backend/conversations/
+# Comptes, organisations et sessions ouvertes : dérivés de mots de passe et
+# jetons de session vivants (voir backend/profiles.py, users.py, sessions.py).
+# Ce dossier accueillera aussi les données cloisonnées par organisation.
+backend/profiles/
 # Texte reconnu sur les documents scannés : recopie du contenu de fichiers
 # personnels, et cache reconstructible — jamais versionné.
 backend/ocr_cache/

@@ -395,8 +395,12 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 - **CORS restreint** au poste local (plus de wildcard).
 - Écoute sur `127.0.0.1` par défaut.
 - Upload : allowlist d'extensions, nom assaini, taille max, sandbox.
-- **Jeton API optionnel** : définissez `API_TOKEN` dans l'environnement pour exiger l'en-tête
-  `X-API-Token` sur `/api/*`.
+- **Comptes et sessions** : `POST /api/auth/login` ouvre une session (cookie `olivia_session`,
+  `HttpOnly`, `SameSite=Lax`, 8 h) ; `POST /api/auth/logout` la ferme ; `GET /api/auth/me` renvoie
+  le compte et l'organisation connectés. Les comptes se créent avec
+  `python backend/manage_users.py` (mots de passe dérivés en PBKDF2-HMAC-SHA256 salé, jamais
+  stockés en clair). Remplace l'ancien jeton statique partagé `API_TOKEN` / `X-API-Token`, qui
+  n'identifiait personne.
 - Extensions lisibles : `.txt .md .py .js .ts .vue .json .yaml .yml .csv .html .css .log .sh`.
 
 ## 🔍 Recherche web

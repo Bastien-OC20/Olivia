@@ -29,6 +29,13 @@ Dégradation propre, garantie : si `faiss` n'est pas installé, si le modèle
 `bge-m3` n'a pas été tiré, si Ollama est éteint ou si l'index n'existe pas
 encore, les fonctions publiques renvoient un état « indisponible » assorti d'un
 message clair. Aucune exception ne remonte jamais jusqu'à la couche HTTP.
+
+CLOISONNEMENT : un index par organisation, dans
+backend/profiles/<profile_id>/docindex/. Toutes les fonctions publiques prennent
+le `profile_id` en PREMIER paramètre, résolu par `main.get_current_profile()` —
+jamais fourni par le client. L'état vivant du module (verrou de construction,
+progression, annulation, cache mémoire de l'index) est lui aussi keyé par
+organisation : voir la section « État par organisation » plus bas.
 """
 import json
 import os
@@ -43,6 +50,7 @@ from typing import Callable, Optional
 import httpx
 
 from . import documents
+from . import profiles
 
 # `faiss` (et `numpy`, qui vient avec) est une dépendance obligatoire de CE
 # module. Mais `main.py` importe `docindex` au démarrage : sans ce garde-fou,
@@ -86,12 +94,28 @@ EMBED_TIMEOUT = 60.0
 EMBED_TIMEOUT_PREMIER_APPEL = 180.0
 
 # ---------- Index sur disque ----------
-# Volontairement placé dans backend/, à côté des conversations et du cache OCR :
-# sur le disque portable, l'index voyage donc avec l'application.
-DOSSIER_INDEX = Path(__file__).resolve().parent / "docindex"
-FICHIER_INDEX = DOSSIER_INDEX / "index.faiss"
-FICHIER_META = DOSSIER_INDEX / "meta.json"
+# Volontairement placé sous backend/profiles/<profile_id>/, à côté des
+# conversations et des réglages de la même organisation : sur le disque portable,
+# l'index voyage donc avec l'application, et il disparaît avec le profil auquel
+# il appartient (droit à l'effacement).
+SOUS_DOSSIER_INDEX = "docindex"
+NOM_INDEX = "index.faiss"
+NOM_META = "meta.json"
 VERSION_META = 1                       # à incrémenter si le format des métadonnées change
+
+
+def dossier_index(profile_id: str) -> Path:
+    """Dossier d'index d'une organisation (valide l'identifiant, voir profiles.py)."""
+    return profiles.profile_dir(profile_id) / SOUS_DOSSIER_INDEX
+
+
+def _fichier_index(profile_id: str) -> Path:
+    return dossier_index(profile_id) / NOM_INDEX
+
+
+def _fichier_meta(profile_id: str) -> Path:
+    return dossier_index(profile_id) / NOM_META
+
 
 # Sauvegardes intermédiaires : indexer plusieurs milliers de documents prend des
 # minutes. Sans point de reprise, une coupure de courant (clé USB débranchée,
@@ -110,17 +134,65 @@ MAX_CAR_EXTRAIT = 250                  # longueur d'un extrait affiché à l'éc
 _TTL_MODELE = 3.0
 _modele_memo: tuple[float, bool] = (0.0, False)
 
-# ---------- Cache mémoire de l'index chargé ----------
-# Invalidé sur la date de modification de meta.json : une construction qui
-# vient de se terminer est donc vue immédiatement par la recherche.
-_verrou_cache = threading.Lock()
-_cache_index: Optional[tuple] = None   # (mtime_ns, index, meta)
+# ---------- État par organisation ----------
+# TOUT l'état vivant de ce module est keyé par profile_id, et ce n'est pas une
+# précaution théorique. Avec un verrou de construction et un dict de progression
+# uniques pour le process :
+#   - deux organisations qui indexent en même temps se bloquent (la seconde est
+#     refusée sans raison visible à l'écran) ;
+#   - la progression affichée à l'une décrit les fichiers de l'autre ;
+#   - le cache mémoire de l'index, chargé sans savoir de qui il vient, peut
+#     répondre à une organisation avec les extraits de sa voisine.
+# `_verrou_etats` ne protège QUE ces tables (accès très courts) ; le contenu d'un
+# index reste protégé par le verrou de construction de son propre profil.
+_verrou_etats = threading.Lock()
+_verrous_construction: dict[str, threading.Lock] = {}
+_evenements_annulation: dict[str, threading.Event] = {}
+_progres: dict[str, dict] = {}
 
-# ---------- Construction en tâche de fond ----------
-_verrou_construction = threading.Lock()
-_verrou_progres = threading.Lock()
-_progres = {"en_cours": False, "fait": 0, "total": 0, "fichier": "", "erreur": ""}
-_evenement_annulation = threading.Event()
+# Cache mémoire de l'index chargé, un par organisation. Invalidé sur la date de
+# modification de meta.json : une construction qui vient de se terminer est donc
+# vue immédiatement par la recherche.
+_verrou_cache = threading.Lock()
+_cache_index: dict[str, tuple] = {}    # profile_id -> (mtime_ns, index, meta)
+
+
+def _progres_vide() -> dict:
+    return {"en_cours": False, "fait": 0, "total": 0, "fichier": "", "erreur": ""}
+
+
+def _verrou_construction(profile_id: str) -> threading.Lock:
+    """Verrou de construction propre à une organisation (créé à la demande)."""
+    with _verrou_etats:
+        verrou = _verrous_construction.get(profile_id)
+        if verrou is None:
+            verrou = threading.Lock()
+            _verrous_construction[profile_id] = verrou
+        return verrou
+
+
+def _annulation(profile_id: str) -> threading.Event:
+    """Drapeau d'annulation propre à une organisation (créé à la demande)."""
+    with _verrou_etats:
+        evenement = _evenements_annulation.get(profile_id)
+        if evenement is None:
+            evenement = threading.Event()
+            _evenements_annulation[profile_id] = evenement
+        return evenement
+
+
+def _lire_progres(profile_id: str) -> dict:
+    with _verrou_etats:
+        return dict(_progres.get(profile_id) or _progres_vide())
+
+
+def _maj_progres(profile_id: str, **champs) -> None:
+    with _verrou_etats:
+        etat_profil = _progres.get(profile_id)
+        if etat_profil is None:
+            etat_profil = _progres_vide()
+            _progres[profile_id] = etat_profil
+        etat_profil.update(champs)
 
 
 # ---------- Découpage en extraits ----------
@@ -202,7 +274,9 @@ def _embed(textes: list[str], client: httpx.Client,
     try:
         reponse = client.post(
             f"{OLLAMA_URL}/api/embed",
-            json={"model": EMBED_MODEL, "input": textes},
+            # keep_alive=-1 : évite de repayer le chargement de bge-m3
+            # (dizaines de secondes sans GPU) après chaque pause > 5 min.
+            json={"model": EMBED_MODEL, "input": textes, "keep_alive": -1},
             timeout=delai,
         )
         reponse.raise_for_status()
@@ -270,8 +344,8 @@ def _meta_vide() -> dict:
     }
 
 
-def _charger(depuis_disque: bool = False) -> tuple:
-    """(index, métadonnées) lus sur disque, ou (None, None).
+def _charger(profile_id: str, depuis_disque: bool = False) -> tuple:
+    """(index, métadonnées) de CETTE organisation lus sur disque, ou (None, None).
 
     `depuis_disque` court-circuite le cache mémoire : la construction MODIFIE
     l'index qu'elle reçoit, elle ne doit donc jamais travailler sur l'objet
@@ -281,21 +355,22 @@ def _charger(depuis_disque: bool = False) -> tuple:
     ne correspond plus aux métadonnées — est traitée comme une absence d'index :
     il sera simplement reconstruit. Jamais d'exception, jamais de résultat faux.
     """
-    global _cache_index
     if not FAISS_DISPONIBLE:
         return None, None
+    chemin_meta = _fichier_meta(profile_id)
     try:
-        mtime = FICHIER_META.stat().st_mtime_ns
+        mtime = chemin_meta.stat().st_mtime_ns
     except OSError:
         return None, None
     if not depuis_disque:
         with _verrou_cache:
-            if _cache_index is not None and _cache_index[0] == mtime:
-                return _cache_index[1], _cache_index[2]
+            en_cache = _cache_index.get(profile_id)
+            if en_cache is not None and en_cache[0] == mtime:
+                return en_cache[1], en_cache[2]
     try:
-        with open(FICHIER_META, encoding="utf-8") as f:
+        with open(chemin_meta, encoding="utf-8") as f:
             meta = json.load(f)
-        index = faiss.read_index(str(FICHIER_INDEX))
+        index = faiss.read_index(str(_fichier_index(profile_id)))
     except Exception:
         return None, None
     if not isinstance(meta, dict):
@@ -313,12 +388,13 @@ def _charger(depuis_disque: bool = False) -> tuple:
         return None, None
     if not depuis_disque:
         with _verrou_cache:
-            _cache_index = (mtime, index, meta)
+            _cache_index[profile_id] = (mtime, index, meta)
     return index, meta
 
 
-def _sauver(index, meta: dict) -> bool:
-    """Écrit l'index puis les métadonnées, chacun de façon atomique.
+def _sauver(profile_id: str, index, meta: dict) -> bool:
+    """Écrit l'index puis les métadonnées de cette organisation, chacun de façon
+    atomique.
 
     L'ORDRE compte : l'index d'abord, les métadonnées ensuite. Si la machine
     s'arrête entre les deux, le meta.json encore en place décrit un index plus
@@ -326,15 +402,17 @@ def _sauver(index, meta: dict) -> bool:
     extraits inexistants.
     """
     try:
-        DOSSIER_INDEX.mkdir(parents=True, exist_ok=True)
+        chemin_index = _fichier_index(profile_id)
+        chemin_meta = _fichier_meta(profile_id)
+        chemin_index.parent.mkdir(parents=True, exist_ok=True)
         meta["built_at"] = datetime.now().isoformat(timespec="seconds")
-        tmp_index = FICHIER_INDEX.with_suffix(".tmp")
+        tmp_index = chemin_index.with_suffix(".tmp")
         faiss.write_index(index, str(tmp_index))
-        tmp_index.replace(FICHIER_INDEX)
-        tmp_meta = FICHIER_META.with_suffix(".tmp")
+        tmp_index.replace(chemin_index)
+        tmp_meta = chemin_meta.with_suffix(".tmp")
         with open(tmp_meta, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
-        tmp_meta.replace(FICHIER_META)
+        tmp_meta.replace(chemin_meta)
         return True
     except Exception:
         return False                   # un index non sauvé n'empêche rien d'autre
@@ -361,11 +439,15 @@ def _retirer(index, meta: dict, cle: str) -> None:
 
 
 # ---------- Construction de l'index ----------
-def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = None) -> dict:
-    """Construit ou met à jour l'index. BLOQUANTE : à appeler dans un thread.
+def construire_index(profile_id: str, fichiers,
+                     on_progress: Optional[Callable[[dict], None]] = None) -> dict:
+    """Construit ou met à jour l'index de CETTE organisation. BLOQUANTE : à
+    appeler dans un thread.
 
     `fichiers` : itérable de tuples (chemin absolu, chemin virtuel affiché) —
-    même contrat que `main._iter_searchable_files`.
+    même contrat que `main._iter_searchable_files`. C'est l'appelant qui l'a
+    construit à partir des `fs_roots` du même profil : ce module ne voit donc
+    jamais les documents d'une autre organisation.
 
     Incrémentale : un fichier dont la date de modification et la taille n'ont
     pas bougé n'est pas revectorisé. Réindexer un dossier entier après l'ajout
@@ -379,10 +461,11 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
     if not FAISS_DISPONIBLE:
         return resume
 
-    index, meta = _charger(depuis_disque=True)
+    index, meta = _charger(profile_id, depuis_disque=True)
     if index is None or meta is None:
         index, meta = _index_vide(), _meta_vide()
 
+    annulation = _annulation(profile_id)
     liste = list(fichiers)
     total = len(liste)
     vus: set[str] = set()
@@ -395,7 +478,7 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
 
     with httpx.Client(timeout=EMBED_TIMEOUT) as client:
         for chemin, _virtuel in liste:
-            if _evenement_annulation.is_set():
+            if annulation.is_set():
                 resume["annule"] = True
                 break
             fait += 1
@@ -404,7 +487,7 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
                     on_progress({"fait": fait, "total": total, "fichier": chemin.name})
                 except Exception:
                     pass               # l'affichage ne doit pas casser la construction
-            if not documents.est_cherchable(chemin.suffix):
+            if not documents.est_cherchable(profile_id, chemin.suffix):
                 continue
             try:
                 st = chemin.stat()
@@ -422,8 +505,8 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
             if isinstance(ancien, dict) and ancien.get("mtime_ns") == st.st_mtime_ns \
                     and ancien.get("size") == st.st_size:
                 continue
-            traite, premier_appel = _indexer_fichier(index, meta, chemin, cle, st,
-                                                     client, premier_appel)
+            traite, premier_appel = _indexer_fichier(profile_id, index, meta, chemin,
+                                                     cle, st, client, premier_appel)
             if traite is None:
                 resume["erreurs"] += 1
                 continue
@@ -434,7 +517,7 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
             depuis_point += 1
             if depuis_point >= CHECKPOINT_FICHIERS \
                     or time.monotonic() - dernier_point >= CHECKPOINT_SECONDES:
-                _sauver(index, meta)
+                _sauver(profile_id, index, meta)
                 depuis_point = 0
                 dernier_point = time.monotonic()
 
@@ -450,11 +533,11 @@ def construire_index(fichiers, on_progress: Optional[Callable[[dict], None]] = N
     # modèle) : on ne réécrit pas l'index, ce qui laisse aussi la date de
     # dernière construction affichée à l'écran refléter un vrai contenu.
     if modifie:
-        _sauver(index, meta)
+        _sauver(profile_id, index, meta)
     return resume
 
 
-def _indexer_fichier(index, meta: dict, chemin: Path, cle: str, st,
+def _indexer_fichier(profile_id: str, index, meta: dict, chemin: Path, cle: str, st,
                      client: httpx.Client, premier_appel: bool) -> tuple:
     """Vectorise UN fichier et remplace ses extraits dans l'index.
 
@@ -464,7 +547,7 @@ def _indexer_fichier(index, meta: dict, chemin: Path, cle: str, st,
     retenté à la prochaine construction.
     """
     try:
-        texte, provenance = documents.extract_text_meta(chemin)
+        texte, provenance = documents.extract_text_meta(profile_id, chemin)
     except Exception:
         return None, premier_appel
     extraits = _decouper(texte)
@@ -507,71 +590,67 @@ def _indexer_fichier(index, meta: dict, chemin: Path, cle: str, st,
 
 
 # ---------- Pilotage de la construction en tâche de fond ----------
-def _noter_progres(etape: dict) -> None:
-    with _verrou_progres:
-        _progres["fait"] = int(etape.get("fait") or 0)
-        _progres["total"] = int(etape.get("total") or 0)
-        _progres["fichier"] = str(etape.get("fichier") or "")
-
-
-def _construire_en_thread(fichiers) -> None:
-    """Corps du thread de construction.
+def _construire_en_thread(profile_id: str, fichiers) -> None:
+    """Corps du thread de construction d'UNE organisation.
 
     `fichiers` est encore un GÉNÉRATEUR : le matérialiser coûte quelques
     centaines de millisecondes sur un gros dossier, et c'est précisément
     pourquoi ce travail est fait ici et non dans la requête HTTP.
 
     Le `finally` est vital : sans lui, une erreur inattendue laisserait le
-    verrou pris et interdirait toute construction ultérieure jusqu'au
-    redémarrage de l'application.
+    verrou de ce profil pris et interdirait toute construction ultérieure
+    jusqu'au redémarrage de l'application.
     """
+    def noter(etape: dict) -> None:
+        _maj_progres(profile_id,
+                     fait=int(etape.get("fait") or 0),
+                     total=int(etape.get("total") or 0),
+                     fichier=str(etape.get("fichier") or ""))
+
     try:
-        construire_index(fichiers, on_progress=_noter_progres)
+        construire_index(profile_id, fichiers, on_progress=noter)
     except Exception as e:
-        with _verrou_progres:
-            _progres["erreur"] = f"{type(e).__name__} : {e}"
+        _maj_progres(profile_id, erreur=f"{type(e).__name__} : {e}")
     finally:
-        with _verrou_progres:
-            _progres["en_cours"] = False
-            _progres["fichier"] = ""
-        _verrou_construction.release()
+        _maj_progres(profile_id, en_cours=False, fichier="")
+        _verrou_construction(profile_id).release()
 
 
-def lancer_construction(fichiers) -> bool:
-    """Démarre un thread démon si aucune construction n'est en cours.
+def lancer_construction(profile_id: str, fichiers) -> bool:
+    """Démarre un thread démon si aucune construction n'est en cours POUR CETTE
+    organisation.
 
-    Renvoie False sans rien faire si une construction tourne déjà : deux
-    constructions simultanées écriraient le même index.
+    Renvoie False sans rien faire si une construction tourne déjà pour elle :
+    deux constructions simultanées écriraient le même index. Une autre
+    organisation, elle, n'est pas bloquée — elle a son propre verrou.
     """
     if not FAISS_DISPONIBLE:
         return False
-    if not _verrou_construction.acquire(blocking=False):
+    verrou = _verrou_construction(profile_id)
+    if not verrou.acquire(blocking=False):
         return False
-    _evenement_annulation.clear()
-    with _verrou_progres:
-        _progres.update(en_cours=True, fait=0, total=0, fichier="", erreur="")
+    _annulation(profile_id).clear()
+    _maj_progres(profile_id, en_cours=True, fait=0, total=0, fichier="", erreur="")
     try:
-        threading.Thread(target=_construire_en_thread, args=(fichiers,),
+        threading.Thread(target=_construire_en_thread, args=(profile_id, fichiers),
                          daemon=True).start()
     except Exception as e:
-        with _verrou_progres:
-            _progres["en_cours"] = False
-            _progres["erreur"] = f"{type(e).__name__} : {e}"
-        _verrou_construction.release()
+        _maj_progres(profile_id, en_cours=False, erreur=f"{type(e).__name__} : {e}")
+        verrou.release()
         return False
     return True
 
 
-def annuler_construction() -> None:
-    """Demande l'arrêt de la construction en cours (effectif entre deux fichiers)."""
-    _evenement_annulation.set()
+def annuler_construction(profile_id: str) -> None:
+    """Demande l'arrêt de la construction de cette organisation (effectif entre
+    deux fichiers)."""
+    _annulation(profile_id).set()
 
 
 # ---------- État, pour l'interface ----------
-def etat() -> dict:
-    """État de la recherche par le sens, affiché dans les Paramètres."""
-    with _verrou_progres:
-        instantane = dict(_progres)
+def etat(profile_id: str) -> dict:
+    """État de la recherche par le sens de cette organisation (Paramètres)."""
+    instantane = _lire_progres(profile_id)
     en_cours = bool(instantane.get("en_cours"))
     reponse = {
         "modele": EMBED_MODEL,
@@ -594,7 +673,7 @@ def etat() -> dict:
         return reponse
 
     reponse["modele_disponible"] = _modele_disponible()
-    index, meta = _charger()
+    index, meta = _charger(profile_id)
     if index is not None and meta is not None and index.ntotal > 0:
         reponse["index_construit"] = True
         reponse["construit_le"] = str(meta.get("built_at") or "")
@@ -635,8 +714,9 @@ def _reponse_vide(requete: str, notice: str) -> dict:
             "truncated": False, "notice": notice}
 
 
-def rechercher(requete: str, k: int = 10, dossier: Optional[Path] = None) -> dict:
-    """Documents les plus proches du SENS de la requête.
+def rechercher(profile_id: str, requete: str, k: int = 10,
+               dossier: Optional[Path] = None) -> dict:
+    """Documents de CETTE organisation les plus proches du SENS de la requête.
 
     `dossier`, s'il est fourni, est un chemin absolu déjà résolu par l'appelant :
     seuls les documents situés dessous sont renvoyés.
@@ -651,7 +731,7 @@ def rechercher(requete: str, k: int = 10, dossier: Optional[Path] = None) -> dic
     if not demande:
         return _reponse_vide(requete, "Saisissez au moins un mot à chercher.")
 
-    index, meta = _charger()
+    index, meta = _charger(profile_id)
     if index is None or meta is None or index.ntotal == 0:
         return _reponse_vide(requete, "Aucun index n'a encore été construit. "
                                       "Lancez la construction depuis les Paramètres.")
@@ -733,17 +813,18 @@ def rechercher(requete: str, k: int = 10, dossier: Optional[Path] = None) -> dic
 
 
 # ---------- Effacement (RGPD) ----------
-def purger_index() -> bool:
-    """Supprime l'index et ses métadonnées. Vrai si quelque chose existait.
+def purger_index(profile_id: str) -> bool:
+    """Supprime l'index et les métadonnées de CETTE organisation, et d'elle seule.
+    Vrai si quelque chose existait.
 
     L'annulation est posée d'abord : une construction en cours réécrirait
     sinon, quelques secondes plus tard, les fichiers qu'on vient d'effacer.
     """
-    global _cache_index
-    _evenement_annulation.set()
+    _annulation(profile_id).set()
+    dossier = dossier_index(profile_id)
     with _verrou_cache:
-        _cache_index = None
-        existait = DOSSIER_INDEX.exists()
+        _cache_index.pop(profile_id, None)
+        existait = dossier.exists()
         if existait:
-            shutil.rmtree(DOSSIER_INDEX, ignore_errors=True)
+            shutil.rmtree(dossier, ignore_errors=True)
     return existait

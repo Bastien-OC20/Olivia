@@ -23,7 +23,10 @@ import httpx
 from html import unescape
 from urllib.parse import unquote
 
-from .settings import settings as _app_settings
+# Ce module ne lit AUCUN réglage : tout ce dont il a besoin (provider, URL
+# SearXNG, clé Brave, mode officiel) lui est passé par l'appelant, qui seul sait
+# de quelle organisation il s'agit — les réglages sont cloisonnés par profil
+# depuis la Phase 1 (voir settings.py).
 
 # Ordre de tentative par défaut de la cascade (le provider demandé est
 # toujours essayé en premier, puis les autres dans cet ordre).
@@ -259,10 +262,11 @@ async def web_search(provider: str, query: str, **kwargs) -> tuple[str, list[dic
     (OFFICIAL_DOMAINS) : la requête envoyée à chaque moteur est complétée
     d'une restriction `site:`, et les résultats sont en plus filtrés après
     coup pour ignorer tout ce qui n'appartient pas à ces domaines (certains
-    moteurs sous-jacents de SearXNG n'honorent pas cet opérateur). Si
-    `official_only` n'est pas fourni explicitement, il est lu depuis les
-    paramètres persistés (`search_official_only`) — c'est le cas normal
-    quand l'appel vient de la route /api/search, qui ne le transmet pas.
+    moteurs sous-jacents de SearXNG n'honorent pas cet opérateur). Il est
+    TOUJOURS transmis par l'appelant, jamais relu ici depuis les réglages :
+    ceux-ci appartiennent désormais à une organisation (voir settings.py), et
+    ce module n'a pas à deviner de laquelle il s'agit. La route /api/search
+    passe donc `search_official_only` du profil connecté.
 
     Renvoie `(provider_effectif, résultats)` — le provider qui a réellement
     répondu, pas forcément celui demandé. Un résultat vide (y compris,
@@ -282,9 +286,7 @@ async def web_search(provider: str, query: str, **kwargs) -> tuple[str, list[dic
     # existantes qui la définissaient déjà).
     brave_key = kwargs.get("brave_api_key") or os.getenv("BRAVE_API_KEY", "")
 
-    official_only = kwargs.get("official_only")
-    if official_only is None:
-        official_only = bool(_app_settings.get().get("search_official_only", False))
+    official_only = bool(kwargs.get("official_only") or False)
 
     query_to_send = _restrict_query_to_official(query) if official_only else query
 

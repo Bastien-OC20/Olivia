@@ -37,7 +37,7 @@ from typing import Optional
 from docx import Document
 from docx.oxml.ns import qn
 
-from .settings import settings
+from .settings import reglages_lus
 
 # Nom et emplacement par défaut du modèle. `modeles/` est ignoré par git : le
 # logo appartient au lycée et n'a rien à faire ni dans le dépôt ni dans l'.exe.
@@ -67,10 +67,16 @@ def _dossier_application() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def chemin_modele() -> Path:
-    """Chemin du modèle : réglage `docgen_template_path`, sinon emplacement par défaut."""
+def chemin_modele(profile_id: str = "") -> Path:
+    """Chemin du modèle : réglage `docgen_template_path` de l'organisation, sinon
+    emplacement par défaut.
+
+    `profile_id` vide = valeurs par défaut : c'est le cas de la ligne de commande
+    (`python -m backend.docmodele`), qui n'a pas de session ouverte. Un profil
+    inconnu n'emprunte donc jamais le réglage d'un autre.
+    """
     try:
-        regle = str(settings.get().get("docgen_template_path") or "").strip()
+        regle = str(reglages_lus(profile_id).get("docgen_template_path") or "").strip()
     except Exception:
         regle = ""
     if regle:
@@ -158,9 +164,9 @@ def inspecter(chemin: Path) -> dict:
     }
 
 
-def etat() -> dict:
+def etat(profile_id: str = "") -> dict:
     """État du modèle, affiché dans Paramètres → Documents (motif repris d'OCR)."""
-    chemin = chemin_modele()
+    chemin = chemin_modele(profile_id)
     if not chemin.is_file():
         return {
             "disponible": False,
@@ -226,8 +232,12 @@ def _purger_metadonnees(doc) -> None:
     props.category = ""
 
 
-def construire_modele(source: Path, destination: Optional[Path] = None) -> dict:
+def construire_modele(source: Path, destination: Optional[Path] = None,
+                      profile_id: str = "") -> dict:
     """Fabrique le modèle depuis `source` et l'écrit dans `destination`.
+
+    Sans `destination`, le modèle est écrit à l'emplacement réglé par
+    l'organisation `profile_id` (voir `chemin_modele`).
 
     Renvoie le compte rendu de l'inspection du fichier produit.
     Lève `ValueError` si la source est absente ou illisible.
@@ -237,7 +247,7 @@ def construire_modele(source: Path, destination: Optional[Path] = None) -> dict:
         raise ValueError(f"Document source introuvable : {source}")
     if source.suffix.lower() != ".docx":
         raise ValueError("Le document source doit être un fichier Word (.docx).")
-    destination = Path(destination) if destination else chemin_modele()
+    destination = Path(destination) if destination else chemin_modele(profile_id)
 
     try:
         doc = Document(str(source))

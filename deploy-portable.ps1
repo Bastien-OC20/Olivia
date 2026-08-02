@@ -25,13 +25,14 @@
                 et les modèles doivent être recopiés (plusieurs minutes).
 
     La synchronisation est un MIROIR : les fichiers d'anciennes versions sont
-    supprimés de la destination. En mode -Update, trois éléments en sont
+    supprimés de la destination. En mode -Update, plusieurs éléments en sont
     explicitement protégés car ils vivent sur le disque et n'existent pas
     dans le build :
 
       - ai-webapp\ollama\                          (moteur + modèles)
       - ai-webapp\_internal\backend\conversations\ (historique)
       - ai-webapp\_internal\backend\settings.json  (réglages, dont secrets)
+      - ai-webapp\_internal\backend\profiles\      (comptes et organisations)
 
 .PARAMETER Destination
     Racine de l'installation portable, par exemple G:\Olivia.
@@ -405,9 +406,16 @@ $nbConversations = if (Test-Path $dossierConv) {
 $ocrCacheDest = Join-Path $app '_internal\backend\ocr_cache'
 $docindexDest = Join-Path $app '_internal\backend\docindex'
 
+# Comptes, organisations et sessions (backend/profiles/) : absents du build
+# (voir build.spec), crees sur le poste cible via backend/manage_users.py, et
+# surtout PAS reconstructibles - un /MIR sans exclusion deconnecterait tout le
+# monde et supprimerait les comptes a chaque mise a jour de l'application.
+$profilesDest = Join-Path $app '_internal\backend\profiles'
+
 if ($installExistante) {
     Write-Host "  Preserve : conversations\ ($nbConversations enregistrees)"
     Write-Host '  Preserve : settings.json'
+    Write-Host '  Preserve : profiles\ (comptes et organisations)'
     Write-Host '  Preserve : ocr_cache\ et docindex\ (caches reconstructibles)'
 }
 
@@ -418,6 +426,7 @@ $exclusionsDossiers = @(
     $tesseractDest,
     $modeleWordDest,
     $dossierConv,
+    $profilesDest,
     $ocrCacheDest,
     $docindexDest
 )

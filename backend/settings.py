@@ -1,12 +1,26 @@
 """
-Persistance des paramètres utilisateur dans backend/settings.json.
+Persistance des paramètres, UNE INSTANCE PAR ORGANISATION.
 
-Le fichier est créé automatiquement au premier accès avec les valeurs par défaut.
-Toutes les écritures sont mutexées et atomic-write sur disque.
+Chaque profil (organisation) a son propre fichier
+backend/profiles/<profile_id>/settings.json, créé automatiquement au premier
+enregistrement avec les valeurs par défaut. Toutes les écritures sont mutexées et
+atomic-write sur disque.
+
+Le cloisonnement passe par le DOSSIER et non par un champ `profile_id` mêlé à des
+réglages communs : `fs_roots`, les identifiants de connecteurs (IMAP…) et la clé
+d'API du moteur de recherche vivent dans ce fichier, et une fuite d'une
+organisation vers une autre devient structurellement impossible plutôt que
+simplement filtrée.
+
+On n'accède donc plus à un singleton mais au registre (`reglages(profile_id)`),
+alimenté par `main.get_current_profile()` — jamais par un identifiant fourni par
+le client.
 """
 import json
 from pathlib import Path
 from threading import RLock
+
+from . import profiles
 
 # Modèles recommandés selon le périphérique de calcul.
 #   gpu : cible RTX 5060 8 Go (voir README) — modèle quantifié Q4_K_M
@@ -187,8 +201,67 @@ class Settings:
             return self.get()
 
 
-SETTINGS_PATH = Path(__file__).parent / "settings.json"
-settings = Settings(SETTINGS_PATH)
+NOM_FICHIER = "settings.json"
+
+# Fichier du temps où Olivia était mono-organisation (backend/settings.json).
+# Il n'est plus ni lu ni écrit : la constante ne subsiste que pour documenter
+# l'emplacement des réglages hérités. Leur migration vers un profil est une
+# décision d'exploitation (quelle organisation en hérite ?), pas un effet de bord
+# du démarrage — voir le rapport de la Phase 1.
+SETTINGS_PATH_HERITE = Path(__file__).parent / NOM_FICHIER
+
+
+class SettingsRegistry:
+    """Une instance `Settings` par organisation, mise en cache.
+
+    Pourquoi un cache : `Settings` lit son fichier une fois et garde l'état en
+    mémoire ; en recréer une par requête relirait le disque à chaque `get()`,
+    plusieurs fois par affichage de l'interface.
+
+    Pourquoi ce cache reste cohérent : il n'existe qu'UNE instance par profil dans
+    tout le process, donc deux requêtes concurrentes d'une même organisation
+    passent par le même RLock interne à `Settings` — leurs écritures se
+    sérialisent au lieu de s'écraser. C'est précisément ce qu'un cache par requête
+    (ou pas de cache du tout) ne garantirait pas.
+    """
+
+    def __init__(self):
+        # Protège uniquement le dictionnaire d'instances ; l'état de chaque
+        # profil est protégé par le verrou de son propre objet `Settings`.
+        self._lock = RLock()
+        self._instances: dict[str, Settings] = {}
+
+    def for_profile(self, profile_id: str) -> Settings:
+        """Réglages d'une organisation. Lève ValueError si l'identifiant est invalide."""
+        chemin = profiles.profile_dir(profile_id) / NOM_FICHIER   # valide l'identifiant
+        with self._lock:
+            instance = self._instances.get(profile_id)
+            if instance is None:
+                instance = Settings(chemin)
+                self._instances[profile_id] = instance
+            return instance
+
+
+registry = SettingsRegistry()
+
+
+def reglages(profile_id: str) -> Settings:
+    """Réglages d'une organisation (raccourci sur le registre)."""
+    return registry.for_profile(profile_id)
+
+
+def reglages_lus(profile_id: str) -> dict:
+    """Réglages en LECTURE de l'organisation, avec repli sur les valeurs par défaut
+    quand aucun profil n'est fourni.
+
+    Sert aux appels faits hors d'une requête HTTP (ligne de commande de
+    backend/docmodele.py) : un identifiant vide ou invalide y rend les défauts au
+    lieu de lever — mais jamais, en aucun cas, les réglages d'une autre
+    organisation.
+    """
+    if not profiles.is_valid_id(profile_id or ""):
+        return _deep_default()
+    return registry.for_profile(profile_id).get()
 
 
 def style_directives(style: str, tone: str) -> str:

@@ -92,6 +92,11 @@ def _est_donnee_utilisateur(dest: str) -> bool:
     d = dest.replace("\\", "/")
     return (
         d.startswith("backend/conversations/")
+        # Comptes, organisations et sessions ouvertes de la machine de
+        # compilation : dérivés de mots de passe et jetons de session vivants —
+        # ce que le binaire ne doit surtout pas transporter (voir backend/users.py).
+        # Les comptes se recréent sur le poste cible via backend/manage_users.py.
+        or d.startswith("backend/profiles/")
         or d.startswith("backend/.venv/")
         or d.startswith("backend/ocr_cache/")
         or d.startswith("backend/docindex/")

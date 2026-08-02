@@ -21,6 +21,17 @@ l'application se comporte exactement comme avant. Aucune exception ne remonte.
 
 Rien ne sort de la machine : Tesseract est un binaire local, appelé sans shell,
 avec des arguments passés en liste. Aucun appel réseau n'est fait ici.
+
+CLOISONNEMENT : le cache disque reste COMMUN à toutes les organisations, à la
+différence des conversations, des réglages et de l'index sémantique. Ce n'est pas
+un oubli : une entrée est adressée par le hash (chemin + date + taille) du
+fichier source, donc deux organisations n'y partagent quelque chose que si elles
+ont accès au MÊME fichier, sur le même disque, ce qu'aucune entrée de cache ne
+leur permet d'obtenir de plus. Le partager économise un OCR complet sur un
+dossier commun, sans rien révéler qui ne soit déjà lisible.
+Ce qui est bien cloisonné, en revanche : les réglages lus (`ocr_enabled`,
+`ocr_tesseract_path`) le sont pour le profil appelant, et la purge RGPD
+(`vider_cache`) ne retire que les entrées issues des dossiers de ce profil.
 """
 import hashlib
 import json
@@ -34,7 +45,7 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
-from .settings import settings
+from .settings import reglages_lus
 
 LANGUE = "fra"
 NOM_EXE = "tesseract.exe" if sys.platform.startswith("win") else "tesseract"
@@ -69,12 +80,13 @@ VERSION_CACHE = 1                  # à incrémenter si le format du texte produ
 MAX_FICHIERS_CACHE = 400
 _verrou_cache = threading.Lock()
 
-# Mémo très court du réglage : `est_active()` est interrogée une fois par
-# fichier candidat pendant une recherche (jusqu'à des milliers). 2 secondes
-# suffisent pour qu'une modification faite dans les Paramètres soit prise en
-# compte tout de suite, sans relire le fichier de réglages à chaque fichier.
+# Mémo très court du réglage, PAR ORGANISATION : `est_active()` est interrogée une
+# fois par fichier candidat pendant une recherche (jusqu'à des milliers).
+# 2 secondes suffisent pour qu'une modification faite dans les Paramètres soit
+# prise en compte tout de suite, sans relire les réglages à chaque fichier. Keyé
+# par profil : un mémo unique servirait à une organisation le choix d'une autre.
 _TTL_REGLAGE = 2.0
-_reglage_memo: tuple[float, bool] = (0.0, False)
+_reglage_memo: dict[str, tuple[float, bool]] = {}
 
 
 class Resultat(NamedTuple):
@@ -85,17 +97,17 @@ class Resultat(NamedTuple):
 
 
 # ---------- Réglage ----------
-def est_active() -> bool:
-    """Vrai si l'utilisatrice a laissé la reconnaissance activée."""
-    global _reglage_memo
+def est_active(profile_id: str) -> bool:
+    """Vrai si cette organisation a laissé la reconnaissance activée."""
     maintenant = time.monotonic()
-    if maintenant - _reglage_memo[0] < _TTL_REGLAGE:
-        return _reglage_memo[1]
+    memo = _reglage_memo.get(profile_id or "")
+    if memo is not None and maintenant - memo[0] < _TTL_REGLAGE:
+        return memo[1]
     try:
-        valeur = bool(settings.get().get("ocr_enabled", True))
+        valeur = bool(reglages_lus(profile_id).get("ocr_enabled", True))
     except Exception:
         valeur = False
-    _reglage_memo = (maintenant, valeur)
+    _reglage_memo[profile_id or ""] = (maintenant, valeur)
     return valeur
 
 
@@ -112,8 +124,12 @@ def _dossier_application() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def chemin_moteur() -> Optional[Path]:
+def chemin_moteur(profile_id: str) -> Optional[Path]:
     """Tesseract portable livré avec l'application, sinon le PATH, sinon réglage.
+
+    Le réglage `ocr_tesseract_path` est celui de l'organisation appelante : le
+    moteur est un binaire de la machine, mais son emplacement se règle par profil
+    comme le reste (mêmes Paramètres).
 
     Volontairement non mémorisé : la recherche coûte quelques appels système,
     négligeables devant une seconde d'OCR, et l'application détecte ainsi
@@ -126,7 +142,7 @@ def chemin_moteur() -> Optional[Path]:
     if trouve:
         return Path(trouve)
     try:
-        regle = str(settings.get().get("ocr_tesseract_path") or "").strip()
+        regle = str(reglages_lus(profile_id).get("ocr_tesseract_path") or "").strip()
     except Exception:
         regle = ""
     if regle:
@@ -157,12 +173,12 @@ def _moteur_pdf_disponible() -> bool:
     return True
 
 
-def etat() -> dict:
+def etat(profile_id: str) -> dict:
     """État de la reconnaissance, pour l'affichage dans les Paramètres."""
-    exe = chemin_moteur()
+    exe = chemin_moteur(profile_id)
     if exe is None:
         return {
-            "actif": est_active(),
+            "actif": est_active(profile_id),
             "disponible": False,
             "chemin": "",
             "langues": [],
@@ -182,7 +198,7 @@ def etat() -> dict:
     else:
         message = "Moteur de reconnaissance opérationnel (français)."
     return {
-        "actif": est_active(),
+        "actif": est_active(profile_id),
         "disponible": True,
         "chemin": str(exe),
         "langues": langues,
@@ -261,8 +277,8 @@ def _echelle(largeur_pt: float, hauteur_pt: float) -> float:
 
 
 # ---------- Reconnaissance ----------
-def _ocr_pdf(chemin: Path) -> Optional[Resultat]:
-    exe = chemin_moteur()
+def _ocr_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
+    exe = chemin_moteur(profile_id)
     if exe is None:
         return None
     try:
@@ -316,8 +332,8 @@ def _ocr_pdf(chemin: Path) -> Optional[Resultat]:
     return Resultat("\n".join(morceaux), pages_faites, notice)
 
 
-def _ocr_image(chemin: Path) -> Optional[Resultat]:
-    exe = chemin_moteur()
+def _ocr_image(profile_id: str, chemin: Path) -> Optional[Resultat]:
+    exe = chemin_moteur(profile_id)
     if exe is None:
         return None
     try:
@@ -358,8 +374,16 @@ def _lire_cache(cle: str) -> Optional[Resultat]:
 
 def _ecrire_cache(cle: str, resultat: Resultat, chemin: Path) -> None:
     fichier = DOSSIER_CACHE / f"{cle}.json"
+    try:
+        source_absolue = str(chemin.resolve())
+    except OSError:
+        source_absolue = str(chemin)
+    # `source_path` est indispensable à la purge RGPD ciblée : la clé du cache
+    # est un hash non réversible, donc sans ce champ il serait impossible de
+    # savoir de quel dossier — et donc de quelle organisation — vient une entrée.
     charge = {"texte": resultat.texte, "pages": resultat.pages,
-              "notice": resultat.notice, "source": chemin.name}
+              "notice": resultat.notice, "source": chemin.name,
+              "source_path": source_absolue}
     try:
         with _verrou_cache:
             DOSSIER_CACHE.mkdir(parents=True, exist_ok=True)
@@ -385,11 +409,49 @@ def _purger() -> None:
             pass
 
 
-def vider_cache() -> int:
-    """Supprime tout le cache OCR. Renvoie le nombre d'entrées effacées."""
+def _sous_une_racine(source: str, racines: list[Path]) -> bool:
+    """Le fichier d'origine tombe-t-il sous l'un des dossiers fournis ?"""
+    if not source:
+        return False
+    try:
+        chemin = Path(source)
+    except (OSError, ValueError):
+        return False
+    for racine in racines:
+        try:
+            if chemin == racine or chemin.is_relative_to(racine):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def vider_cache(racines: list[Path]) -> int:
+    """RGPD : supprime les entrées de cache issues des dossiers `racines`
+    (les `fs_roots` de l'organisation demandeuse). Renvoie le nombre effacé.
+
+    Le cache étant COMMUN à toutes les organisations (voir l'en-tête du module),
+    tout vider sur une demande d'effacement détruirait le travail des autres — et,
+    plus grave, ferait passer pour une purge ciblée ce qui n'en est pas une. On ne
+    retire donc que ce qui provient des dossiers du demandeur.
+
+    Cas particulier assumé : une entrée écrite par une version antérieure ne porte
+    pas de `source_path` et n'est donc rattachable à aucun dossier. Elle est
+    supprimée. Le mauvais choix serait l'inverse : laisser en place, après une
+    demande d'effacement, un texte reconnu qui appartient très probablement au
+    demandeur. Ce que ça coûte aux autres organisations est un simple OCR à
+    repayer, le cache étant reconstructible par construction.
+    """
     efface = 0
     with _verrou_cache:
         for fichier in DOSSIER_CACHE.glob("*.json"):
+            try:
+                with open(fichier, encoding="utf-8") as f:
+                    source = str((json.load(f) or {}).get("source_path") or "")
+            except Exception:
+                source = ""          # entrée illisible : traitée comme non rattachable
+            if source and not _sous_une_racine(source, racines):
+                continue
             try:
                 fichier.unlink()
                 efface += 1
@@ -412,11 +474,11 @@ def _avec_cache(chemin: Path, calcul: Callable[[Path], Optional[Resultat]]) -> O
 
 
 # ---------- API publique ----------
-def texte_pdf(chemin: Path) -> Optional[Resultat]:
+def texte_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
     """Texte reconnu d'un PDF scanné, ou None si la reconnaissance est impossible."""
-    return _avec_cache(chemin, _ocr_pdf)
+    return _avec_cache(chemin, lambda p: _ocr_pdf(profile_id, p))
 
 
-def texte_image(chemin: Path) -> Optional[Resultat]:
+def texte_image(profile_id: str, chemin: Path) -> Optional[Resultat]:
     """Texte reconnu d'une image, ou None si la reconnaissance est impossible."""
-    return _avec_cache(chemin, _ocr_image)
+    return _avec_cache(chemin, lambda p: _ocr_image(profile_id, p))

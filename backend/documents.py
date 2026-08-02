@@ -157,16 +157,20 @@ def _preview_docx(path: Path) -> dict:
 
 
 # ---------- Extraction de texte brut (recherche documentaire) ----------
-def ocr_actif() -> bool:
-    """Vrai si la reconnaissance de caractères est activée dans les paramètres."""
+# `profile_id` est le premier paramètre des fonctions d'extraction : la
+# reconnaissance de caractères est un RÉGLAGE (ocr_enabled, ocr_tesseract_path),
+# et les réglages appartiennent désormais à une organisation. Il n'est utilisé que
+# pour cela — le contenu extrait, lui, ne dépend jamais du profil.
+def ocr_actif(profile_id: str) -> bool:
+    """Vrai si cette organisation a activé la reconnaissance de caractères."""
     try:
         from . import ocr
-        return ocr.est_active()
+        return ocr.est_active(profile_id)
     except Exception:
         return False
 
 
-def est_cherchable(ext: str) -> bool:
+def est_cherchable(profile_id: str, ext: str) -> bool:
     """Une extension entre-t-elle dans le périmètre de la recherche ?
 
     Les images n'y entrent que si la reconnaissance de caractères est active :
@@ -176,15 +180,15 @@ def est_cherchable(ext: str) -> bool:
     ext = (ext or "").lower()
     if ext in SEARCHABLE_EXT:
         return True
-    return ext in OCR_IMAGE_EXT and ocr_actif()
+    return ext in OCR_IMAGE_EXT and ocr_actif(profile_id)
 
 
-def extract_text(path: Path) -> str:
+def extract_text(profile_id: str, path: Path) -> str:
     """Texte brut intégral d'un document, pour la recherche."""
-    return extract_text_meta(path)[0]
+    return extract_text_meta(profile_id, path)[0]
 
 
-def extract_text_meta(path: Path) -> tuple[str, dict]:
+def extract_text_meta(profile_id: str, path: Path) -> tuple[str, dict]:
     """Texte brut intégral d'un document + provenance de ce texte.
 
     Couvre le texte/code, le CSV, le Word (.docx), l'Excel (.xlsx/.xlsm), le PDF
@@ -206,10 +210,10 @@ def extract_text_meta(path: Path) -> tuple[str, dict]:
         if ext in {".xlsx", ".xlsm"}:
             return _text_xlsx(path)[:EXTRACT_MAX_CHARS], vide
         if ext == ".pdf":
-            texte, meta = _text_pdf_ou_ocr(path)
+            texte, meta = _text_pdf_ou_ocr(profile_id, path)
             return texte[:EXTRACT_MAX_CHARS], meta
         if ext in OCR_IMAGE_EXT:
-            texte, meta = _text_image_ocr(path)
+            texte, meta = _text_image_ocr(profile_id, path)
             return texte[:EXTRACT_MAX_CHARS], meta
         if ext == ".csv" or ext in TEXT_EXT:
             return read_text_file(path)[:EXTRACT_MAX_CHARS], vide
@@ -224,7 +228,7 @@ def _semble_scanne(texte: str, pages: int) -> bool:
     return alnum < SEUIL_ALNUM_PAR_PAGE * max(1, pages)
 
 
-def _text_pdf_ou_ocr(path: Path) -> tuple[str, dict]:
+def _text_pdf_ou_ocr(profile_id: str, path: Path) -> tuple[str, dict]:
     """Couche texte du PDF ; à défaut, reconnaissance de caractères.
 
     L'OCR n'est tenté QUE si la couche texte est vide ou quasi vide : un PDF
@@ -232,22 +236,22 @@ def _text_pdf_ou_ocr(path: Path) -> tuple[str, dict]:
     conservé et placé devant le texte reconnu.
     """
     natif, pages = _text_pdf(path)
-    if not _semble_scanne(natif, pages) or not ocr_actif():
+    if not _semble_scanne(natif, pages) or not ocr_actif(profile_id):
         return natif, {"ocr": False, "notice": ""}
     from . import ocr
-    resultat = ocr.texte_pdf(path)
+    resultat = ocr.texte_pdf(profile_id, path)
     if resultat is None or not resultat.texte.strip():
         return natif, {"ocr": False, "notice": resultat.notice if resultat else ""}
     parts = [p for p in (natif.strip(), resultat.texte) if p]
     return "\n".join(parts), {"ocr": True, "notice": resultat.notice}
 
 
-def _text_image_ocr(path: Path) -> tuple[str, dict]:
+def _text_image_ocr(profile_id: str, path: Path) -> tuple[str, dict]:
     """Texte d'une image (circulaire photographiée, capture d'écran, fax)."""
-    if not ocr_actif():
+    if not ocr_actif(profile_id):
         return "", {"ocr": False, "notice": ""}
     from . import ocr
-    resultat = ocr.texte_image(path)
+    resultat = ocr.texte_image(profile_id, path)
     if resultat is None or not resultat.texte.strip():
         return "", {"ocr": False, "notice": resultat.notice if resultat else ""}
     return resultat.texte, {"ocr": True, "notice": resultat.notice}
