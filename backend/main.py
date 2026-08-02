@@ -499,11 +499,32 @@ def _build_options(profile_id: str, temperature: float | None) -> dict:
     return options
 
 
+# Injectée quel que soit le style choisi : Olivia produit des courriers et des
+# convocations qui partent tels quels à des familles et à des administrations, où
+# une référence inventée ne se voit pas à la relecture. Le déclencheur constaté le
+# 02/08/2026 était la directive « détaillé » (corrigée dans settings.py), mais le
+# risque ne dépend pas du style retenu dans les réglages.
+#
+# Formulée comme une CONDITION et non comme une interdiction de citer : les
+# documents joints et les résultats de recherche web arrivent bien dans la
+# conversation, en messages `user` explicitement présentés comme tels (voir
+# `withDocuments` / `withWebContext` dans frontend/src/stores/chat.js). Ils
+# doivent rester citables — c'est précisément l'inverse du défaut à corriger.
+DIRECTIVE_ANTI_FABRICATION = (
+    "N'invente jamais une source, une référence, un texte de loi, un sigle, une "
+    "date, un nom ni un chiffre : ne cite que ce qui figure explicitement dans "
+    "les documents ou les résultats de recherche fournis dans cette conversation. "
+    "Si rien de tel ne t'a été fourni, n'ajoute aucune section de sources et "
+    "laisse un espace à compléter (par exemple « [date à préciser] ») plutôt "
+    "qu'une valeur plausible mais inventée."
+)
+
+
 def _inject_system_prompt(profile_id: str, messages: list[ChatMessage]) -> list[dict]:
     s = reglages(profile_id).get()
     directive = style_directives(s.get("reasoning_style", "balanced"), s.get("tone", "neutral"))
     custom = s.get("system_prompt", "").strip()
-    combined = (custom + " " + directive).strip() or "Tu es un assistant IA local."
+    combined = " ".join(p for p in (custom, directive, DIRECTIVE_ANTI_FABRICATION) if p).strip()
     out = [{"role": "system", "content": combined}]
     out.extend(m.dict() for m in messages)
     return out

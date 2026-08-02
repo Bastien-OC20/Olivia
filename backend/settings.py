@@ -270,8 +270,13 @@ def style_directives(style: str, tone: str) -> str:
     if style == "concise":
         fragments.append("Sois concis : réponses courtes, va à l'essentiel.")
     elif style == "detailed":
+        # « mentionne tes sources de raisonnement » a été retiré le 02/08/2026 :
+        # sans document ni résultat de recherche fourni, le modèle obéissait à la
+        # lettre et fabriquait des références plausibles (textes officiels et
+        # sigles inexistants) en fin de document. On garde le bénéfice — le pas à
+        # pas — en demandant le cheminement du raisonnement, pas ses « sources ».
         fragments.append("Sois détaillé : explique pas à pas, "
-                         "mentionne tes sources de raisonnement.")
+                         "justifie chaque point par le raisonnement qui y mène.")
     elif style == "creative":
         fragments.append("Sois créatif : propose des idées originales, varie ton vocabulaire.")
     elif style == "analytical":
