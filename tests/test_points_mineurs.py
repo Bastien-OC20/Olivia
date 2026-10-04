@@ -40,7 +40,15 @@ def client(tmp_path, monkeypatch):
 
 
 # ---------- Aperçu ----------
-@pytest.mark.parametrize("nom", ["C&A n°1+2.pdf", "compte rendu #3.pdf", "a=b?c.pdf"])
+# Caractères qui cassent une adresse non encodée : « & », « + », « # », « % »,
+# « = », « ; »… et « ? », seulement hors Windows : il y est interdit dans un nom
+# de fichier, un tel document ne peut donc pas exister sur ce système.
+NOMS_SPECIAUX = ["C&A n°1+2.pdf", "compte rendu #3.pdf", "taux 100% = b;c.pdf"]
+if os.name != "nt":
+    NOMS_SPECIAUX.append("a=b?c.pdf")
+
+
+@pytest.mark.parametrize("nom", NOMS_SPECIAUX)
 def test_apercu_pdf_avec_caracteres_speciaux(client, nom):
     (client.docs / nom).write_bytes(b"%PDF-1.4\n%%EOF")
     apercu = client.get("/api/fs/preview", params={"path": f"r0/{nom}"}).json()
