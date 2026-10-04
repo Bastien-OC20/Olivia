@@ -32,8 +32,21 @@
         role="status"
       >
         <strong>Aucun compte n'a encore été créé sur ce poste.</strong>
-        La personne qui s'occupe de l'informatique doit d'abord en créer un :
-        <ul>
+        La personne qui s'occupe de l'informatique doit d'abord en créer un.
+        <!-- Application de bureau : l'assistant s'ouvre directement (desktop/preload.js). -->
+        <template v-if="bureau">
+          <button
+            type="button"
+            class="secondaire"
+            @click="ouvrirAssistant"
+          >
+            Ouvrir l'assistant de création de compte
+          </button>
+          <span class="discret">
+            (aussi dans le menu, et sur l'icône d'Olivia : « Créer un compte… »)
+          </span>
+        </template>
+        <ul v-else>
           <li>Olivia installée : menu Démarrer, <b>Créer un compte Olivia</b> ;</li>
           <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
           <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Olivia.</li>
@@ -104,6 +117,13 @@ const champIdentifiant = ref(null)
 // réseau ou un fichier de comptes illisible (`comptes: null`) laisse l'écran
 // habituel : ce n'est pas la même situation.
 const aucunCompte = ref(false)
+// Exposé par l'application de bureau (desktop/preload.js) ; absent dans un
+// navigateur ordinaire.
+const bureau = typeof window !== 'undefined' ? window.oliviaBureau : undefined
+
+function ouvrirAssistant() {
+  bureau?.creerCompte()
+}
 
 async function verifierComptes() {
   try {
@@ -172,6 +192,8 @@ button[type="submit"] { margin-top: 20px; padding: 10px 16px; font-size: 15px; }
 }
 .avis { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
 .premier-compte ul { margin: 6px 0; padding-left: 18px; }
+.premier-compte .secondaire { display: block; width: 100%; margin: 10px 0 4px; }
+.premier-compte .discret { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
 .premier-compte li { margin: 2px 0; }
 .erreur {
   margin-top: 14px;

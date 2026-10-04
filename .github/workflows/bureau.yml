@@ -1,0 +1,90 @@
+# Construit l'application de bureau Olivia (desktop/) pour macOS et Windows.
+#
+# Pourquoi une CI : rien ne se compile « en croisé ». Le backend PyInstaller et
+# l'installeur electron-builder se construisent chacun sur leur propre système :
+# un .dmg sur un Mac, un .exe sur un Windows.
+#
+# Déclenchement :
+#   - manuel (onglet Actions > « Application de bureau » > Run workflow) :
+#     installeurs téléchargeables dans les artefacts du run ;
+#   - étiquette v* (ex. v1.1.0) : installeurs publiés en plus dans une release
+#     GitHub (brouillon, à publier à la main), source des mises à jour
+#     automatiques.
+#
+# Les installeurs ne sont PAS signés (CSC_IDENTITY_AUTO_DISCOVERY=false) : voir
+# le README, section « Application de bureau ». Les moteurs (Ollama, Tesseract)
+# et les modèles d'IA ne sont pas embarqués ici : l'application utilise ceux
+# installés sur le poste.
+name: Application de bureau
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  construire:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest = Apple Silicon (arm64). Un Mac Intel demande un build
+          # x64, sur un Mac Intel ou un runner Intel : non couvert ici.
+          - os: macos-latest
+            cible: --mac
+          - os: windows-latest
+            cible: --win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Dépendances Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyinstaller pytest
+
+      - name: Tests du backend
+        run: python -m pytest tests -q
+
+      - name: Interface (Vue)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Backend compilé (PyInstaller)
+        run: pyinstaller build.spec --clean --noconfirm
+
+      - name: Application de bureau (Electron)
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          npm ci
+          npm test
+          node scripts/preparer.mjs
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then PUBLIER=always; else PUBLIER=never; fi
+          npx electron-builder ${{ matrix.cible }} --publish "$PUBLIER"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: olivia-${{ matrix.os }}
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.exe
+            desktop/dist/latest*.yml
+          if-no-files-found: error

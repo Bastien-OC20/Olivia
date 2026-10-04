@@ -22,6 +22,8 @@ Techniquement, c'est une application web (Vue.js + FastAPI + Ollama) qui :
 - Affiche une barre stylisée des **outils connectés** (boîte mail pro avec notification des non-lus, calendrier)
 - Respecte les mesures techniques **RGPD** (export / suppression des données, consentement) et **RGAA/WCAG AA** (ARIA, clavier, contrastes)
 - Lanceur automatique (`.py` multi-OS + `.exe` Windows autonome via PyInstaller)
+- **Application de bureau macOS et Windows** (Electron) : fenêtre native, icône dans la barre
+  des menus / zone de notification, raccourci global, installeurs `.dmg` / `.exe`, mises à jour
 
 ## 🧭 Mode simple (par défaut)
 
@@ -126,6 +128,86 @@ npm run dev        # dev → http://localhost:5173
 # ou
 npm run build      # prod → frontend/dist, servi par FastAPI sur /ui
 ```
+
+## 🖥️ Application de bureau (macOS, Windows)
+
+Olivia existe aussi en **application de bureau** (`desktop/`, Electron), sur le modèle
+d'applications comme Hermes Desktop : une vraie fenêtre au lieu d'un onglet de navigateur.
+Elle **enveloppe** l'application existante sans la réécrire : elle lance le backend compilé
+(PyInstaller), attend qu'il réponde, puis affiche son interface. Tout reste local : la fenêtre
+ne charge que `http://127.0.0.1`, aucune donnée ne sort de la machine, et aucune messagerie
+externe (WhatsApp, Telegram…) n'est branchée — choix assumé, cohérent avec le RGPD.
+
+Ce que l'application apporte :
+
+- **fenêtre native**, icône Olivia dans le Dock / la barre des tâches ;
+- **icône dans la barre des menus** (macOS) ou la **zone de notification** (Windows) : fermer la
+  fenêtre laisse Olivia disponible en arrière-plan ; menu : Ouvrir, Créer un compte…, Redémarrer,
+  Quitter ;
+- **raccourci global** `Ctrl+Alt+O` (Windows) / `Cmd+Option+O` (macOS) pour afficher ou masquer
+  Olivia depuis n'importe quelle application ;
+- **une seule instance** : relancer Olivia ramène la fenêtre existante ;
+- **installeurs** `.dmg` (macOS) et `.exe` (Windows, NSIS) ;
+- **mises à jour automatiques** depuis les releases GitHub du dépôt (electron-updater) — sur
+  Windows ; sur macOS seulement une fois l'application signée (macOS refuse sinon d'installer la
+  mise à jour : activer alors `olivia.majAutoMac` dans `desktop/package.json`). Une release ne
+  sert de mise à jour qu'une fois publiée, et seulement si le dépôt est accessible aux postes ;
+- **création de compte** : sur un poste sans compte, l'écran de connexion propose « Ouvrir
+  l'assistant de création de compte » ; ensuite, menu *Créer un compte…*. L'assistant `init`
+  s'ouvre dans une fenêtre de terminal : la création reste réservée au service informatique,
+  sans formulaire d'inscription dans l'interface.
+
+**Données** : `C:\ProgramData\Olivia` sous Windows (commun au poste ; l'installeur y donne le
+droit de modification au groupe Utilisateurs), `~/Library/Application Support/Olivia` sous
+macOS. Transmis au backend par `OLIVIA_DATA_DIR` (voir `backend/emplacements.py`). Le journal de
+l'application (`olivia.log`, dossier des journaux d'Electron) aide le support en cas de panne.
+
+**Sécurité de la fenêtre** : `contextIsolation`, `sandbox`, aucun accès Node pour la page ; la
+fenêtre ne navigue que vers l'interface d'Olivia, les liens s'ouvrent dans le navigateur du
+système (http/https seulement) ; toutes les permissions du navigateur (caméra, micro…) sont
+refusées. Seule action exposée à la page (`desktop/preload.js`) : ouvrir l'assistant de compte.
+
+### Construire les installeurs
+
+Chaque installeur se construit **sur son propre système** (pas de compilation croisée) :
+
+```bash
+cd frontend && npm ci && npm run build && cd ..
+pyinstaller build.spec --clean --noconfirm        # → dist/ai-webapp
+cd desktop && npm ci
+npm run dist:mac        # sur un Mac      → desktop/dist/Olivia-<version>.dmg
+npm run dist:win        # sur un Windows  → desktop/dist/Olivia Setup <version>.exe
+```
+
+`desktop/scripts/preparer.mjs` embarque aussi `ollama/`, `tesseract/` et `modeles/` s'ils sont
+présents à la racine du dépôt **et** compilés pour le système de la machine. Sinon, l'application
+utilise l'Ollama installé sur le poste (port 11434) : sur Mac, installer Ollama depuis ollama.com
+puis `ollama pull mistral-nemo:12b-instruct-2407-q4_K_M`, `ollama pull gemma2:2b` et
+`ollama pull bge-m3`.
+
+Sans Mac ni Windows sous la main : le workflow GitHub Actions **« Application de bureau »**
+(`.github/workflows/bureau.yml`, lancement manuel ou étiquette `v*`) construit les deux
+installeurs (Mac Apple Silicon et Windows) et les dépose dans les artefacts du run.
+
+Développement : `cd desktop && npm ci && npm start` (backend lancé depuis le dépôt ;
+`OLIVIA_PYTHON` pour désigner l'interpréteur). Tests : `npm test`.
+
+### Signature (non configurée pour l'instant)
+
+Les installeurs ne sont **pas signés**. Conséquences : Windows affiche SmartScreen au premier
+lancement (*Informations complémentaires → Exécuter quand même*) ; macOS bloque l'ouverture d'une
+application non signée téléchargée (autorisation à donner dans *Réglages Système →
+Confidentialité et sécurité*, ou par le service informatique avec
+`xattr -dr com.apple.quarantine /Applications/Olivia.app`). Pour signer : compte Apple
+Developer (signature + notarisation) et certificat de signature de code Windows, fournis à
+electron-builder par ses variables `CSC_LINK` / `CSC_KEY_PASSWORD` (et `APPLE_ID`… pour la
+notarisation), en retirant `CSC_IDENTITY_AUTO_DISCOVERY=false` du workflow.
+
+> **Vérifié** : chaîne complète construite et testée sous Linux (même code que macOS) —
+> backend embarqué, connexion, arrêt du backend en moins d'une seconde à la fermeture comme
+> après un plantage de l'application, navigation externe bloquée. **À vérifier sur de vrais
+> postes** : installeurs `.dmg` et `.exe`, premier lancement non signé sur macOS, droits de
+> `C:\ProgramData\Olivia`, icônes et raccourci global, mise à jour automatique.
 
 ## 🪟 Construire le `.exe` Windows (PyInstaller)
 
@@ -641,6 +723,7 @@ ai-webapp/
 ├── launch.py              ← lanceur multi-OS (dev) + point d'entrée .exe (mode gelé)
 ├── build.spec             ← config PyInstaller (embarque backend + frontend/dist)
 ├── deploy-portable.ps1    ← build + synchro vers un disque portable (préserve modèles et données)
+├── desktop/               ← application de bureau Electron (macOS, Windows) : main.js, preload.js
 ├── portable/              ← lanceur .bat et notice copiés sur le disque portable
 ├── tests/                 ← tests de cloisonnement entre organisations (pytest)
 ├── .gitignore

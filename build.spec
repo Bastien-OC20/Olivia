@@ -12,6 +12,7 @@ Au lancement il démarre FastAPI EN INTERNE (pas de venv/pip requis) et ouvre
 le navigateur sur http://127.0.0.1:8000/ui/.
 """
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
 
@@ -131,7 +132,10 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='ai-webapp.ico',  # logo Olivia (généré depuis visuel/logo.png)
+    # Icône .ico : Windows seulement. Sur macOS, PyInstaller voudrait la
+    # convertir en .icns (Pillow requis) ; l'exécutable y est de toute façon
+    # lancé par l'application de bureau (desktop/), qui porte sa propre icône.
+    icon='ai-webapp.ico' if sys.platform.startswith('win') else None,
 )
 
 coll = COLLECT(

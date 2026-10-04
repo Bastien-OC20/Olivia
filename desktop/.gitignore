@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Assemblé par scripts/preparer.mjs avant chaque empaquetage.
+build/ressources/
