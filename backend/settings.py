@@ -134,6 +134,119 @@ DEFAULTS = {
 }
 
 
+# ---------- Validation des réglages reçus (PUT /api/settings) ----------
+# Sans validation, n'importe quelle valeur était enregistrée telle quelle :
+# `temperature: "chaud"` ou `compute_device: 42` étaient acceptés (HTTP 200),
+# puis faisaient échouer chaque appel au modèle, sans que l'utilisatrice sache
+# pourquoi. Chaque clé connue a désormais un type et des bornes.
+CHOIX = {
+    "reasoning_style": {"concise", "balanced", "detailed", "creative", "analytical"},
+    "tone": {"neutral", "friendly", "formal", "teacher"},
+    "compute_device": {"gpu", "cpu"},
+    "search_provider": {"duckduckgo", "searxng", "brave"},
+}
+BOOLEENS = {"simple_mode", "search_official_only", "ocr_enabled", "privacy_consent"}
+# Texte libre : longueur maximale (borne une saisie aberrante, ou un collage
+# accidentel de plusieurs pages dans le prompt système).
+TEXTES = {
+    "system_prompt": 4000,
+    "searxng_url": 500,
+    "search_brave_api_key": 500,
+    "ocr_tesseract_path": 1000,
+    "docgen_appel": 500,
+    "docgen_formule_politesse": 1000,
+    "docgen_lieu": 200,
+    "docgen_signature": 500,
+}
+TEMPERATURE_MIN, TEMPERATURE_MAX = 0.0, 2.0
+# Connecteurs : champ -> longueur maximale d'un texte, ou bool.
+CONNECTEURS = {
+    "imap": {"enabled": bool, "label": 60, "host": 255, "user": 255,
+             "password": 500, "folder": 255},
+    "calendar_ics": {"enabled": bool, "path": 1000},
+    "obsidian": {"enabled": bool, "vault_path": 1000},
+    "notion": {"enabled": bool, "api_token": 500},
+}
+# Validés à part, dans main.update_settings (existence des dossiers, dossiers
+# réservés) : transmis ici tels quels.
+VALIDES_AILLEURS = {"fs_roots"}
+
+
+def _texte(champ: str, valeur, maximum: int) -> str:
+    if not isinstance(valeur, str):
+        raise ValueError(f"« {champ} » doit être un texte.")
+    if len(valeur) > maximum:
+        raise ValueError(f"« {champ} » dépasse {maximum} caractères.")
+    return valeur
+
+
+def _booleen(champ: str, valeur) -> bool:
+    if not isinstance(valeur, bool):
+        raise ValueError(f"« {champ} » doit valoir vrai ou faux.")
+    return valeur
+
+
+def valider_patch(patch: dict) -> dict:
+    """Réglages reçus, vérifiés et nettoyés. Lève ValueError (message en
+    français, nommant le champ) sur une valeur de mauvais type ou hors bornes.
+
+    Une clé INCONNUE est ignorée sans erreur, pas refusée : l'interface renvoie
+    tous les réglages à chaque « Enregistrer », y compris des clés d'anciennes
+    versions restées dans un settings.json (connecteurs retirés,
+    docgen_template_path…). Les refuser rendrait tout enregistrement impossible
+    sur ces installations ; les ignorer ne leur fait rien enregistrer de plus.
+    """
+    if not isinstance(patch, dict):
+        raise ValueError("Les réglages doivent être un objet JSON.")
+    propre: dict = {}
+    for cle, valeur in patch.items():
+        if cle in VALIDES_AILLEURS:
+            propre[cle] = valeur
+        elif cle in CHOIX:
+            if valeur not in CHOIX[cle]:
+                permis = ", ".join(sorted(CHOIX[cle]))
+                raise ValueError(f"« {cle} » doit valoir l'un de : {permis}.")
+            propre[cle] = valeur
+        elif cle in BOOLEENS:
+            propre[cle] = _booleen(cle, valeur)
+        elif cle in TEXTES:
+            propre[cle] = _texte(cle, valeur, TEXTES[cle])
+        elif cle == "temperature":
+            if isinstance(valeur, bool) or not isinstance(valeur, (int, float)) \
+                    or not TEMPERATURE_MIN <= valeur <= TEMPERATURE_MAX:
+                raise ValueError(f"« temperature » doit être un nombre entre "
+                                 f"{TEMPERATURE_MIN:g} et {TEMPERATURE_MAX:g}.")
+            propre[cle] = float(valeur)
+        elif cle == "connectors":
+            propre[cle] = _valider_connecteurs(valeur)
+        # Toute autre clé : ignorée (voir la docstring).
+    url = propre.get("searxng_url")
+    if url and not url.startswith(("http://", "https://")):
+        raise ValueError("« searxng_url » doit commencer par http:// ou https://.")
+    return propre
+
+
+def _valider_connecteurs(valeur) -> dict:
+    if not isinstance(valeur, dict):
+        raise ValueError("« connectors » doit être un objet.")
+    propre: dict = {}
+    for nom, cfg in valeur.items():
+        schema = CONNECTEURS.get(nom)
+        if schema is None:
+            continue                       # connecteur retiré : ignoré
+        if not isinstance(cfg, dict):
+            raise ValueError(f"« connectors.{nom} » doit être un objet.")
+        propre[nom] = {}
+        for champ, v in cfg.items():
+            regle = schema.get(champ)
+            chemin = f"connectors.{nom}.{champ}"
+            if regle is bool:
+                propre[nom][champ] = _booleen(chemin, v)
+            elif isinstance(regle, int):
+                propre[nom][champ] = _texte(chemin, v, regle)
+    return propre
+
+
 def _deep_default() -> dict:
     return json.loads(json.dumps(DEFAULTS))
 

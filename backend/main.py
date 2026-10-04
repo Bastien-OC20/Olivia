@@ -68,7 +68,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from .settings import reglages, style_directives
+from .settings import reglages, style_directives, valider_patch
 from .search import web_search
 from . import documents
 from . import docsearch
@@ -1164,8 +1164,13 @@ async def get_settings(profile_id: str = Depends(get_current_profile)):
 
 @app.put("/api/settings")
 async def update_settings(patch: dict, profile_id: str = Depends(get_current_profile)):
-    if not isinstance(patch, dict):
-        raise HTTPException(400, "Body doit être un objet JSON")
+    # Types et bornes de chaque réglage connu (voir settings.valider_patch) :
+    # une valeur invalide est refusée ici, avec un message qui nomme le champ,
+    # au lieu d'être enregistrée puis de faire échouer chaque appel au modèle.
+    try:
+        patch = valider_patch(patch)
+    except ValueError as e:
+        raise HTTPException(400, f"Réglage refusé : {e}")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
     # Plus un réglage : l'emplacement du modèle Word est fixé par le code, un

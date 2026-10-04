@@ -491,6 +491,10 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 - **CORS restreint** au poste local (plus de wildcard).
 - Écoute sur `127.0.0.1` par défaut.
 - Upload : allowlist d'extensions, nom assaini, taille max, sandbox.
+- **Réglages validés** (`PUT /api/settings`) : chaque réglage connu a un type et des bornes
+  (température de 0 à 2, choix fermés, textes de longueur bornée…) ; une valeur invalide est refusée
+  (HTTP 400, message nommant le champ) au lieu d'être enregistrée puis de faire échouer le modèle.
+  Une clé inconnue, héritée d'une ancienne version, est ignorée sans bloquer l'enregistrement.
 - **Comptes et sessions** — écran de connexion dans l'interface (voir
   [🔐 Comptes et organisations](#-comptes-et-organisations)) : `POST /api/auth/login` ouvre une
   session (cookie `olivia_session`, `HttpOnly`, `SameSite=Lax`, 8 h) ; `POST /api/auth/logout` la
