@@ -739,6 +739,34 @@ async def fs_download(path: str = Query(...), profile_id: str = Depends(get_curr
     return FileResponse(str(p), filename=p.name)
 
 
+MAX_VARIANTES_NOM = 500
+
+
+def _ouvrir_fichier_neuf(dossier: Path, nom: str):
+    """Crée un fichier NEUF dans `dossier` et renvoie (chemin, fichier ouvert en
+    écriture binaire). Ne remplace JAMAIS un fichier existant.
+
+    Un import portant le nom d'un document déjà présent écrasait auparavant ce
+    document sans prévenir — un compte rendu ou une convocation perdus sans
+    retour possible. Le fichier reçu est désormais rangé sous « nom (2).ext »,
+    « nom (3).ext »…, même convention que la production de documents Word
+    (voir `_destination_libre`).
+
+    L'ouverture en mode exclusif (`"xb"`) fait la vérification et la création
+    en une seule opération du système : deux imports simultanés du même nom ne
+    peuvent pas choisir le même emplacement et s'écraser l'un l'autre, ce
+    qu'un test `exists()` suivi d'une ouverture ne garantirait pas.
+    """
+    base, ext = os.path.splitext(nom)
+    for i in range(1, MAX_VARIANTES_NOM + 1):
+        candidat = dossier / (nom if i == 1 else f"{base} ({i}){ext}")
+        try:
+            return candidat, open(candidat, "xb")
+        except FileExistsError:
+            continue
+    raise HTTPException(409, f"Trop de fichiers portent déjà le nom « {nom} » dans ce dossier.")
+
+
 @app.post("/api/fs/upload")
 async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
                     profile_id: str = Depends(get_current_profile)):
@@ -772,11 +800,14 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
     if zones.est_reserve(target_dir, deja_resolu=True):
         raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
-    dest = target_dir / safe_name
 
     size = 0
     try:
-        with open(dest, "wb") as out:
+        dest, out = _ouvrir_fichier_neuf(target_dir, safe_name)
+    except OSError as e:
+        raise HTTPException(500, f"Erreur d'upload : {e}")
+    try:
+        with out:
             while chunk := await file.read(1024 * 1024):
                 size += len(chunk)
                 if size > MAX_UPLOAD_SIZE:
@@ -796,7 +827,16 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
     # introuvable par la recherche par le sens jusqu'au prochain démarrage ou
     # clic manuel sur « Construire l'index ». Tâche de fond, jamais bloquant.
     _indexer_automatiquement(profile_id)
-    return {"path": _virtual_path(dest, root, prefix), "name": safe_name, "size": size}
+    return {
+        "path": _virtual_path(dest, root, prefix),
+        "name": dest.name,
+        "size": size,
+        # Nom demandé, et si le fichier a dû être renommé pour ne pas écraser un
+        # document existant : l'interface doit le dire, sinon l'utilisatrice
+        # chercherait son fichier sous le nom d'origine.
+        "requested_name": safe_name,
+        "renamed": dest.name != safe_name,
+    }
 
 
 def _iter_searchable_files(targets):
