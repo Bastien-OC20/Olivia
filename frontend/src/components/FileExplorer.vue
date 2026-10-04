@@ -352,6 +352,7 @@ function openFile(path) { selectedPath.value = path }
 async function onUpload(e) {
   const file = e.target.files?.[0]
   if (!file) return
+  let renomme = false
   uploadMsg.value = 'Envoi…'
   try {
     const fd = new FormData()
@@ -361,14 +362,21 @@ async function onUpload(e) {
     })
     const data = await r.json()
     if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`)
-    uploadMsg.value = `✓ ${data.name} importé`
+    // Un fichier du même nom existait : le serveur ne l'écrase jamais et range
+    // l'import sous un autre nom. Il faut le dire, sinon l'utilisatrice
+    // chercherait (ou rouvrirait) l'ancien document sous le nom d'origine.
+    renomme = !!data.renamed
+    uploadMsg.value = renomme
+      ? `✓ Importé sous « ${data.name} » : un fichier « ${data.requested_name} » existait déjà, il n'a pas été remplacé.`
+      : `✓ ${data.name} importé`
     await navigate(currentPath.value)
   } catch (err) {
     uploadMsg.value = ''
     alert('Upload impossible : ' + err.message)
   } finally {
     if (fileInput.value) fileInput.value.value = ''
-    setTimeout(() => { uploadMsg.value = '' }, 4000)
+    // Message de renommage laissé plus longtemps : il demande d'être lu.
+    setTimeout(() => { uploadMsg.value = '' }, renomme ? 10000 : 4000)
   }
 }
 

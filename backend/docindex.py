@@ -150,6 +150,17 @@ _verrous_construction: dict[str, threading.Lock] = {}
 _evenements_annulation: dict[str, threading.Event] = {}
 _progres: dict[str, dict] = {}
 
+# Effacement RGPD vs construction en cours. Le drapeau d'annulation ne suffit
+# pas : une construction interrompue SAUVEGARDE le travail déjà fait (c'est le
+# comportement voulu du bouton « Interrompre »), et cette sauvegarde recréait
+# l'index qu'une purge venait d'effacer. Chaque purge incrémente donc la
+# GÉNÉRATION de l'organisation ; une construction mémorise celle de son départ
+# et n'écrit plus rien dès qu'elle a changé. Le contrôle et l'écriture se font
+# sous `_verrou_disque`, que la purge prend aussi : aucune écriture ne peut se
+# glisser entre le contrôle et l'effacement.
+_verrous_disque: dict[str, threading.Lock] = {}
+_generations: dict[str, int] = {}
+
 # Cache mémoire de l'index chargé, un par organisation. Invalidé sur la date de
 # modification de meta.json : une construction qui vient de se terminer est donc
 # vue immédiatement par la recherche.
@@ -179,6 +190,22 @@ def _annulation(profile_id: str) -> threading.Event:
             evenement = threading.Event()
             _evenements_annulation[profile_id] = evenement
         return evenement
+
+
+def _verrou_disque(profile_id: str) -> threading.Lock:
+    """Verrou des fichiers d'index d'une organisation (voir `_generations`)."""
+    with _verrou_etats:
+        verrou = _verrous_disque.get(profile_id)
+        if verrou is None:
+            verrou = threading.Lock()
+            _verrous_disque[profile_id] = verrou
+        return verrou
+
+
+def _generation(profile_id: str) -> int:
+    """Nombre de purges subies par l'index de cette organisation."""
+    with _verrou_etats:
+        return _generations.get(profile_id, 0)
 
 
 def _lire_progres(profile_id: str) -> dict:
@@ -418,6 +445,18 @@ def _sauver(profile_id: str, index, meta: dict) -> bool:
         return False                   # un index non sauvé n'empêche rien d'autre
 
 
+def _sauver_si_non_purge(profile_id: str, generation: int, index, meta: dict) -> bool:
+    """`_sauver`, sauf si l'index a été purgé depuis le début de la construction.
+
+    Renvoie False sans rien écrire dans ce cas : une demande d'effacement
+    l'emporte toujours sur le travail d'une construction lancée avant elle.
+    """
+    with _verrou_disque(profile_id):
+        if _generation(profile_id) != generation:
+            return False
+        return _sauver(profile_id, index, meta)
+
+
 def _retirer(index, meta: dict, cle: str) -> None:
     """Efface de l'index et des métadonnées tous les extraits d'un fichier."""
     ancien = meta["files"].pop(cle, None)
@@ -461,6 +500,9 @@ def construire_index(profile_id: str, fichiers,
     if not FAISS_DISPONIBLE:
         return resume
 
+    # Mémorisée AVANT le chargement : une purge survenue après ce point, même
+    # pendant la lecture de l'index, empêche toute écriture ultérieure.
+    generation = _generation(profile_id)
     index, meta = _charger(profile_id, depuis_disque=True)
     if index is None or meta is None:
         index, meta = _index_vide(), _meta_vide()
@@ -517,7 +559,7 @@ def construire_index(profile_id: str, fichiers,
             depuis_point += 1
             if depuis_point >= CHECKPOINT_FICHIERS \
                     or time.monotonic() - dernier_point >= CHECKPOINT_SECONDES:
-                _sauver(profile_id, index, meta)
+                _sauver_si_non_purge(profile_id, generation, index, meta)
                 depuis_point = 0
                 dernier_point = time.monotonic()
 
@@ -533,7 +575,7 @@ def construire_index(profile_id: str, fichiers,
     # modèle) : on ne réécrit pas l'index, ce qui laisse aussi la date de
     # dernière construction affichée à l'écran refléter un vrai contenu.
     if modifie:
-        _sauver(profile_id, index, meta)
+        _sauver_si_non_purge(profile_id, generation, index, meta)
     return resume
 
 
@@ -817,14 +859,22 @@ def purger_index(profile_id: str) -> bool:
     """Supprime l'index et les métadonnées de CETTE organisation, et d'elle seule.
     Vrai si quelque chose existait.
 
-    L'annulation est posée d'abord : une construction en cours réécrirait
-    sinon, quelques secondes plus tard, les fichiers qu'on vient d'effacer.
+    L'annulation arrête une construction en cours au fichier suivant, mais ne
+    suffit pas : interrompue, une construction sauvegarde ce qu'elle a déjà
+    fait, ce qui recréait l'index effacé quelques secondes plus tôt. La
+    génération incrémentée ici, sous le même verrou que les écritures, interdit
+    toute sauvegarde à une construction lancée avant la purge (voir
+    `_sauver_si_non_purge`). Ne bloque pas l'appelant : rien n'attend la fin de
+    la construction.
     """
     _annulation(profile_id).set()
     dossier = dossier_index(profile_id)
-    with _verrou_cache:
-        _cache_index.pop(profile_id, None)
-        existait = dossier.exists()
-        if existait:
-            shutil.rmtree(dossier, ignore_errors=True)
+    with _verrou_disque(profile_id):
+        with _verrou_etats:
+            _generations[profile_id] = _generations.get(profile_id, 0) + 1
+        with _verrou_cache:
+            _cache_index.pop(profile_id, None)
+            existait = dossier.exists()
+            if existait:
+                shutil.rmtree(dossier, ignore_errors=True)
     return existait
