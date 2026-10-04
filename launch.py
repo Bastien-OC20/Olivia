@@ -18,6 +18,12 @@ Usage :
   python launch.py --no-dev         # backend seul, UI buildée sur /ui
   python launch.py --no-browser     # ne pas ouvrir le navigateur
   python launch.py --port 9000      # changer le port backend
+
+Comptes (service informatique) — n'importe quel mode, sans rien démarrer :
+  ai-webapp.exe init                # assistant : organisation + compte
+  ai-webapp.exe create-user <identifiant> <profile_id>
+  ai-webapp.exe list-profiles
+  (python launch.py init, etc. depuis le dépôt source)
 """
 import argparse
 import os
@@ -209,6 +215,26 @@ def run_frozen(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------- comptes (service informatique)
+# Sous-commandes de backend/manage_users.py, relayées par le lanceur. Raison :
+# une installation neuve (installeur, disque portable) démarre SANS aucun compte,
+# puisque build.spec exclut backend/profiles/ du binaire — et l'écran de
+# connexion est obligatoire. Sans ce relais, le seul moyen de créer un compte
+# était de lancer manage_users.py depuis le dépôt source, qui écrit dans le
+# backend/profiles/ du dépôt et non dans celui de l'installation : une
+# installation neuve était inutilisable. Passer par l'exécutable lui-même
+# garantit d'écrire au bon endroit (_internal/backend/profiles/ en mode gelé).
+COMMANDES_COMPTES = {"init", "create-profile", "create-user", "list-profiles"}
+
+
+def run_comptes(argv: list[str]) -> int:
+    """Exécute une commande de comptes, sans démarrer ni Ollama ni le serveur."""
+    sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
+    from backend import manage_users
+    prog = Path(sys.executable).name if FROZEN else "python launch.py"
+    return manage_users.main(argv, prog=prog)
+
+
 # ------------------------------------------------------------- mode SOURCE (dev)
 def find_venv_python() -> str | None:
     candidate = (BACKEND_DIR / ".venv" / ("Scripts" if IS_WINDOWS else "bin")
@@ -315,6 +341,9 @@ def main() -> int:
             _stream.reconfigure(encoding="utf-8")
         except Exception:
             pass
+
+    if len(sys.argv) > 1 and sys.argv[1] in COMMANDES_COMPTES:
+        return run_comptes(sys.argv[1:])
 
     parser = argparse.ArgumentParser(description="Lanceur Olivia")
     parser.add_argument("--host", default="127.0.0.1")

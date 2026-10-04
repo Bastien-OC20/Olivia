@@ -69,6 +69,17 @@ def get_user(user_id: str) -> dict | None:
         return None
 
 
+def existe_un_compte() -> bool:
+    """Au moins un compte est-il provisionné sur ce poste ?
+
+    Sert uniquement à l'écran de connexion d'une installation neuve, pour dire
+    COMMENT créer le premier compte au lieu de laisser un formulaire qui ne peut
+    pas aboutir (voir GET /api/auth/etat).
+    """
+    with store_lock:
+        return bool(_lire()["users"])
+
+
 def get_user_by_username(username: str) -> dict | None:
     """Compte correspondant à un identifiant de connexion (casse ignorée)."""
     cle = _cle_username(username)

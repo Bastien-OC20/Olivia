@@ -46,13 +46,27 @@ identifiant deviné d'une autre organisation ne donne accès à rien.
 
 **Créer une organisation et un compte** — volontairement en ligne de commande et non
 dans l'interface (même logique que les connecteurs OAuth : préparé une fois par le
-service informatique, pas par l'utilisatrice finale) :
+service informatique, pas par l'utilisatrice finale).
 
-```bash
-python backend/manage_users.py create-profile "Nom de l'organisation"
-python backend/manage_users.py create-user <identifiant> <mot-de-passe> <id-du-profil>
-python backend/manage_users.py list-profiles
+Une installation neuve (installeur, disque portable, `.exe`) démarre **sans aucun
+compte** : `build.spec` n'embarque jamais `backend/profiles/`. L'écran de connexion le
+détecte (`GET /api/auth/etat`) et explique comment créer le premier compte. Les
+commandes passent par l'exécutable lui-même, qui écrit donc au bon endroit — aucun
+Python n'est requis sur le poste :
+
+```powershell
+# Disque portable : double-clic sur Creer-un-compte.bat (assistant guidé)
+ai-webapp.exe init                                  # assistant : organisation + compte
+ai-webapp.exe create-profile "Nom de l'organisation"
+ai-webapp.exe create-user <identifiant> <id-du-profil>
+ai-webapp.exe list-profiles
 ```
+
+Depuis le dépôt source, mêmes commandes avec `python launch.py init` (ou
+`python backend/manage_users.py init`). Le mot de passe est **demandé au clavier,
+masqué et confirmé** : passé en argument, il resterait dans l'historique du terminal.
+L'ancienne forme `create-user <identifiant> <mot-de-passe> <id-du-profil>` reste
+acceptée pour les scripts existants, avec un avertissement.
 
 Aucune commande de suppression n'existe à ce jour : le retrait d'un compte ou d'une
 organisation se fait en éditant `backend/profiles/registry.json` / `users.json` et en
@@ -205,6 +219,7 @@ Structure produite (`ollama\` doit être **dans** `ai-webapp\` : le lanceur le c
 ```
 G:\Olivia\
 ├── Lancer-Olivia.bat      ← double-clic (source versionnée : portable/)
+├── Creer-un-compte.bat    ← création d'un compte (service informatique)
 ├── LISEZ-MOI.txt          ← notice non technique
 └── ai-webapp\
     ├── ai-webapp.exe

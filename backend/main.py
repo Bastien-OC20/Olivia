@@ -3,6 +3,7 @@ FastAPI backend pour Olivia (assistante locale).
 
 Routes principales :
   POST /api/auth/login                   : ouvre une session (cookie HttpOnly)
+  GET  /api/auth/etat                    : au moins un compte existe-t-il ? (public)
   POST /api/auth/logout                  : ferme la session courante
   GET  /api/auth/me                      : compte et organisation connectés
   GET  /api/health                       : diagnostic de service
@@ -41,8 +42,9 @@ Routes principales :
   DELETE /api/conversations/{conv_id}    : supprime une conversation
   /ui                                    : interface Vue buildée (frontend/dist)
 
-CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service) et
-/api/auth/login, toute route /api/* exige une session ouverte et ne travaille que
+CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service),
+/api/auth/login et /api/auth/etat (écran de connexion), toute route /api/* exige
+une session ouverte et ne travaille que
 sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
 identifiant d'organisation n'est jamais accepté depuis le client.
 """
@@ -282,6 +284,26 @@ async def auth_login(demande: DemandeConnexion, response: Response):
         httponly=True, samesite="lax", secure=False, path="/",
     )
     return _identite(user)
+
+
+@app.get("/api/auth/etat")
+async def auth_etat():
+    """Le poste a-t-il au moins un compte ? Sans authentification, par nécessité :
+    c'est l'écran de connexion qui pose la question.
+
+    Une installation neuve démarre sans aucun compte (build.spec exclut
+    backend/profiles/ du binaire). L'écran de connexion peut alors expliquer
+    comment créer le premier, au lieu d'un formulaire voué à l'échec. La réponse
+    ne révèle qu'un booléen — ni nom de compte, ni nom d'organisation — et le
+    service n'écoute que sur 127.0.0.1.
+
+    `comptes` vaut None si le fichier des comptes est illisible : ce n'est pas
+    « aucun compte », et l'écran ne doit pas inviter à en créer un.
+    """
+    try:
+        return {"comptes": users.existe_un_compte()}
+    except RuntimeError:
+        return {"comptes": None}
 
 
 @app.post("/api/auth/logout")

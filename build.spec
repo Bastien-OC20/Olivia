@@ -53,6 +53,11 @@ hiddenimports = (
         'ics',                         # calendrier .ics
         'email.mime.text', 'email.mime.multipart',
         'imaplib', 'smtplib',
+        # Saisie masquée du mot de passe par `ai-webapp.exe init` / `create-user`
+        # (backend/manage_users.py, relayé par launch.py). Module de la
+        # bibliothèque standard, mais importé seulement par le backend, que
+        # l'analyse statique ne voit pas.
+        'getpass',
     ]
 )
 

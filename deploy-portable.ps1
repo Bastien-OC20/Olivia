@@ -451,6 +451,7 @@ $controles = [ordered]@{
     'moteur OCR'        = Join-Path $tesseractDest $exeOcr
     'langue OCR (fra)'  = Join-Path $tesseractDest 'tessdata\fra.traineddata'
     'lanceur (.bat)'    = Join-Path $Destination 'Lancer-Olivia.bat'
+    'creation de compte' = Join-Path $Destination 'Creer-un-compte.bat'
 }
 $manquants = @()
 foreach ($c in $controles.GetEnumerator()) {
@@ -480,6 +481,7 @@ if ($manquants.Count -gt 0) {
 Write-Host ('Deploiement termine en {0:N0}s. Total sur le disque : {1} Go.' -f `
             $chrono.Elapsed.TotalSeconds, (Get-TailleGo $Destination)) -ForegroundColor Green
 Write-Host "Pour demarrer : double-clic sur $Destination\Lancer-Olivia.bat"
+Write-Host "Premiere installation : creer un compte avec $Destination\Creer-un-compte.bat"
 
 # Sortie explicite : sans elle, PowerShell propage le code de robocopy, dont les
 # valeurs de succes vont de 0 a 7 (2 = elements presents en destination et absents

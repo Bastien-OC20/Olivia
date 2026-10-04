@@ -2,6 +2,16 @@
   OLIVIA - assistante locale, version portable
 ========================================================
 
+PREMIERE UTILISATION : CREER UN COMPTE
+--------------------------------------
+Olivia demande un identifiant et un mot de passe. Au depart,
+aucun compte n'existe : la personne qui s'occupe de
+l'informatique en cree un, une seule fois.
+
+Double-cliquez sur "Creer-un-compte.bat" et repondez aux
+questions (nom de l'organisation, identifiant, mot de passe).
+Le meme fichier sert plus tard a ajouter un autre compte.
+
 POUR DEMARRER
 -------------
 Double-cliquez sur "Lancer-Olivia.bat".
@@ -20,11 +30,12 @@ Attendez qu'elle disparaisse avant de retirer le disque.
 CE QUI EST SUR CE DISQUE
 ------------------------
   Lancer-Olivia.bat   <- le raccourci de demarrage
+  Creer-un-compte.bat <- creation d'un compte (informatique)
   ai-webapp\          <- l'application
       ai-webapp.exe
       _internal\      <- fichiers techniques, ne pas toucher
       ollama\         <- le moteur d'intelligence artificielle
-          models\     <- les modeles qwen3:4b et qwen3:8b
+          models\     <- les modeles d'intelligence artificielle
 
 
 VOS DONNEES
@@ -32,8 +43,8 @@ VOS DONNEES
 Tout reste sur ce disque, rien n'est envoye sur Internet
 et rien n'est installe sur l'ordinateur utilise :
 
-  - vos reglages       : ai-webapp\_internal\backend\settings.json
-  - vos conversations  : ai-webapp\_internal\backend\conversations\
+  - comptes, reglages et conversations, ranges par
+    organisation : ai-webapp\_internal\backend\profiles\
 
 Si vous branchez ce disque sur un autre ordinateur, vous
 retrouvez vos conversations. Si vous le perdez, elles
@@ -53,11 +64,10 @@ BON A SAVOIR
   pas signee numeriquement : cliquez sur "Informations
   complementaires" puis "Executer quand meme".
 
-* Rapidite : Olivia utilise la carte graphique de
-  l'ordinateur si elle en trouve une. Sur un poste sans
-  carte graphique, allez dans Parametres > Reglages avances
-  et choisissez la puissance "Standard" avec le modele
-  qwen3:4b - beaucoup plus fluide.
+* Rapidite : au premier demarrage, Olivia choisit seule
+  entre la carte graphique (mode "Rapide") et le processeur
+  (mode "Standard") selon l'ordinateur. Le bouton en haut
+  de l'ecran permet de changer de mode a tout moment.
 
 * Vos dossiers de travail : onglet "Documents", bouton
   "Parcourir". Attention, si vous designez un dossier de
