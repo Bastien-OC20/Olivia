@@ -48,6 +48,7 @@ une session ouverte et ne travaille que
 sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
 identifiant d'organisation n'est jamais accepté depuis le client.
 """
+import json
 import os
 import re
 import sys
@@ -594,15 +595,60 @@ async def chat_stream(req: ChatRequest, profile_id: str = Depends(get_current_pr
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as resp:
+                    if resp.status_code >= 400:
+                        # Modèle absent, requête refusée… Ollama répond alors par
+                        # un code d'erreur et un corps {"error": "..."} : relayé
+                        # tel quel, il n'était pas reconnu par l'interface, qui
+                        # affichait une bulle vide.
+                        brut = (await resp.aread()).decode("utf-8", "replace")
+                        yield _ligne_sse({"error": _erreur_ollama_lisible(
+                            resp.status_code, brut, req.model)})
+                        return
                     async for line in resp.aiter_lines():
                         if line:
                             yield f"data: {line}\n\n"
+        except httpx.ConnectError:
+            yield _ligne_sse({"error": MESSAGE_OLLAMA_INJOIGNABLE})
         except httpx.HTTPError as e:
-            yield f'data: {{"error": "Ollama error: {str(e)}"}}\n\n'
+            yield _ligne_sse({"error": f"La connexion au moteur d'IA a été interrompue ({e})."})
         except Exception as e:
-            yield f'data: {{"error": "{str(e)}"}}\n\n'
+            yield _ligne_sse({"error": f"Erreur inattendue pendant la réponse : {e}"})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# Ollama éteint : le cas le plus fréquent en pratique (fenêtre du lanceur fermée,
+# moteur pas encore démarré). Formulé pour l'utilisatrice, pas pour un technicien.
+MESSAGE_OLLAMA_INJOIGNABLE = (
+    "Le moteur d'IA (Ollama) ne répond pas. Vérifiez qu'Olivia a bien été lancée "
+    "et que sa fenêtre noire est toujours ouverte, puis réessayez."
+)
+
+
+def _ligne_sse(donnees: dict) -> str:
+    """Événement SSE dont la charge est TOUJOURS un JSON valide.
+
+    Les messages d'erreur étaient auparavant insérés dans un JSON écrit à la
+    main : un guillemet dans le message (fréquent, Ollama cite le nom du
+    modèle) rendait la ligne illisible, et l'interface l'ignorait en silence.
+    """
+    return f"data: {json.dumps(donnees, ensure_ascii=False)}\n\n"
+
+
+def _erreur_ollama_lisible(statut: int, corps: str, modele: str) -> str:
+    """Message en français pour une réponse d'erreur d'Ollama."""
+    detail = corps.strip()
+    try:
+        charge = json.loads(corps)
+        if isinstance(charge, dict) and charge.get("error"):
+            detail = str(charge["error"])
+    except ValueError:
+        pass
+    if statut == 404 and "not found" in detail.lower():
+        return (f"Le modèle « {modele} » n'est pas installé sur ce poste. "
+                "Choisissez-en un autre, ou demandez au service informatique de "
+                "l'installer.")
+    return f"Le moteur d'IA a refusé la demande (erreur {statut}) : {detail[:300]}"
 
 
 @app.post("/api/chat")

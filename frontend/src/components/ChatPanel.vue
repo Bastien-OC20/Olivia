@@ -89,6 +89,15 @@
           >
             ⚠️ {{ m.searchNote }}
           </p>
+          <!-- Erreur du moteur d'IA sur ce tour : affichée à part, jamais mêlée
+               au texte de la réponse (qui est renvoyé au modèle). -->
+          <p
+            v-if="m.erreur"
+            class="erreur-modele"
+            role="alert"
+          >
+            ⛔ {{ m.erreur }}
+          </p>
           <details
             v-if="m.sources && m.sources.length"
             class="sources"
@@ -567,6 +576,11 @@ onMounted(chargerEtatModele)
 /* Réponse d'Olivia : pleine largeur, sans bulle (comme Claude Desktop) */
 .msg.assistant .bubble { background: transparent; padding: 2px 0; }
 .search-note { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
+.erreur-modele {
+  margin: 6px 0 0; padding: 8px 10px; font-size: 13px; line-height: 1.4;
+  color: var(--text); background: rgba(239,68,68,0.12);
+  border: 1px solid var(--danger); border-radius: 6px;
+}
 .sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
 .sources summary { cursor: pointer; padding: 2px 0; }
 .sources ol { margin: 6px 0 0; padding-left: 22px; }

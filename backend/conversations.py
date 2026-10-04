@@ -69,6 +69,11 @@ def _clean_messages(messages: list[dict] | None) -> list[dict]:
             entry["sources"] = m["sources"]
         if "searchNote" in m:
             entry["searchNote"] = m["searchNote"]
+        # Erreur du moteur d'IA sur ce tour (Ollama éteint, modèle absent…) :
+        # conservée pour qu'une conversation rouverte dise pourquoi la réponse
+        # manque, et gardée HORS de `content`, qui est renvoyé au modèle.
+        if m.get("erreur"):
+            entry["erreur"] = m["erreur"]
         cleaned.append(entry)
     return cleaned
 

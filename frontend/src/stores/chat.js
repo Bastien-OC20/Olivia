@@ -6,6 +6,14 @@ import { ref, computed } from 'vue'
 const WEB_SEARCH_LIMIT = 5
 const WEB_QUERY_MAX = 300
 
+// Moteur d'IA (Ollama) injoignable : même texte que MESSAGE_OLLAMA_INJOIGNABLE
+// côté backend (main.py), pour que l'utilisatrice lise la même consigne quel que
+// soit le moment où la panne est constatée.
+const MESSAGE_MOTEUR_ETEINT = "Le moteur d'IA (Ollama) ne répond pas. Vérifiez qu'Olivia "
+  + 'a bien été lancée et que sa fenêtre noire est toujours ouverte, puis réessayez.'
+const MESSAGE_OLIVIA_INJOIGNABLE = "Olivia ne répond pas. Vérifiez qu'elle est bien "
+  + 'démarrée, puis réessayez.'
+
 // ---------- Contexte documentaire ----------
 // Un petit modèle local n'a qu'une fenêtre de contexte limitée : on borne donc
 // ce qui est injecté, par document ET au total. Quand un document est coupé,
@@ -135,11 +143,28 @@ export const useChatStore = defineStore('chat', () => {
    * l'ordre renvoyé par Ollama, qui ne reflète ni une recommandation ni même
    * un ordre stable (un modèle tout juste installé peut apparaître en tête).
    */
-  async function loadModels(recommandes = []) {
+  // Raison pour laquelle aucun modèle n'est disponible (moteur éteint, aucun
+  // modèle installé), affichée si l'utilisatrice envoie quand même un message.
+  const modelsErreur = ref('')
+  // Derniers modèles conseillés reçus : réutilisés quand `send()` retente le
+  // chargement (moteur démarré après l'ouverture de la page).
+  let derniersRecommandes = []
+
+  async function loadModels(recommandes = derniersRecommandes) {
+    derniersRecommandes = recommandes
     try {
       const r = await fetch('/api/models')
-      const data = await r.json()
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        availableModels.value = []
+        modelsErreur.value = r.status === 502 ? MESSAGE_MOTEUR_ETEINT
+          : `Liste des modèles indisponible (erreur ${r.status}).`
+        return
+      }
       availableModels.value = data.models || []
+      modelsErreur.value = availableModels.value.length ? ''
+        : "Aucun modèle de conversation n'est installé sur ce poste. "
+          + "Le service informatique doit en installer un."
       if (availableModels.value.length && !currentModel.value) {
         const noms = new Set(availableModels.value.map((m) => m.name))
         const conseille = recommandes.find((n) => noms.has(n))
@@ -147,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (e) {
       console.error('Impossible de charger les modèles :', e)
+      modelsErreur.value = MESSAGE_OLIVIA_INJOIGNABLE
     }
   }
 
@@ -160,6 +186,7 @@ export const useChatStore = defineStore('chat', () => {
       content: m.content,
       sources: m.sources || [],
       searchNote: m.searchNote || '',
+      erreur: m.erreur || '',
     }))
   }
 
@@ -188,6 +215,7 @@ export const useChatStore = defineStore('chat', () => {
         content: m.content || '',
         sources: m.sources || [],
         searchNote: m.searchNote || '',
+        erreur: m.erreur || '',
       }))
       currentId.value = data.id ?? id
       historyUnavailable.value = false
@@ -272,10 +300,24 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function send(userMessage, useWebSearch = false) {
-    if (isStreaming.value || !currentModel.value) return
+    if (isStreaming.value) return
+    // Aucun modèle choisi : le plus souvent, Ollama était éteint au chargement
+    // de la page. Il a pu démarrer depuis, on retente une fois. Auparavant,
+    // l'envoi était abandonné en silence — et la zone de saisie déjà vidée :
+    // le message tapé disparaissait sans réponse ni explication.
+    if (!currentModel.value) await loadModels()
+    if (!currentModel.value) {
+      messages.value.push({ role: 'user', content: userMessage })
+      messages.value.push({
+        role: 'assistant', content: '', sources: [], searchNote: '',
+        erreur: modelsErreur.value || MESSAGE_MOTEUR_ETEINT,
+      })
+      await persist()
+      return
+    }
     messages.value.push({ role: 'user', content: userMessage })
     isStreaming.value = true
-    messages.value.push({ role: 'assistant', content: '', sources: [], searchNote: '' })
+    messages.value.push({ role: 'assistant', content: '', sources: [], searchNote: '', erreur: '' })
     // On reprend l'élément DEPUIS le tableau : Vue renvoie alors un proxy réactif.
     // Écrire sur l'objet brut d'origine ne déclencherait aucun rendu — la réponse
     // n'apparaîtrait qu'à la toute fin du streaming, et la comparaison
@@ -318,6 +360,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     for (const m of messages.value) {
       if (m === assistantMsg) continue
+      // Un tour d'Olivia sans texte est une réponse en échec (son erreur vit à
+      // part, dans `erreur`) : l'envoyer au modèle comme une réponse vide ne
+      // lui apprendrait rien et pourrait l'inciter à répondre vide à son tour.
+      if (m.role === 'assistant' && !(m.content || '').trim()) continue
       ollamaMessages.push({ role: m.role, content: m.content })
     }
 
@@ -339,35 +385,61 @@ export const useChatStore = defineStore('chat', () => {
         }),
         signal: abortController.value.signal
       })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      if (!r.ok) throw new Error(`Olivia ne répond pas (erreur ${r.status}).`)
       const reader = r.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      while (true) {
+      let termine = false
+      lecture: while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          if (line.startsWith('data:')) {
-            try {
-              const payload = JSON.parse(line.slice(5).trim())
-              if (payload.message?.content) {
-                assistantMsg.content += payload.message.content
-              }
-              if (payload.done) {
-                isStreaming.value = false
-                abortController.value = null
-                return
-              }
-            } catch { /* skip */ }
+          if (!line.startsWith('data:')) continue
+          let payload
+          try {
+            payload = JSON.parse(line.slice(5).trim())
+          } catch {
+            continue           // ligne incomplète ou étrangère au protocole
+          }
+          // Erreur du moteur (Ollama éteint, modèle absent…), envoyée par le
+          // backend ou par Ollama en cours de réponse. Auparavant ignorée :
+          // l'utilisatrice voyait une bulle vide, sans explication.
+          if (payload.error) {
+            assistantMsg.erreur = String(payload.error)
+            termine = true
+            break lecture
+          }
+          if (payload.message?.content) {
+            assistantMsg.content += payload.message.content
+          }
+          if (payload.done) {
+            // Plafond de génération atteint (num_predict, voir backend) : la
+            // réponse est coupée, il faut le dire avant qu'elle soit recopiée.
+            if (payload.done_reason === 'length') {
+              assistantMsg.erreur = 'Réponse coupée : longueur maximale atteinte. '
+                + 'Demandez la suite, ou une version plus courte.'
+            }
+            termine = true
+            break lecture
           }
         }
       }
+      if (!termine) {
+        assistantMsg.erreur = 'La réponse s\'est interrompue avant la fin. Réessayez.'
+      } else if (!assistantMsg.content.trim() && !assistantMsg.erreur) {
+        assistantMsg.erreur = 'Le modèle n\'a produit aucun texte. Réessayez, '
+          + 'éventuellement en reformulant la demande.'
+      }
     } catch (e) {
       if (e.name !== 'AbortError') {
-        assistantMsg.content += `\n\n[Erreur : ${e.message}]`
+        // TypeError = le navigateur n'a pas pu joindre Olivia elle-même
+        // (« Failed to fetch ») : message en anglais, inutile tel quel.
+        assistantMsg.erreur = e instanceof TypeError
+          ? MESSAGE_OLIVIA_INJOIGNABLE
+          : (e.message || 'Erreur inconnue.')
       }
     } finally {
       isStreaming.value = false
@@ -385,7 +457,7 @@ export const useChatStore = defineStore('chat', () => {
    *  on se détache simplement d'elle (équivalent d'une nouvelle conversation). */
   function clear() { newConversation() }
 
-  return { messages, isStreaming, isSearching, currentModel, availableModels,
+  return { messages, isStreaming, isSearching, currentModel, availableModels, modelsErreur,
            conversations, currentId, historyUnavailable,
            fileContexts, fileContextPlan, fileContextNotice,
            addFileContext, removeFileContext, clearFileContexts,
