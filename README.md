@@ -70,9 +70,9 @@ Elle s'utilise de quatre façons, avec le même code :
   fabriquer de référence, de texte de loi ou de date.
 - Erreurs du moteur (Ollama éteint, modèle absent, réponse coupée) **affichées dans la
   conversation**, en clair, au lieu d'une bulle vide.
-- Panneau **« Oliv'IA n'est pas encore prête »** : si Ollama ne répond pas ou si un modèle
-  manque, Oliv'IA explique quoi installer ou démarrer (commandes `ollama pull` à copier) et le
-  panneau disparaît de lui-même une fois le problème réglé.
+- Panneau **« Oliv'IA n'est pas encore prête »** : si un modèle manque, Oliv'IA le
+  **télécharge elle-même** (bouton, barre de progression) ; si le moteur ne répond pas, elle
+  explique quoi faire. Le panneau disparaît de lui-même une fois le problème réglé.
 
 **Documents**
 - Explorateur de fichiers limité aux **dossiers de travail** choisis, choix des dossiers **à
@@ -175,9 +175,9 @@ dans `backend/settings.py`, `DEVICE_MODELS`) :
 | **Tesseract** (facultatif) | OCR des documents scannés | voir [OCR](#-documents-scannés--ocr) |
 | **Docker** (facultatif) | SearXNG | voir [Recherche web](#-recherche-web) |
 
-Pour un **utilisateur final**, rien de tout cela n'est nécessaire avec l'installeur Inno
-Setup ou le disque portable (tout est embarqué). L'application de bureau demande seulement
-Ollama et ses modèles sur le poste (voir plus bas).
+Pour un **utilisateur final**, rien de tout cela n'est nécessaire : l'installeur Inno Setup et
+le disque portable embarquent tout ; l'application de bureau embarque le moteur Ollama et
+télécharge les modèles au premier lancement (voir plus bas).
 
 ---
 
@@ -269,17 +269,26 @@ choix assumé, cohérent avec le RGPD.
 
 ### Installer sur un poste
 
-1. Installer **Ollama** (https://ollama.com) et tirer les trois modèles :
-   ```bash
-   ollama pull mistral-nemo:12b-instruct-2407-q4_K_M
-   ollama pull gemma2:2b
-   ollama pull bge-m3
-   ```
-2. Installer Oliv'IA : `.dmg` (glisser dans *Applications*) ou `Olivia Setup <version>.exe`.
-3. Au premier lancement, créer le premier compte avec le bouton de l'écran de connexion.
-   Si Ollama ou un modèle manque, un panneau en haut de la fenêtre l'indique après la
-   connexion, avec les commandes à taper.
+1. Installer Oliv'IA : `.dmg` (glisser dans *Applications*) ou `Olivia Setup <version>.exe`,
+   depuis la page *Releases* du dépôt. Le moteur d'IA **Ollama est inclus** : rien d'autre à
+   installer.
+2. Au premier lancement, créer le premier compte avec le bouton de l'écran de connexion.
+3. Après la connexion, le panneau « Oliv'IA n'est pas encore prête » propose de **télécharger
+   les modèles** (bouton *Tout télécharger*) : une seule fois, plusieurs Go, connexion Internet
+   nécessaire. Le modèle de conversation téléchargé dépend du mode détecté (GPU ou CPU).
 4. Facultatif : Tesseract pour l'OCR (voir [OCR](#-documents-scannés--ocr)).
+
+**Moteur embarqué** : Ollama 0.35.1, version figée, archive officielle vérifiée par son empreinte
+SHA-256 (`desktop/scripts/embarquer_ollama.py`), sous licence MIT
+(`desktop/licences/OLLAMA-LICENSE.txt`, copiée à côté du moteur avec les licences de ses
+composants). Sous Windows, il inclut les bibliothèques NVIDIA CUDA (v12 et v13 : Ollama choisit
+selon le pilote) et Vulkan, d'où un installeur d'environ 1,5 Go. Si un Ollama tourne déjà sur le
+poste (port 11434), Oliv'IA l'utilise à la place du sien, avec ses modèles.
+
+**Modèles** : rangés dans le dossier des données, sous-dossier `modeles-ia`
+(`C:\ProgramData\Olivia\modeles-ia`, `~/Library/Application Support/Olivia/modeles-ia`), et
+non dans le dossier de l'application, qui n'est pas modifiable par un utilisateur standard et
+serait remplacé à chaque mise à jour.
 
 Les installeurs n'étant **pas signés** : Windows affiche SmartScreen (*Informations
 complémentaires → Exécuter quand même*) ; macOS bloque l'ouverture (autoriser dans *Réglages
@@ -316,10 +325,14 @@ npm run dist:win        # sur un Windows  → desktop/dist/Olivia Setup <version
 npm run dist:dir        # dossier non empaqueté, pour tester
 ```
 
+Pour embarquer le moteur, lancer avant `npm run dist:*`, depuis la racine du dépôt :
+`python desktop/scripts/embarquer_ollama.py` (télécharge Ollama 0.35.1 dans `ollama/` et vérifie
+son empreinte ; le workflow le fait automatiquement).
+
 `desktop/scripts/preparer.mjs` copie `dist/ai-webapp` dans `desktop/build/ressources/backend`,
 et y ajoute `ollama/`, `tesseract/` et `modeles/` s'ils sont présents à la racine du dépôt
-**et** compilés pour le système de la machine. Sinon, l'application utilise l'Ollama installé
-sur le poste.
+**et** compilés pour le système de la machine. Sans `ollama/`, l'application utilise l'Ollama
+installé sur le poste.
 
 Sans Mac ni Windows sous la main : le workflow GitHub Actions **« Application de bureau »**
 construit les deux installeurs (voir [Intégration continue](#-tests-et-intégration-continue)).
@@ -845,7 +858,7 @@ Toutes les routes exigent une session, sauf `POST /api/auth/login`, `GET /api/au
 | Domaine | Routes |
 |---|---|
 | Authentification | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/etat` (y a-t-il au moins un compte ?) |
-| Modèles et chat | `GET /api/models`, `GET /api/moteur/etat` (Ollama joignable ? modèles nécessaires installés ?), `POST /api/chat/stream` (SSE), `POST /api/chat` |
+| Modèles et chat | `GET /api/models`, `GET /api/moteur/etat` (Ollama joignable ? modèles nécessaires installés ? progression des téléchargements), `POST /api/moteur/telecharger` (`{modele}` : seulement un modèle attendu par Oliv'IA), `POST /api/chat/stream` (SSE), `POST /api/chat` |
 | Fichiers | `GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/preview`, `GET /api/fs/text`, `GET /api/fs/download`, `POST /api/fs/upload` |
 | Choix des dossiers | `GET /api/fs/drives`, `GET /api/fs/browse` |
 | Recherche documentaire | `GET /api/fs/search` (mots-clés), `GET /api/fs/search/semantic` (par le sens) |
@@ -915,7 +928,8 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
 | Symptôme | Piste |
 |---|---|
 | « Le moteur d'IA (Ollama) ne répond pas » dans le chat | suivre le panneau affiché en haut de la fenêtre : installer ou démarrer Ollama ; vérifier aussi `OLLAMA_URL` |
-| Panneau « Oliv'IA n'est pas encore prête » | taper les commandes `ollama pull` proposées ; le panneau disparaît seul une fois le modèle installé |
+| Panneau « Oliv'IA n'est pas encore prête » | cliquer sur *Télécharger* (ou *Tout télécharger*) ; le panneau disparaît seul une fois le modèle installé. Un téléchargement interrompu reprend où il s'était arrêté (*Réessayer*) |
+| Téléchargement des modèles impossible | le poste n'a pas accès à Internet, ou un pare-feu bloque le registre de modèles d'Ollama : utiliser l'installeur Inno Setup ou le disque portable, qui embarquent les modèles |
 | « Oliv'IA ne répond plus » (application de bureau) | icône Oliv'IA → *Redémarrer Oliv'IA* ; sinon consulter `olivia.log` |
 | « Oliv'IA ne répond pas » (navigateur) | la fenêtre noire du lanceur a été fermée : relancer Oliv'IA |
 | Réponses extrêmement lentes | le mode GPU est choisi sur un poste sans carte adaptée : passer en 🧩 CPU |
@@ -939,8 +953,10 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
   encore vérifiés sur de vrais postes : installeurs, premier lancement non signé sur macOS,
   droits de `C:\ProgramData\Olivia`, icônes, raccourci global, mise à jour automatique. Le
   workflow « Application de bureau » n'a pas encore été exécuté.
-- **Panneau « Oliv'IA n'est pas encore prête »** : vérifié dans Chromium avec un Ollama simulé ;
-  les consignes d'installation (application Ollama, commande `ollama` dans le Terminal ou
+- **Ollama embarqué** : archives et extraction vérifiées ici ; démarrage du moteur embarqué,
+  utilisation du GPU et taille réelle de l'installeur Windows à confirmer sur de vrais postes.
+- **Panneau « Oliv'IA n'est pas encore prête »** : téléchargement vérifié dans Chromium avec un
+  Ollama simulé ; les consignes d'installation (application Ollama, commande `ollama` dans le Terminal ou
   l'Invite de commandes) restent à confirmer sur de vrais postes Mac et Windows.
 - **Mac Intel** : non couvert par la CI (`macos-latest` construit pour Apple Silicon).
 - **Installeur Inno Setup** et **ACL NSIS** : non recompilés ni testés après les dernières
@@ -1016,6 +1032,8 @@ Olivia/
 │   ├── chargement.html    ← écran d'attente du démarrage
 │   ├── lib/outils.js      ← fonctions pures testées (port, données, commande, liens)
 │   ├── scripts/preparer.mjs ← copie du backend compilé avant empaquetage
+│   ├── scripts/embarquer_ollama.py ← télécharge et vérifie le moteur Ollama embarqué
+│   ├── licences/          ← licence d'Ollama (MIT), livrée avec le moteur
 │   ├── build/             ← icon.png (macOS), icon.ico (Windows), installer.nsh (droits sur ProgramData\Olivia)
 │   ├── icons/             ← icônes de fenêtre et de barre des menus
 │   └── test/outils.test.js
@@ -1039,7 +1057,7 @@ Olivia/
 │   ├── ocr.py             ← OCR Tesseract
 │   ├── docgen.py          ← production des documents Word (types, formules)
 │   ├── docmodele.py       ← modèle Word de l'établissement
-│   ├── moteur.py          ← état du moteur d'IA (Ollama joignable, modèles installés)
+│   ├── moteur.py          ← état du moteur d'IA (joignable, modèles installés) et téléchargement des modèles
 │   ├── connectors/        ← imap_client.py, oauth_providers.py (calendrier .ics)
 │   ├── requirements.txt
 │   └── .env.example

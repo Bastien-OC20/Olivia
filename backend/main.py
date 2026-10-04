@@ -9,6 +9,7 @@ Routes principales :
   GET  /api/health                       : diagnostic de service
   GET  /api/models                       : liste des modèles Ollama installés
   GET  /api/moteur/etat                  : Ollama joignable ? modèles nécessaires installés ?
+  POST /api/moteur/telecharger           : fait télécharger un modèle attendu par Ollama
   GET  /api/settings                     : retourne les réglages du profil (secrets masqués)
   PUT  /api/settings                     : patch partiel des paramètres
   POST /api/chat/stream                  : appel Ollama SSE (token par token)
@@ -608,6 +609,23 @@ async def moteur_etat(profile_id: str = Depends(get_current_profile)):
     """
     peripherique = reglages(profile_id).get().get("compute_device", "gpu")
     return await moteur.etat(OLLAMA_URL, peripherique)
+
+
+@app.post("/api/moteur/telecharger")
+async def moteur_telecharger(body: dict, profile_id: str = Depends(get_current_profile)):
+    """Fait télécharger un modèle par Ollama, en arrière-plan.
+
+    Seuls les modèles attendus par Oliv'IA sont acceptés (voir
+    moteur.modeles_attendus) : un nom libre permettrait à n'importe quel compte
+    de remplir le disque du poste avec des modèles quelconques. La progression
+    se lit dans GET /api/moteur/etat.
+    """
+    nom = str(body.get("modele") or "").strip()
+    peripherique = reglages(profile_id).get().get("compute_device", "gpu")
+    if nom not in {m["nom"] for m in moteur.modeles_attendus(peripherique)}:
+        raise HTTPException(400, f"Modèle non prévu par Oliv'IA : {nom or '(vide)'}")
+    lance = moteur.lancer_telechargement(OLLAMA_URL, nom)
+    return {"ok": True, "deja_en_cours": not lance}
 
 
 def _build_options(profile_id: str, temperature: float | None) -> dict:
