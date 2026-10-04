@@ -211,16 +211,16 @@ type de bus.
 | `-Replace` | Efface intégralement le dossier et repart à neuf. **Destructif** : conversations et réglages perdus, modèles recopiés (plusieurs minutes). |
 
 En mode `-Update`, la synchronisation est un miroir — les fichiers des anciennes
-versions sont supprimés — avec quatre éléments sanctuarisés, car ils vivent sur le
+versions sont supprimés — sauf les éléments ci-dessous, sanctuarisés car ils vivent sur le
 disque portable et n'existent pas dans le build :
 
 | Préservé | Pourquoi |
 |---|---|
 | `ai-webapp\ollama\` | moteur + modèles (~9 Go) : les réécraser à chaque déploiement serait absurde |
 | `ai-webapp\tesseract\` | moteur OCR (~190 Mo) |
-| `..\backend\profiles\` | comptes, organisations, sessions et **conversations** (cloisonnées par organisation) |
-| `..\backend\settings.json` | réglages du mode mono-organisation historique |
-| `..\backend\ocr_cache\`, `..\backend\docindex\` | caches reconstructibles (OCR, index de recherche par le sens) — non destructeurs à perdre, mais coûteux à refaire |
+| `ai-webapp\_internal\backend\profiles\` | comptes, organisations, sessions, et pour chaque organisation ses réglages, **conversations**, index de recherche par le sens et modèle Word |
+| `ai-webapp\_internal\backend\settings.json` | réglages du mode mono-organisation historique (plus lus, conservés par prudence) |
+| `ai-webapp\_internal\backend\ocr_cache\` | cache OCR reconstructible — non destructeur à perdre, mais coûteux à refaire |
 
 Les deux moteurs ne sont pas dans le build : ils sont copiés depuis `ollama/` et
 `tesseract/` du projet uniquement s'ils manquent à destination — première
@@ -257,8 +257,8 @@ G:\Olivia\
 > ordinateur » au premier lancement : *Informations complémentaires* → *Exécuter
 > quand même*. C'est expliqué dans le `LISEZ-MOI.txt`.
 
-Icône personnalisée : placez `ai-webapp.ico` à la racine et décommentez la ligne
-`# icon='ai-webapp.ico'` dans `build.spec`.
+Icône : `build.spec` embarque `ai-webapp.ico` (racine du dépôt, généré depuis
+`visuel/logo.png`) ; remplacez ce fichier pour changer l'icône de l'exécutable.
 
 ## 🎮 CPU / GPU et modèles
 
@@ -447,8 +447,10 @@ simplement ignorées : la fusion des paramètres n'efface rien.
 
 Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentialité (RGPD)** :
 - **Export** (`GET /api/privacy/export`) : télécharge toutes vos données/paramètres en JSON.
-- **Suppression** (`POST /api/privacy/delete`) : réinitialise les paramètres et purge le dossier
-  `_uploads` (vos autres documents ne sont pas touchés).
+- **Suppression** (`POST /api/privacy/delete`) : pour l'organisation connectée seulement,
+  réinitialise ses paramètres (le choix GPU/CPU est re-détecté), supprime ses conversations et
+  son index de recherche par le sens, purge le dossier `_uploads` de ses dossiers de travail et
+  retire du cache OCR le texte reconnu sur ses documents. Vos autres documents ne sont pas touchés.
 - **Consentement** : bandeau informatif au premier lancement.
 - Les secrets (mot de passe IMAP, clé Brave, jeton Notion) ne sont **jamais renvoyés en clair**
   par l'API : `GET`/`PUT /api/settings` les masquent, et l'**export RGPD aussi** — un fichier
@@ -583,8 +585,8 @@ Olivia répond alors sans le web et le dit, au lieu d'annoncer une erreur.
 
 > **Clé Brave** : le palier gratuit est annoncé autour de 2 000 requêtes/mois et
 > demande la création d'un compte sur `brave.com/search/api`. La clé se colle dans
-> **Paramètres → Recherche web** ; elle est stockée dans `backend/settings.json`
-> (fichier ignoré par Git) et n'est **jamais renvoyée en clair** à l'interface —
+> **Paramètres → Recherche web** ; elle est stockée dans les réglages de l'organisation
+> (`profiles/<profile_id>/settings.json`, ignoré par Git) et n'est **jamais renvoyée en clair** à l'interface —
 > elle s'affiche masquée, comme les mots de passe des connecteurs.
 > La variable d'environnement `BRAVE_API_KEY` reste acceptée en repli.
 

@@ -50,11 +50,13 @@ identifiant d'organisation n'est jamais accepté depuis le client.
 """
 import json
 import os
+from contextlib import asynccontextmanager
 import re
 import sys
 import shutil
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 from fastapi import (
@@ -139,7 +141,17 @@ def _bundle_base() -> Path:
 
 FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", str(_bundle_base() / "frontend" / "dist")))
 
-app = FastAPI(title="Olivia — assistante locale", version="3.0.0")
+
+@asynccontextmanager
+async def _cycle_de_vie(_app: FastAPI):
+    """Démarrage du service (remplace `@app.on_event("startup")`, déprécié par
+    FastAPI). La fonction appelée est définie plus bas : son nom n'est résolu
+    qu'au démarrage, une fois le module entièrement chargé."""
+    _demarrer_indexation_semantique()
+    yield
+
+
+app = FastAPI(title="Olivia — assistante locale", version="3.0.0", lifespan=_cycle_de_vie)
 
 
 # ---------- Middleware sécurité ----------
@@ -619,7 +631,7 @@ def _inject_system_prompt(profile_id: str, messages: list[ChatMessage]) -> list[
     custom = s.get("system_prompt", "").strip()
     combined = " ".join(p for p in (custom, directive, DIRECTIVE_ANTI_FABRICATION) if p).strip()
     out = [{"role": "system", "content": combined}]
-    out.extend(m.dict() for m in messages)
+    out.extend(m.model_dump() for m in messages)
     return out
 
 
@@ -787,8 +799,16 @@ async def fs_preview(path: str = Query(...), profile_id: str = Depends(get_curre
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
     rel = _virtual_path(p, root, prefix)
-    download_url = f"/api/fs/download?path={rel}"
+    # Chemin ENCODÉ : un nom comme « C&A n°1+2.pdf » cassait l'adresse (le « & »
+    # ouvrait un nouveau paramètre, le « + » devenait une espace) et l'aperçu
+    # répondait 404.
+    download_url = f"/api/fs/download?path={quote(rel, safe='/')}"
     result = documents.preview(p, download_url)
+    if result.get("kind") == "pdf":
+        # Affiché dans une <iframe> : servi en `inline`, sans quoi le
+        # navigateur déclenche un téléchargement au lieu de l'afficher
+        # (constaté dans Chromium avec `attachment`).
+        result["url"] = f"{download_url}&apercu=1"
     result["path"] = rel
     result["name"] = p.name
     return result
@@ -823,10 +843,21 @@ def fs_text(path: str = Query(...), profile_id: str = Depends(get_current_profil
 
 
 @app.get("/api/fs/download")
-async def fs_download(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
+async def fs_download(path: str = Query(...), apercu: bool = Query(False),
+                      profile_id: str = Depends(get_current_profile)):
+    """Téléchargement d'un fichier (sandboxé), en pièce jointe.
+
+    `apercu=1` sert un PDF en `inline` pour l'aperçu (<iframe>). Réservé au PDF,
+    volontairement : un .html ou un .svg servi en ligne depuis l'origine
+    d'Olivia y exécuterait ses scripts, avec la session de l'utilisatrice.
+    Tout autre type reste en pièce jointe, même avec `apercu=1`.
+    """
     p, _root, _prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
+    if apercu and p.suffix.lower() == ".pdf":
+        return FileResponse(str(p), filename=p.name, media_type="application/pdf",
+                            content_disposition_type="inline")
     return FileResponse(str(p), filename=p.name)
 
 
@@ -1025,7 +1056,6 @@ def _indexer_automatiquement(profile_id: str) -> None:
         docindex.lancer_construction(profile_id, _iter_searchable_files(cibles))
 
 
-@app.on_event("startup")
 def _demarrer_indexation_semantique():
     """Rattrapage au démarrage, POUR CHAQUE organisation provisionnée.
 

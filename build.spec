@@ -58,6 +58,8 @@ hiddenimports = (
         # bibliothèque standard, mais importé seulement par le backend, que
         # l'analyse statique ne voit pas.
         'getpass',
+        # Lecture de backend/.env au chargement du paquet (backend/__init__.py).
+        'dotenv',
     ]
 )
 
