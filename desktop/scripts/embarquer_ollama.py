@@ -71,6 +71,11 @@ def extraire(archive: Path, dossier: Path) -> None:
 
 
 def main(argv=None) -> int:
+    # La console d'un runner Windows est en cp1252 : sans cela, le premier
+    # « → » ou « ✓ » affiché arrête le script (UnicodeEncodeError).
+    for flux in (sys.stdout, sys.stderr):
+        if hasattr(flux, "reconfigure"):
+            flux.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Embarque le moteur Ollama officiel.")
     parser.add_argument("--plateforme", default=sys.platform, choices=sorted(ARCHIVES),
                         help="par défaut, celle de cette machine")
