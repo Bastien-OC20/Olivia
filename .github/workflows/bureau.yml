@@ -6,10 +6,16 @@
 #
 # Déclenchement :
 #   - manuel (onglet Actions > « Application de bureau » > Run workflow) :
-#     installeurs téléchargeables dans les artefacts du run ;
-#   - étiquette v* (ex. v1.1.0) : installeurs publiés en plus dans une release
-#     GitHub (brouillon, à publier à la main), source des mises à jour
-#     automatiques.
+#     installeurs téléchargeables dans les artefacts du run ; case « publier »
+#     cochée, ils sont joints en plus à une release brouillon v<version>
+#     (version lue dans desktop/package.json) — pas besoin de pousser une
+#     étiquette ;
+#   - étiquette v* (ex. v1.1.0) : même publication.
+#   La release est créée en BROUILLON, une seule fois, avant les deux
+#   constructions (tâche « release ») : lancées en parallèle, elles en
+#   créeraient sinon chacune une. Elle se publie à la main (Releases > Publish
+#   release), ce qui crée l'étiquette si elle n'existe pas ; publiée, elle
+#   devient la source des mises à jour automatiques.
 #
 # Les installeurs ne sont PAS signés (CSC_IDENTITY_AUTO_DISCOVERY=false) : voir
 # le README, section « Application de bureau ». Les moteurs (Ollama, Tesseract)
@@ -19,6 +25,11 @@ name: Application de bureau
 
 on:
   workflow_dispatch:
+    inputs:
+      publier:
+        description: "Joindre les installeurs à une release brouillon (version de desktop/package.json)"
+        type: boolean
+        default: false
   push:
     tags: ['v*']
 
@@ -26,7 +37,35 @@ permissions:
   contents: write
 
 jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publier
+    runs-on: ubuntu-latest
+    outputs:
+      etiquette: ${{ steps.version.outputs.etiquette }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version de l'application
+        id: version
+        run: echo "etiquette=v$(node -p "require('./desktop/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Release brouillon (créée une seule fois)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ETIQUETTE: ${{ steps.version.outputs.etiquette }}
+        run: |
+          if gh release view "$ETIQUETTE" >/dev/null 2>&1; then
+            echo "La release $ETIQUETTE existe déjà : les installeurs y seront joints."
+          else
+            gh release create "$ETIQUETTE" --draft --target "$GITHUB_SHA" \
+              --title "Oliv'IA ${ETIQUETTE#v}" \
+              --notes "Installeurs non signés : voir le README, section « Application de bureau »."
+          fi
+
   construire:
+    needs: release
+    # Construit aussi quand « release » est sautée (run sans publication).
+    if: ${{ !failure() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -76,7 +115,7 @@ jobs:
           npm ci
           npm test
           node scripts/preparer.mjs
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then PUBLIER=always; else PUBLIER=never; fi
+          if [[ -n "${{ needs.release.outputs.etiquette }}" ]]; then PUBLIER=always; else PUBLIER=never; fi
           npx electron-builder ${{ matrix.cible }} --publish "$PUBLIER"
 
       - uses: actions/upload-artifact@v4
