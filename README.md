@@ -40,8 +40,9 @@ Elle s'utilise de quatre façons, avec le même code :
 19. [Tests et intégration continue](#-tests-et-intégration-continue)
 20. [Dépannage](#-dépannage)
 21. [Limites connues et points non vérifiés](#️-limites-connues-et-points-non-vérifiés)
-22. [Arborescence](#-arborescence)
-23. [Historique](#-historique)
+22. [Logo et icônes](#-logo-et-icônes)
+23. [Arborescence](#-arborescence)
+24. [Historique](#-historique)
 
 ---
 
@@ -343,7 +344,8 @@ backend\.venv\Scripts\pyinstaller.exe build.spec --clean --noconfirm
   **à côté de `ai-webapp.exe`** ; sinon il réutilise un Ollama déjà lancé sur le port 11434.
 - Le binaire **n'embarque ni comptes, ni réglages, ni conversations** (`build.spec` les retire) :
   une installation neuve démarre vide et ne transporte aucun secret.
-- Icône : `ai-webapp.ico` (racine du dépôt, généré depuis `visuel/logo.png`).
+- Icône : `ai-webapp.ico` (racine du dépôt), générée depuis `visuel/logo.png` (voir
+  [Logo et icônes](#-logo-et-icônes)).
 - Le même exécutable sert à créer les comptes : `ai-webapp.exe init`.
 
 ---
@@ -935,6 +937,37 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
 
 ---
 
+## 🎨 Logo et icônes
+
+Toutes les icônes viennent d'**un seul fichier**, `visuel/logo.png` : tuile bleue aux coins
+arrondis, « O » au rameau d'olivier et mot « Olivia ». Pour changer de logo, remplacer ce
+fichier puis :
+
+```bash
+pip install pillow numpy
+python visuel/generer_icones.py      # depuis la racine du dépôt
+```
+
+Le script en tire deux variantes (coins rendus transparents) :
+- **logo complet** (O + « Olivia ») pour les grandes tailles, où le mot reste lisible ;
+- **marque** (la même tuile avec le seul « O » au rameau, agrandi) pour les petites tailles et
+  l'interface, où le mot deviendrait illisible et où « Olivia » est déjà écrit à côté.
+
+| Fichier | Variante | Usage |
+|---|---|---|
+| `frontend/src/assets/logo-mark.png` | marque, 512 px | barre du haut, connexion, accueil |
+| `frontend/public/favicon.ico` | marque, 16-48 px | onglet du navigateur |
+| `ai-webapp.ico` | marque 16-48 px, logo 64-256 px | exécutable Windows, installeur Inno Setup |
+| `desktop/build/icon.ico` | idem | application de bureau et installeur Windows |
+| `desktop/build/icon.png` | logo, 1024 px avec marge transparente | application macOS |
+| `desktop/icons/fenetre.png` | marque, 256 px | fenêtre, écran de démarrage |
+| `desktop/icons/tray.png`, `tray@2x.png` | marque, 32 et 64 px | barre des menus / zone de notification |
+
+Le script fixe deux réglages :
+- **marge macOS** : la tuile occupe 824 px d'une toile de 1024. C'est la convention de la
+  grille d'icônes macOS, non revérifiée sur la documentation d'Apple ;
+- **format du `.ico`** : bitmap classique jusqu'à 128 px, PNG à 256 px.
+
 ## 📁 Arborescence
 
 ```
@@ -945,7 +978,8 @@ Olivia/
 ├── deploy-portable.ps1    ← build + synchro vers un disque portable
 ├── start-ollama.ps1       ← lance Ollama seul (Windows)
 ├── ai-webapp.ico          ← icône de l'exécutable Windows
-├── visuel/logo.png
+├── visuel/logo.png        ← logo source (toutes les icônes en sont tirées)
+├── visuel/generer_icones.py ← régénère toutes les icônes
 ├── .github/workflows/tests.yml    ← CI : tests sur chaque PR
 ├── .github/workflows/bureau.yml   ← CI : installeurs macOS et Windows
 ├── installer Olivia/olivia.iss    ← installeur Inno Setup
@@ -958,7 +992,7 @@ Olivia/
 │   ├── chargement.html    ← écran d'attente du démarrage
 │   ├── lib/outils.js      ← fonctions pures testées (port, données, commande, liens)
 │   ├── scripts/preparer.mjs ← copie du backend compilé avant empaquetage
-│   ├── build/             ← icon.png, installer.nsh (droits sur ProgramData\Olivia)
+│   ├── build/             ← icon.png (macOS), icon.ico (Windows), installer.nsh (droits sur ProgramData\Olivia)
 │   ├── icons/             ← icônes de fenêtre et de barre des menus
 │   └── test/outils.test.js
 ├── backend/
@@ -1020,6 +1054,6 @@ Ignorés par Git : `backend/profiles/`, `backend/.env`, `olivia.ini`, `ollama/`,
 | 04/10/2026 — PR #2 | Import sans écrasement ; purge RGPD de l'index non annulable |
 | 04/10/2026 — PR #3 | Erreurs du moteur affichées dans le chat ; secrets masqués dans l'export RGPD |
 | 04/10/2026 — PR #4 | Connexion robuste (temporisation, temps constant, 600 000 itérations, sessions révoquées) ; validation des réglages ; dépendances npm à jour |
-| 04/10/2026 — PR #5 | Points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet ; panneau « Olivia n'est pas encore prête » ; messages d'erreur adaptés à l'application de bureau ; workflow de tests sur les PR |
+| 04/10/2026 — PR #5 | Nouveau logo (tuile bleue) et icônes générées par script ; points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet ; panneau « Olivia n'est pas encore prête » ; messages d'erreur adaptés à l'application de bureau ; workflow de tests sur les PR |
 
 Détail : `git log`.

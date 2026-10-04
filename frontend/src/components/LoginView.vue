@@ -175,10 +175,7 @@ async function soumettre() {
   border-radius: 12px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.35);
 }
-.logo {
-  width: 48px; height: 48px; align-self: center;
-  border-radius: 10px; background: #fff; padding: 2px;
-}
+.logo { width: 48px; height: 48px; align-self: center; }
 .titre { margin: 10px 0 0; text-align: center; font-size: 24px; }
 .sous-titre {
   margin: 0 0 18px; text-align: center;

@@ -622,7 +622,7 @@ onMounted(chargerEtatModele)
   color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 13px; text-decoration: none;
 }
 .welcome { text-align: center; color: var(--muted); padding: 32px 20px; max-width: 620px; margin: 0 auto; }
-.welcome-logo { width: 84px; height: 84px; border-radius: 16px; background: #fff; padding: 6px; }
+.welcome-logo { width: 84px; height: 84px; }
 .welcome h2 { color: var(--text); font-size: 20px; margin: 8px 0 4px; }
 .welcome-lead { line-height: 1.6; margin: 0 0 20px; }
 .examples { display: grid; gap: 10px; text-align: left; }

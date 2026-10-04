@@ -273,7 +273,7 @@ function openPrivacy() {
   border-bottom: 1px solid var(--border);
 }
 .brand { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; }
-.brand-logo { width: 30px; height: 30px; border-radius: 6px; background: #fff; padding: 1px; }
+.brand-logo { width: 30px; height: 30px; }   /* tuile bleue aux coins déjà arrondis */
 .brand-sub { align-self: flex-end; padding-bottom: 3px; }
 .brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
 .brand-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
