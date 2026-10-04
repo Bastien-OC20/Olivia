@@ -277,7 +277,17 @@ async def auth_login(demande: DemandeConnexion, response: Response):
     if user is None:
         # Message volontairement unique : ne dit pas si le compte existe.
         raise HTTPException(401, "Identifiant ou mot de passe incorrect")
-    token = sessions.create_session(user["id"], user["profile_id"])
+    try:
+        token = sessions.create_session(user["id"], user["profile_id"])
+    except OSError as e:
+        # Dossier des données non modifiable (voir emplacements.py) : sans ce
+        # message, l'utilisatrice verrait une erreur 500 sans explication.
+        raise HTTPException(
+            500,
+            "Olivia ne peut pas enregistrer la session : le dossier de ses données "
+            f"n'est pas modifiable ({profiles.PROFILES_DIR}). Prévenez la personne "
+            "qui s'occupe de l'informatique.",
+        ) from e
     response.set_cookie(
         COOKIE_SESSION, token,
         max_age=sessions.SESSION_TTL_SECONDS,

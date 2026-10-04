@@ -18,12 +18,22 @@
 ; poids de modèles (GGUF, déjà denses) ne se compressent presque pas et LZMA
 ; maximal ferait juste perdre du temps de compilation pour rien.
 ;
-; DONNÉES UTILISATEUR (conversations, réglages, caches) : jamais embarquées
-; (déjà exclues par build.spec, voir _est_donnee_utilisateur()) et jamais
-; supprimées à la désinstallation — Inno Setup ne retire que les fichiers
-; qu'il a lui-même installés, donc les dossiers créés à l'usage (conversations\,
-; ocr_cache\, docindex\, _uploads\, settings.json) ne sont ni installés ni
-; jamais touchés par [UninstallDelete].
+; DONNÉES UTILISATEUR (comptes, sessions, réglages, conversations, index, cache
+; OCR) : HORS de Program Files, dans {commonappdata}\Olivia (C:\ProgramData\Olivia).
+; Program Files n'est pas modifiable par un utilisateur standard : avec les
+; données à côté du code, chaque connexion échouait (écriture de la session)
+; sauf à lancer Olivia en administrateur. L'installeur :
+;   - crée ce dossier en le rendant modifiable par les utilisateurs du poste
+;     ([Dirs], users-modify) — les comptes sont créés par le service
+;     informatique et servent à toutes les sessions Windows du poste, d'où un
+;     dossier commun et non %LOCALAPPDATA%, propre à chaque session ;
+;   - écrit {app}\ai-webapp\olivia.ini pour le désigner ([INI]) : c'est ce
+;     fichier que lit backend/emplacements.py.
+; Une installation antérieure qui avait écrit ses données dans Program Files
+; est recopiée automatiquement au premier démarrage (emplacements.py).
+; Les données ne sont jamais embarquées (build.spec, _est_donnee_utilisateur())
+; ni supprimées à la désinstallation (uninsneveruninstall, aucune entrée dans
+; [UninstallDelete]).
 
 #define AppName "Olivia"
 #define AppVersion "1.0.0"
@@ -83,18 +93,44 @@ Source: "{#SourceRoot}tesseract\*"; DestDir: "{app}\ai-webapp\tesseract"; Flags:
 ; Modèle Word de l'établissement (logo, en-tête) — voir backend/docmodele.py.
 Source: "{#SourceRoot}modeles\*"; DestDir: "{app}\ai-webapp\modeles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
+[Dirs]
+; Données d'Olivia, communes au poste et modifiables par ses utilisateurs (voir
+; l'en-tête). Jamais supprimées à la désinstallation.
+Name: "{commonappdata}\Olivia"; Permissions: users-modify; Flags: uninsneveruninstall
+
+[INI]
+; Désigne le dossier des données à l'application (backend/emplacements.py).
+Filename: "{app}\ai-webapp\olivia.ini"; Section: "donnees"; Key: "dossier"; String: "{commonappdata}\Olivia"; Flags: uninsdeletesection
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; WorkingDir: "{app}\ai-webapp"
+; Assistant de création de compte (backend/manage_users.py, commande init) :
+; une installation neuve n'a aucun compte, et la connexion est obligatoire.
+Name: "{group}\Créer un compte {#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; Parameters: "init"; WorkingDir: "{app}\ai-webapp"
 Name: "{group}\Désinstaller {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; WorkingDir: "{app}\ai-webapp"; Tasks: desktopicon
 
 [Run]
+; Proposé seulement s'il n'existe encore aucun compte (voir AucunCompte) : sur
+; une mise à jour, les comptes sont déjà là.
+Filename: "{app}\ai-webapp\{#AppExeName}"; Parameters: "init"; WorkingDir: "{app}\ai-webapp"; Description: "Créer le premier compte (service informatique)"; Flags: postinstall skipifsilent; Check: AucunCompte
 Filename: "{app}\ai-webapp\{#AppExeName}"; Description: "Lancer {#AppName} maintenant"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallDelete]
 ; Purge explicitement le cache PyInstaller (dossier temporaire de
-; décompression) si présent, MAIS jamais les données utilisateur — elles ne
-; sont de toute façon jamais dans {app} puisque jamais installées là (voir
-; l'en-tête du fichier). Aucune entrée ici ne doit viser conversations\,
-; ocr_cache\, docindex\, _uploads\ ou settings.json.
+; décompression) si présent, MAIS jamais les données utilisateur — elles
+; vivent dans {commonappdata}\Olivia (voir l'en-tête du fichier). Aucune entrée
+; ici ne doit viser ce dossier, ni profiles\, ocr_cache\ ou _uploads\.
 Type: filesandordirs; Name: "{app}\ai-webapp\_internal\__pycache__"
+
+[Code]
+// Vrai tant qu'aucun compte n'a été créé : la case « Créer le premier compte »
+// n'apparaît alors qu'à la première installation, pas à chaque mise à jour.
+// Le second emplacement est celui d'une version antérieure, qui écrivait les
+// comptes dans Program Files : ils seront recopiés au premier démarrage
+// (backend/emplacements.py), il ne faut donc pas inviter à en recréer.
+function AucunCompte: Boolean;
+begin
+  Result := not FileExists(ExpandConstant('{commonappdata}\Olivia\profiles\users.json'))
+    and not FileExists(ExpandConstant('{app}\ai-webapp\_internal\backend\profiles\users.json'));
+end;

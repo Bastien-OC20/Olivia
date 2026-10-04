@@ -6,6 +6,10 @@ Le dossier backend/profiles/ est aussi la racine du stockage cloisonné par
 organisation (un sous-dossier par profil) — d'où la validation stricte des
 identifiants avant toute utilisation dans un chemin disque.
 
+« backend/profiles/ » désigne ici l'emplacement par défaut (disque portable,
+développement) : sur un poste installé, ce dossier vit dans
+C:\\ProgramData\\Olivia\\profiles\\ (voir emplacements.py).
+
 Le fichier est créé au premier écrit. Toutes les écritures sont mutexées et
 atomic-write sur disque (fichier .tmp puis remplacement), comme conversations.py
 et settings.py.
@@ -17,9 +21,14 @@ from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
+from . import emplacements
+
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
-PROFILES_DIR = Path(__file__).parent / "profiles"
+# backend/profiles/ sur un disque portable ou en développement, mais
+# C:\ProgramData\Olivia\profiles\ sur un poste installé : Program Files n'est
+# pas modifiable par un utilisateur standard (voir emplacements.py).
+PROFILES_DIR = emplacements.preparer()
 REGISTRY_PATH = PROFILES_DIR / "registry.json"
 
 # Verrou unique pour les trois fichiers de ce dossier (profils, comptes,

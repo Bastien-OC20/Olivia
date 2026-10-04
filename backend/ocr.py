@@ -45,6 +45,7 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
+from . import emplacements
 from .settings import reglages_lus
 
 LANGUE = "fra"
@@ -72,10 +73,11 @@ MAX_CONCURRENCE = 2
 _verrou_moteur = threading.BoundedSemaphore(MAX_CONCURRENCE)
 
 # ---------- Cache disque ----------
-# Volontairement placé dans backend/, à côté des conversations : sur le disque
-# portable, le cache voyage donc avec l'application — c'est voulu, il survit au
-# redémarrage et au débranchement de la clé.
-DOSSIER_CACHE = Path(__file__).resolve().parent / "ocr_cache"
+# Placé avec les autres données d'Olivia (voir emplacements.py) : dans backend/
+# sur le disque portable, où le cache voyage avec l'application et survit au
+# débranchement de la clé ; dans C:\ProgramData\Olivia sur un poste installé,
+# Program Files n'étant pas modifiable par un utilisateur standard.
+DOSSIER_CACHE = emplacements.dossier_donnees() / "ocr_cache"
 VERSION_CACHE = 1                  # à incrémenter si le format du texte produit change
 MAX_FICHIERS_CACHE = 400
 _verrou_cache = threading.Lock()

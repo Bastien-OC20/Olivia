@@ -156,6 +156,32 @@ Le binaire **n'embarque ni les réglages ni les conversations** : `build.spec` l
 retire explicitement. Une installation neuve démarre donc sur les valeurs par défaut,
 et un `.exe` distribué ne transporte aucun secret (clé d'API, mot de passe IMAP).
 
+## 💾 Installeur Windows et emplacement des données
+
+L'installeur (`installer Olivia/olivia.iss`, Inno Setup) place l'application dans
+**Program Files**, qu'un utilisateur standard ne peut pas modifier. Les données
+(comptes, sessions, réglages, conversations, index, cache OCR) vivent donc ailleurs,
+dans **`C:\ProgramData\Olivia`** :
+
+- l'installeur crée ce dossier en le rendant modifiable par les utilisateurs du poste,
+  et écrit `ai-webapp\olivia.ini` pour le désigner (`[donnees] dossier=…`) ;
+- dossier **commun au poste** et non propre à chaque session Windows : les comptes
+  créés par le service informatique servent à toutes les sessions. Conséquence à
+  connaître : tout utilisateur Windows du poste peut lire ces fichiers, comme sur un
+  disque portable ;
+- une installation antérieure qui avait écrit ses données dans Program Files est
+  **recopiée** au premier démarrage (l'ancien dossier reste en place, en sauvegarde) ;
+- la désinstallation ne supprime jamais ce dossier ;
+- l'installeur propose de **créer le premier compte** à la fin de l'installation (case
+  cochée seulement s'il n'en existe aucun), et ajoute un raccourci « Créer un compte
+  Olivia » au menu Démarrer.
+
+Règle générale (`backend/emplacements.py`), par ordre de priorité : variable
+d'environnement `OLIVIA_DATA_DIR`, puis `olivia.ini` à côté de l'application, sinon le
+dossier `backend/` comme avant — c'est le cas du **disque portable** (les données
+voyagent avec la clé) et du développement. Le lanceur affiche l'emplacement retenu au
+démarrage, et signale clairement un dossier non modifiable.
+
 ## 🔌 Version portable (clé USB / disque externe)
 
 Olivia tourne entièrement depuis un disque amovible : application, moteur, modèles,
@@ -603,6 +629,7 @@ ai-webapp/
 │   ├── settings.py        ← persistance JSON par organisation + CPU/GPU + modèle par périphérique
 │   ├── hardware.py        ← détection VRAM (nvidia-smi) pour le choix GPU/CPU par défaut
 │   ├── profiles.py        ← registre des organisations, cloisonnement par dossier
+│   ├── emplacements.py    ← où vivent les données (backend/ ou C:\ProgramData\Olivia)
 │   ├── users.py           ← comptes (mots de passe PBKDF2-HMAC-SHA256 salés)
 │   ├── sessions.py        ← sessions par cookie (jetons opaques, TTL 8 h)
 │   ├── manage_users.py    ← CLI de provisionnement (organisations + comptes)

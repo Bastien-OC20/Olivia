@@ -34,6 +34,7 @@
         <strong>Aucun compte n'a encore été créé sur ce poste.</strong>
         La personne qui s'occupe de l'informatique doit d'abord en créer un :
         <ul>
+          <li>Olivia installée : menu Démarrer, <b>Créer un compte Olivia</b> ;</li>
           <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
           <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Olivia.</li>
         </ul>

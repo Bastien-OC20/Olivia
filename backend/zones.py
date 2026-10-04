@@ -21,8 +21,10 @@ la clé USB est un usage légitime — mais le dossier réservé y est invisible
 inaccessible.
 
 Ce qui est réservé, et pourquoi :
-  - le paquet `backend/` : comptes, sessions, réglages et conversations de
-    toutes les organisations (`profiles/`), cache OCR commun, code ;
+  - le paquet `backend/` (code) et le dossier des données d'Olivia — le même
+    sur un disque portable, C:\\ProgramData\\Olivia sur un poste installé (voir
+    emplacements.py) : comptes, sessions, réglages et conversations de toutes
+    les organisations (`profiles/`), cache OCR commun ;
   - `modeles/` : modèle Word commun déposé par le service informatique, qui
     sert de repli à toutes les organisations — aucune ne doit pouvoir le
     remplacer ;
@@ -37,22 +39,13 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from . import docmodele, ocr, profiles
+from . import docmodele, emplacements, ocr, profiles
 
-DOSSIER_BACKEND = Path(__file__).resolve().parent
+DOSSIER_BACKEND = emplacements.DOSSIER_BACKEND
 SOUS_DOSSIER_OLLAMA = "ollama"
-
-
-def dossier_application() -> Path:
-    """Dossier de l'application : celui de l'exécutable en mode gelé.
-
-    Même calcul que `APP_DIR` dans launch.py et que `_dossier_application()`
-    dans ocr.py et docmodele.py (le moteur OCR, Ollama et le modèle Word vivent
-    à côté de l'.exe, pas dans le dossier temporaire `_MEIPASS`).
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return DOSSIER_BACKEND.parent
+# Dossier de l'application (celui de l'exécutable en mode gelé) : le moteur OCR,
+# Ollama et le modèle Word commun vivent à côté de l'.exe.
+dossier_application = emplacements.dossier_application
 
 
 @lru_cache(maxsize=1)
@@ -61,6 +54,9 @@ def dossiers_reserves() -> tuple[Path, ...]:
     app = dossier_application()
     candidats = [
         DOSSIER_BACKEND,
+        # Données d'Olivia : backend/ par défaut, C:\ProgramData\Olivia sur un
+        # poste installé (voir emplacements.py) — réservées où qu'elles soient.
+        emplacements.dossier_donnees(),
         profiles.PROFILES_DIR,
         ocr.DOSSIER_CACHE,
         app / docmodele.SOUS_DOSSIER_MODELES,
