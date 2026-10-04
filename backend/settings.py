@@ -101,13 +101,12 @@ DEFAULTS = {
     # Chemin d'un Tesseract installé ailleurs. Vide = moteur portable livré dans
     # le dossier tesseract/ de l'application, sinon celui trouvé dans le PATH.
     "ocr_tesseract_path": "",
-    # Modèle Word portant l'identité de l'établissement (logo, en-tête, styles),
-    # utilisé pour produire circulaires, courriers, convocations et comptes rendus.
-    # Vide = modeles/modele-etablissement.docx, à côté de l'application. Ce modèle
-    # se fabrique depuis un vrai document (voir backend/docmodele.py) : il n'est ni
-    # versionné ni embarqué dans l'.exe, le logo appartenant au lycée. S'il manque,
-    # les documents sont tout de même produits, sans l'en-tête, avec un avertissement.
-    "docgen_template_path": "",
+    # Le modèle Word de l'établissement (logo, en-tête, styles) n'a PAS de réglage
+    # d'emplacement : il est rangé dans le dossier de l'organisation, avec repli
+    # sur le modèle commun modeles/modele-etablissement.docx (voir
+    # backend/docmodele.py, chemin_modele). L'ancien réglage `docgen_template_path`
+    # permettait d'écrire et de lire des fichiers n'importe où sur le disque ; une
+    # valeur restée dans un settings.json existant est simplement ignorée.
     # Formules d'usage des documents produits (appel, politesse, lieu, signature).
     # Vide = repli sur les valeurs par défaut de backend/docgen.py (TEXTES) : un
     # établissement scolaire générique, mais pas forcément celui du lycée de

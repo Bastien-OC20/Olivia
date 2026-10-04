@@ -24,9 +24,8 @@ const DEFAULTS = {
   // resterait introuvable sans que l'utilisatrice comprenne pourquoi.
   ocr_enabled: true,
   ocr_tesseract_path: "",
-  // Modèle Word de l'établissement (voir backend/docgen.py). Vide = modèle par
-  // défaut dans modeles/, à côté de l'application.
-  docgen_template_path: "",
+  // Pas de réglage d'emplacement du modèle Word : il est fixé par le backend,
+  // un par organisation (voir backend/docmodele.py, chemin_modele).
   docgen_appel: "",
   docgen_formule_politesse: "",
   docgen_lieu: "",

@@ -326,7 +326,8 @@ secondes pour rien.
   date ou un numéro de circulaire dans un courrier officiel.
 
 Réglages dans **Paramètres → Documents** : activation, état du moteur, et chemin
-d'un Tesseract installé ailleurs.
+d'un Tesseract installé ailleurs. Ce chemin étant **exécuté**, il doit désigner
+`tesseract.exe` (ou le dossier qui le contient) : tout autre programme est refusé.
 
 **Installation du moteur** — il n'est pas fourni par `pip` :
 
@@ -428,6 +429,19 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
   (`chemin | libellé`, path-traversal → **HTTP 403**). Ces dossiers se changent dans
   *Paramètres → Réglages avancés → Préférences*, sans redémarrage ; la variable d'environnement
   `FS_ROOT` reste la valeur par défaut si aucun dossier n'est configuré.
+- **Dossiers réservés** (`backend/zones.py`) : le paquet `backend/` (comptes, sessions, réglages
+  et conversations de toutes les organisations, cache OCR), `modeles/`, `tesseract/`, `ollama/`
+  et, dans l'`.exe`, `_internal/`. Ils ne peuvent pas devenir un dossier de travail (HTTP 400),
+  et sous une racine plus large (la racine du disque, le dossier de la clé USB) ils sont
+  invisibles et refusés (HTTP 403), y compris via un lien symbolique, pour la lecture, l'import,
+  la recherche et l'index sémantique. Sans cela, une organisation pouvait lire les jetons de
+  session et les réglages des autres.
+- **Modèle Word** : un fichier par organisation (`backend/profiles/<profile_id>/modele-etablissement.docx`),
+  avec repli sur le modèle commun `modeles/modele-etablissement.docx` déposé par le service
+  informatique. L'ancien réglage `docgen_template_path` (emplacement libre, qui permettait
+  d'écrire et de lire des fichiers n'importe où) est supprimé et ignoré s'il subsiste.
+- Le chemin du moteur OCR (`ocr_tesseract_path`) n'accepte qu'un exécutable nommé `tesseract`.
+- Tests de cloisonnement : `pip install pytest` puis `python -m pytest tests` (depuis la racine).
 - En-têtes de sécurité sur toutes les réponses : `Content-Security-Policy`, `X-Content-Type-Options`,
   `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`.
 - **CORS restreint** au poste local (plus de wildcard).
@@ -567,6 +581,7 @@ ai-webapp/
 ├── build.spec             ← config PyInstaller (embarque backend + frontend/dist)
 ├── deploy-portable.ps1    ← build + synchro vers un disque portable (préserve modèles et données)
 ├── portable/              ← lanceur .bat et notice copiés sur le disque portable
+├── tests/                 ← tests de cloisonnement entre organisations (pytest)
 ├── .gitignore
 ├── backend/
 │   ├── main.py            ← FastAPI : auth + chat + fs + upload/download/preview + settings + search + connectors + RGPD
@@ -582,6 +597,7 @@ ai-webapp/
 │   ├── docsearch.py       ← recherche en langage courant dans les documents
 │   ├── docindex.py        ← index sémantique FAISS (embeddings bge-m3 via Ollama)
 │   ├── ocr.py             ← reconnaissance de caractères (documents scannés)
+│   ├── zones.py           ← dossiers réservés à Olivia (jamais accessibles depuis l'interface)
 │   ├── connectors/
 │   │   ├── __init__.py
 │   │   ├── imap_client.py      ← IMAP + comptage des non-lus

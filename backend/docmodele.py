@@ -37,7 +37,7 @@ from typing import Optional
 from docx import Document
 from docx.oxml.ns import qn
 
-from .settings import reglages_lus
+from . import profiles
 
 # Nom et emplacement par défaut du modèle. `modeles/` est ignoré par git : le
 # logo appartient au lycée et n'a rien à faire ni dans le dépôt ni dans l'.exe.
@@ -67,24 +67,46 @@ def _dossier_application() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def chemin_modele(profile_id: str = "") -> Path:
-    """Chemin du modèle : réglage `docgen_template_path` de l'organisation, sinon
-    emplacement par défaut.
+def chemin_modele_commun() -> Path:
+    """Modèle commun : `modeles/modele-etablissement.docx`, à côté de l'application.
 
-    `profile_id` vide = valeurs par défaut : c'est le cas de la ligne de commande
-    (`python -m backend.docmodele`), qui n'a pas de session ouverte. Un profil
-    inconnu n'emprunte donc jamais le réglage d'un autre.
+    Déposé par le service informatique (installeur, disque portable, ou
+    `python -m backend.docmodele` sans destination). Jamais écrit depuis
+    l'interface : c'est un dossier réservé (voir zones.py), qu'aucune
+    organisation ne peut remplacer pour les autres.
     """
-    try:
-        regle = str(reglages_lus(profile_id).get("docgen_template_path") or "").strip()
-    except Exception:
-        regle = ""
-    if regle:
-        candidat = Path(regle)
-        if candidat.is_dir():
-            candidat = candidat / NOM_MODELE
-        return candidat
     return _dossier_application() / SOUS_DOSSIER_MODELES / NOM_MODELE
+
+
+def chemin_modele_organisation(profile_id: str) -> Path:
+    """Modèle propre à une organisation : `profiles/<profile_id>/modele-etablissement.docx`.
+
+    C'est là, et nulle part ailleurs, que `POST /api/documents/modele` écrit.
+    Rangé dans le dossier cloisonné de l'organisation : fabriquer son modèle ne
+    remplace donc jamais le logo et l'en-tête d'une autre. Lève ValueError sur
+    un identifiant invalide (voir profiles.profile_dir).
+    """
+    return profiles.profile_dir(profile_id) / NOM_MODELE
+
+
+def chemin_modele(profile_id: str = "") -> Path:
+    """Modèle à utiliser pour produire les documents d'une organisation : le
+    sien s'il l'a fabriqué, sinon le modèle commun.
+
+    L'ancien réglage `docgen_template_path` n'est plus lu : laissé libre, il
+    permettait d'écrire un fichier n'importe où sur le disque (fabrication) et
+    de faire lire n'importe quel .docx du poste (génération). La route
+    PUT /api/settings le retire désormais des réglages reçus.
+
+    `profile_id` vide ou invalide = modèle commun : c'est le cas de la ligne de
+    commande (`python -m backend.docmodele`), qui n'a pas de session ouverte. Un
+    profil n'emprunte donc jamais le modèle d'un autre.
+    """
+    if profiles.is_valid_id(profile_id or ""):
+        propre = chemin_modele_organisation(profile_id)
+        if propre.is_file():
+            return propre
+    return chemin_modele_commun()
 
 
 # ---------- Inspection ----------
@@ -232,12 +254,12 @@ def _purger_metadonnees(doc) -> None:
     props.category = ""
 
 
-def construire_modele(source: Path, destination: Optional[Path] = None,
-                      profile_id: str = "") -> dict:
+def construire_modele(source: Path, destination: Optional[Path] = None) -> dict:
     """Fabrique le modèle depuis `source` et l'écrit dans `destination`.
 
-    Sans `destination`, le modèle est écrit à l'emplacement réglé par
-    l'organisation `profile_id` (voir `chemin_modele`).
+    Sans `destination`, le modèle est écrit à l'emplacement COMMUN (ligne de
+    commande du service informatique). La route HTTP passe toujours
+    explicitement `chemin_modele_organisation(profile_id)`.
 
     Renvoie le compte rendu de l'inspection du fichier produit.
     Lève `ValueError` si la source est absente ou illisible.
@@ -247,7 +269,7 @@ def construire_modele(source: Path, destination: Optional[Path] = None,
         raise ValueError(f"Document source introuvable : {source}")
     if source.suffix.lower() != ".docx":
         raise ValueError("Le document source doit être un fichier Word (.docx).")
-    destination = Path(destination) if destination else chemin_modele(profile_id)
+    destination = Path(destination) if destination else chemin_modele_commun()
 
     try:
         doc = Document(str(source))

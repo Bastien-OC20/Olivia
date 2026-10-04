@@ -204,6 +204,8 @@
               <p class="hint">
                 Utile seulement si Tesseract est installé ailleurs sur le poste.
                 Olivia cherche d'abord le moteur livré avec elle, puis celui du système.
+                Le chemin doit désigner <code>tesseract.exe</code> ou le dossier qui le
+                contient : par sécurité, tout autre programme est refusé.
               </p>
             </div>
 
@@ -296,21 +298,6 @@
                 aria-live="polite"
               >
                 {{ modeleMsg }}
-              </p>
-            </div>
-            <div
-              v-if="!simple"
-              class="field"
-            >
-              <label for="f-modele-path">Emplacement du modèle (facultatif)</label>
-              <input
-                id="f-modele-path"
-                v-model="settings.data.docgen_template_path"
-                placeholder="Laisser vide : modeles/modele-etablissement.docx"
-              >
-              <p class="hint">
-                Utile seulement si le modèle est rangé ailleurs. Appliqué après
-                <b>Enregistrer</b>.
               </p>
             </div>
           </section>
