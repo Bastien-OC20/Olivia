@@ -55,14 +55,18 @@ def _saisir(invite: str) -> str:
 def _demander_mot_de_passe() -> str:
     """Mot de passe saisi deux fois, masqué. Lève Abandon après trop d'échecs.
 
-    La longueur minimale est vérifiée ici, avant la confirmation, pour ne pas
-    faire retaper deux fois un mot de passe que `users.create_user` refuserait.
+    La politique de mot de passe (users.probleme_mot_de_passe) est vérifiée ici,
+    avant la confirmation, pour ne pas faire retaper deux fois un mot de passe
+    que `users.create_user` refuserait.
     """
+    print(f"Mot de passe : au moins {users.PASSWORD_MIN_LEN} caractères, mêlant 3 types "
+          "parmi minuscules, majuscules, chiffres et caractères spéciaux.")
     for _ in range(ESSAIS_MOT_DE_PASSE):
         try:
             mdp = getpass.getpass("Mot de passe (la saisie ne s'affiche pas) : ")
-            if len(mdp) < users.PASSWORD_MIN_LEN:
-                print(f"  Trop court : au moins {users.PASSWORD_MIN_LEN} caractères.")
+            probleme = users.probleme_mot_de_passe(mdp)
+            if probleme:
+                print(f"  {probleme}")
                 continue
             if getpass.getpass("Retapez le mot de passe : ") != mdp:
                 print("  Les deux saisies diffèrent, recommencez.")
