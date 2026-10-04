@@ -1,10 +1,17 @@
-# 🌷 Olivia — assistante locale pour le secrétariat
+# 🌷 Oliv'IA — assistante locale pour le secrétariat
 
-**Olivia** est une assistante IA **100 % locale**, pensée d'abord pour une **assistante de
+**Oliv'IA** est une assistante IA **100 % locale**, pensée d'abord pour une **assistante de
 direction en lycée**, et utilisable par toute petite structure (mairie, association, PME,
 établissement). Objectif : une utilisation **la plus simple possible**, sans donnée envoyée à
 l'extérieur — le modèle d'IA tourne sur le poste (Ollama), les documents restent sur le
 disque.
+
+> **Nom** : l'application s'affiche sous le nom **Oliv'IA**. Les noms techniques gardent
+> « Olivia » : dossiers des données (`C:\ProgramData\Olivia`…), fichiers (`olivia.ini`,
+> `Lancer-Olivia.bat`, `ai-webapp.exe`), variables `OLIVIA_*`, nom interne de l'application de
+> bureau (`Olivia.app`, `Olivia Setup <version>.exe`) et dossier d'installation. Les renommer
+> ferait perdre, à la mise à jour, les comptes et conversations déjà enregistrés, et casserait
+> les mises à jour automatiques.
 
 Elle s'utilise de quatre façons, avec le même code :
 
@@ -59,8 +66,8 @@ Elle s'utilise de quatre façons, avec le même code :
   fabriquer de référence, de texte de loi ou de date.
 - Erreurs du moteur (Ollama éteint, modèle absent, réponse coupée) **affichées dans la
   conversation**, en clair, au lieu d'une bulle vide.
-- Panneau **« Olivia n'est pas encore prête »** : si Ollama ne répond pas ou si un modèle
-  manque, Olivia explique quoi installer ou démarrer (commandes `ollama pull` à copier) et le
+- Panneau **« Oliv'IA n'est pas encore prête »** : si Ollama ne répond pas ou si un modèle
+  manque, Oliv'IA explique quoi installer ou démarrer (commandes `ollama pull` à copier) et le
   panneau disparaît de lui-même une fois le problème réglé.
 
 **Documents**
@@ -236,13 +243,13 @@ choix assumé, cohérent avec le RGPD.
 
 ### Ce qu'elle apporte
 
-- **fenêtre native**, icône Olivia dans le Dock / la barre des tâches ;
+- **fenêtre native**, icône Oliv'IA dans le Dock / la barre des tâches ;
 - **icône dans la barre des menus** (macOS) ou la **zone de notification** (Windows) : fermer
-  la fenêtre laisse Olivia disponible en arrière-plan ; menu : *Ouvrir*, *Créer un compte…*,
+  la fenêtre laisse Oliv'IA disponible en arrière-plan ; menu : *Ouvrir*, *Créer un compte…*,
   *Redémarrer*, *Quitter* ;
 - **raccourci global** `Ctrl+Alt+O` (Windows) / `Cmd+Option+O` (macOS) pour afficher ou
-  masquer Olivia ;
-- **une seule instance** : relancer Olivia ramène la fenêtre existante ;
+  masquer Oliv'IA ;
+- **une seule instance** : relancer Oliv'IA ramène la fenêtre existante ;
 - **menus en français** ;
 - **installeurs** `.dmg` / `.zip` (macOS) et `.exe` (Windows, NSIS, installation pour tous les
   utilisateurs du poste) ;
@@ -263,7 +270,7 @@ choix assumé, cohérent avec le RGPD.
    ollama pull gemma2:2b
    ollama pull bge-m3
    ```
-2. Installer Olivia : `.dmg` (glisser dans *Applications*) ou `Olivia Setup <version>.exe`.
+2. Installer Oliv'IA : `.dmg` (glisser dans *Applications*) ou `Olivia Setup <version>.exe`.
 3. Au premier lancement, créer le premier compte avec le bouton de l'écran de connexion.
    Si Ollama ou un modèle manque, un panneau en haut de la fenêtre l'indique après la
    connexion, avec les commandes à taper.
@@ -281,14 +288,14 @@ backend par `OLIVIA_DATA_DIR`. **Journal** : `olivia.log`, dans le dossier des j
 d'Electron (`app.getPath('logs')`).
 
 **Sécurité de la fenêtre** : `contextIsolation`, `sandbox`, aucun accès Node pour la page ;
-la fenêtre ne navigue que vers l'interface d'Olivia ; les liens s'ouvrent dans le navigateur
+la fenêtre ne navigue que vers l'interface d'Oliv'IA ; les liens s'ouvrent dans le navigateur
 du système (http/https seulement) ; toutes les permissions (caméra, micro…) sont refusées.
 Seule action exposée à la page (`desktop/preload.js`, objet `window.oliviaBureau`) : ouvrir
 l'assistant de création de compte.
 
 **Arrêt** : le backend est lancé avec `--parent-stdin` et s'arrête dès que l'application ferme
 son entrée standard — y compris si elle plante (le système ferme alors le tube) : aucun
-processus Olivia ne survit à la fenêtre.
+processus Oliv'IA ne survit à la fenêtre.
 
 ### Construire les installeurs
 
@@ -367,14 +374,14 @@ L'installeur :
 - place les **données** dans `C:\ProgramData\Olivia`, rendu modifiable par les utilisateurs du
   poste, et écrit `ai-webapp\olivia.ini` pour le désigner ;
 - propose de **créer le premier compte** en fin d'installation (case cochée seulement s'il n'en
-  existe aucun) et ajoute un raccourci **« Créer un compte Olivia »** au menu Démarrer ;
+  existe aucun) et ajoute un raccourci **« Créer un compte Oliv'IA »** au menu Démarrer ;
 - ne supprime **jamais** le dossier des données à la désinstallation.
 
 ---
 
 ## 🔌 Version portable (clé USB / disque externe)
 
-Olivia tourne entièrement depuis un disque amovible : application, moteur, modèles, comptes
+Oliv'IA tourne entièrement depuis un disque amovible : application, moteur, modèles, comptes
 et conversations restent dessus, rien n'est installé sur l'ordinateur hôte.
 
 ```powershell
@@ -389,7 +396,7 @@ synchronisation, puis vérifie que l'installation est complète (interface bien 
 lanceurs présents).
 
 **Choix du disque** — sans `-Destination`, le script liste les lecteurs et propose celui qui
-contient déjà Olivia, sinon le disque non système le plus libre (un disque USB externe est
+contient déjà Oliv'IA, sinon le disque non système le plus libre (un disque USB externe est
 souvent vu comme « fixe » par Windows : le tri se fait sur l'espace libre).
 
 | Mode | Effet |
@@ -409,7 +416,7 @@ En mode `-Update`, la synchronisation est un miroir, sauf ces éléments préser
 | `ai-webapp\_internal\backend\ocr_cache\` | cache OCR, reconstructible mais coûteux |
 
 Garde-fous : lecteur absent refusé ; dossier non vide qui ne ressemble pas à une installation
-Olivia refusé (sauf `-Force`) ; sans console, valeurs par défaut et **jamais** de mode
+Oliv'IA refusé (sauf `-Force`) ; sans console, valeurs par défaut et **jamais** de mode
 destructif sans `-Replace` explicite.
 
 ```
@@ -469,7 +476,7 @@ réservée au **service informatique**, en ligne de commande, sans formulaire d'
 | Où | Commande |
 |---|---|
 | Application de bureau | bouton de l'écran de connexion, ou menu *Créer un compte…* |
-| Installeur Inno Setup | case en fin d'installation, ou menu Démarrer → *Créer un compte Olivia* |
+| Installeur Inno Setup | case en fin d'installation, ou menu Démarrer → *Créer un compte Oliv'IA* |
 | Disque portable | double-clic sur `Creer-un-compte.bat` |
 | Exécutable | `ai-webapp.exe init` |
 | Sources | `python launch.py init` ou `python backend/manage_users.py init` |
@@ -562,9 +569,9 @@ rechargement après inactivité.
 
 ### Mode simple
 
-Olivia démarre en **mode simple** : la **conversation**, les **documents**, la **barre des
+Oliv'IA démarre en **mode simple** : la **conversation**, les **documents**, la **barre des
 outils connectés** et le bouton **🌐 Recherche web**. Le service informatique passe une fois en
-mode avancé pour tout configurer, puis laisse Olivia en mode simple.
+mode avancé pour tout configurer, puis laisse Oliv'IA en mode simple.
 
 ### Conversations
 
@@ -608,13 +615,13 @@ Champ de recherche de l'onglet Documents, deux modes :
   au démarrage et après chaque import ; *Paramètres → Documents* permet de forcer une mise à
   jour. Sans `bge-m3`, sans Ollama ou sans FAISS, le mode est indiqué indisponible, sans erreur.
 
-Chaque résultat peut être **ajouté à la conversation** (plusieurs à la fois) ; Olivia précise de
+Chaque résultat peut être **ajouté à la conversation** (plusieurs à la fois) ; Oliv'IA précise de
 quel document vient chaque information. Le contexte transmis est borné (**8 000 caractères**
 par document, **24 000** au total) et **toute coupe est signalée** (« ⚠️ tronqué »).
 
 ### 🔍 Documents scannés — OCR
 
-Un PDF scanné est fait d'images : sans OCR, il resterait introuvable. Olivia les fait lire par
+Un PDF scanné est fait d'images : sans OCR, il resterait introuvable. Oliv'IA les fait lire par
 **Tesseract**, en local, en français.
 
 - Concerne les PDF **sans couche texte** et les images (`.png`, `.jpg`, `.tif`…) ; un PDF qui
@@ -636,7 +643,7 @@ Un PDF scanné est fait d'images : sans OCR, il resterait introuvable. Olivia le
   l'état du moteur indique qu'il est introuvable, renseigner son chemin dans *Paramètres →
   Documents* (par exemple `/opt/homebrew/bin/tesseract`).
 
-Olivia cherche le moteur livré dans `tesseract/`, puis celui du `PATH`, puis le chemin réglé.
+Oliv'IA cherche le moteur livré dans `tesseract/`, puis celui du `PATH`, puis le chemin réglé.
 Ce chemin étant **exécuté**, il doit désigner un programme nommé `tesseract` (ou son dossier) :
 tout autre programme est refusé. **Sans moteur, rien ne casse** : les documents scannés restent
 consultables, ils ne sortent simplement pas dans les recherches.
@@ -662,7 +669,7 @@ Sous chaque réponse terminée, **📄 Créer un document Word** :
 
 **Modèle de l'établissement** (*Paramètres → Documents*) : indiquer un document Word de
 l'établissement (chemin affiché dans 📁 Documents, ex. `r0/documents/Circulaire.docx`) ;
-Olivia en retire tout le texte et garde l'identité (logo, en-tête, pied de page, polices,
+Oliv'IA en retire tout le texte et garde l'identité (logo, en-tête, pied de page, polices,
 marges). Modèle rangé dans `profiles/<profile_id>/modele-etablissement.docx`, avec repli sur un
 modèle commun `modeles/modele-etablissement.docx` déposé par le service informatique.
 
@@ -677,11 +684,11 @@ politesse, ville, signature. Laissées vides, les valeurs par défaut de `backen
 
 ### Dans la conversation (bouton 🌐)
 
-Le bouton **🌐 Recherche web**, sous la zone de saisie, est un interrupteur. Activé, Olivia
+Le bouton **🌐 Recherche web**, sous la zone de saisie, est un interrupteur. Activé, Oliv'IA
 interroge le moteur **avant** de répondre, transmet les 5 premiers résultats au modèle et
 **cite ses sources** (`[1]`, `[2]`…), listées sous la réponse (« 🌐 N sources web »). Visible
 en mode simple : c'est la **seule action qui fait sortir une donnée de la machine** (la requête
-part vers le moteur), et elle reste un choix explicite. Si le moteur ne répond pas, Olivia
+part vers le moteur), et elle reste un choix explicite. Si le moteur ne répond pas, Oliv'IA
 répond quand même et le dit.
 
 | Moteur | Prérequis | Fiabilité |
@@ -706,7 +713,7 @@ aux domaines `education.gouv.fr`, `eduscol.education.fr`, `legifrance.gouv.fr`,
 `service-public.fr`, `gouv.fr`, `onisep.fr`. Deux barrières : restriction `site:` dans la
 requête, puis **refiltrage par domaine** des résultats (qui écarte aussi les sosies du type
 `education.gouv.fr.exemple.com`). **Aucun repli silencieux** : sans source officielle, la liste
-est vide et Olivia le dit.
+est vide et Oliv'IA le dit.
 
 ### Installer SearXNG
 
@@ -770,7 +777,7 @@ Confidentialité* :
 - `GET` / `PUT /api/settings` ne renvoient jamais les secrets en clair.
 
 > Ce sont des **mesures techniques**. La conformité formelle (registre, information, analyse
-> d'impact le cas échéant) reste à mener par la structure qui déploie Olivia.
+> d'impact le cas échéant) reste à mener par la structure qui déploie Oliv'IA.
 
 ---
 
@@ -897,9 +904,9 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
 | Symptôme | Piste |
 |---|---|
 | « Le moteur d'IA (Ollama) ne répond pas » dans le chat | suivre le panneau affiché en haut de la fenêtre : installer ou démarrer Ollama ; vérifier aussi `OLLAMA_URL` |
-| Panneau « Olivia n'est pas encore prête » | taper les commandes `ollama pull` proposées ; le panneau disparaît seul une fois le modèle installé |
-| « Olivia ne répond plus » (application de bureau) | icône Olivia → *Redémarrer Olivia* ; sinon consulter `olivia.log` |
-| « Olivia ne répond pas » (navigateur) | la fenêtre noire du lanceur a été fermée : relancer Olivia |
+| Panneau « Oliv'IA n'est pas encore prête » | taper les commandes `ollama pull` proposées ; le panneau disparaît seul une fois le modèle installé |
+| « Oliv'IA ne répond plus » (application de bureau) | icône Oliv'IA → *Redémarrer Oliv'IA* ; sinon consulter `olivia.log` |
+| « Oliv'IA ne répond pas » (navigateur) | la fenêtre noire du lanceur a été fermée : relancer Oliv'IA |
 | Réponses extrêmement lentes | le mode GPU est choisi sur un poste sans carte adaptée : passer en 🧩 CPU |
 | L'écran de connexion dit qu'il n'y a aucun compte | créer le premier compte ([Comptes](#-comptes-et-organisations)) |
 | « Trop de tentatives » (HTTP 429) | attendre le délai affiché ; il double à chaque nouvel échec |
@@ -908,7 +915,7 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
 | PDF scanné introuvable | Tesseract absent ou non trouvé : voir l'état dans *Paramètres → Documents* |
 | SearXNG renvoie HTTP 403 | activer le format JSON dans `searxng/settings.yml` |
 | Application de bureau : fenêtre d'erreur au démarrage | consulter `olivia.log` (dossier des journaux d'Electron) |
-| macOS refuse d'ouvrir Olivia | application non signée : voir [Application de bureau](#️-application-de-bureau-macos-windows) |
+| macOS refuse d'ouvrir Oliv'IA | application non signée : voir [Application de bureau](#️-application-de-bureau-macos-windows) |
 | Exécutable sans interface | PyInstaller lancé ailleurs qu'à la racine ; reconstruire depuis la racine |
 
 ---
@@ -921,7 +928,7 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
   encore vérifiés sur de vrais postes : installeurs, premier lancement non signé sur macOS,
   droits de `C:\ProgramData\Olivia`, icônes, raccourci global, mise à jour automatique. Le
   workflow « Application de bureau » n'a pas encore été exécuté.
-- **Panneau « Olivia n'est pas encore prête »** : vérifié dans Chromium avec un Ollama simulé ;
+- **Panneau « Oliv'IA n'est pas encore prête »** : vérifié dans Chromium avec un Ollama simulé ;
   les consignes d'installation (application Ollama, commande `ollama` dans le Terminal ou
   l'Invite de commandes) restent à confirmer sur de vrais postes Mac et Windows.
 - **Mac Intel** : non couvert par la CI (`macos-latest` construit pour Apple Silicon).
@@ -929,7 +936,7 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
   modifications.
 - **Fenêtre de contexte** : `num_ctx` n'est pas fixé, Ollama applique sa valeur par défaut ;
   de longs documents ajoutés à la conversation peuvent donc être tronqués par le moteur
-  lui-même, au-delà des bornes signalées par Olivia.
+  lui-même, au-delà des bornes signalées par Oliv'IA.
 - **Versions non alignées** entre composants (voir [Versions](#️-versions)).
 - **Pas de suppression de compte** en ligne de commande.
 - **Connecteurs Obsidian et Notion** : squelettes.
@@ -941,7 +948,7 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
 ## 🎨 Logo et icônes
 
 Toutes les icônes viennent d'**un seul fichier**, `visuel/logo.png` : tuile bleue aux coins
-arrondis, « O » au rameau d'olivier et mot « Olivia ». Pour changer de logo, remplacer ce
+arrondis, « O » au rameau d'olivier et mot « Oliv'IA ». Pour changer de logo, remplacer ce
 fichier puis :
 
 ```bash
@@ -950,9 +957,9 @@ python visuel/generer_icones.py      # depuis la racine du dépôt
 ```
 
 Le script en tire deux variantes (coins rendus transparents) :
-- **logo complet** (O + « Olivia ») pour les grandes tailles, où le mot reste lisible ;
+- **logo complet** (O + « Oliv'IA ») pour les grandes tailles, où le mot reste lisible ;
 - **marque** (la même tuile avec le seul « O » au rameau, agrandi) pour les petites tailles et
-  l'interface, où le mot deviendrait illisible et où « Olivia » est déjà écrit à côté.
+  l'interface, où le mot deviendrait illisible et où « Oliv'IA » est déjà écrit à côté.
 
 | Fichier | Variante | Usage |
 |---|---|---|
@@ -968,6 +975,9 @@ Le script fixe deux réglages :
 - **marge macOS** : la tuile occupe 824 px d'une toile de 1024. C'est la convention de la
   grille d'icônes macOS, non revérifiée sur la documentation d'Apple ;
 - **format du `.ico`** : bitmap classique jusqu'à 128 px, PNG à 256 px.
+
+Le logo complet affiche le mot « Olivia » tel qu'il figure sur l'image fournie. Pour qu'il
+affiche « Oliv'IA », remplacer `visuel/logo.png` par une version modifiée et relancer le script.
 
 ## 📁 Arborescence
 
@@ -1036,7 +1046,7 @@ Olivia/
             ├── ModelPicker.vue       ← GPU / CPU
             ├── ConnectedTools.vue    ← barre des outils connectés
             ├── ConsentBanner.vue     ← bandeau RGPD
-            ├── MoteurAssistant.vue   ← panneau « Olivia n'est pas encore prête »
+            ├── MoteurAssistant.vue   ← panneau « Oliv'IA n'est pas encore prête »
             └── SettingsMenu.vue      ← 6 onglets de Paramètres
 ```
 
@@ -1055,6 +1065,6 @@ Ignorés par Git : `backend/profiles/`, `backend/.env`, `olivia.ini`, `ollama/`,
 | 04/10/2026 — PR #2 | Import sans écrasement ; purge RGPD de l'index non annulable |
 | 04/10/2026 — PR #3 | Erreurs du moteur affichées dans le chat ; secrets masqués dans l'export RGPD |
 | 04/10/2026 — PR #4 | Connexion robuste (temporisation, temps constant, 600 000 itérations, sessions révoquées) ; validation des réglages ; dépendances npm à jour |
-| 04/10/2026 — PR #5 | Nouveau logo (tuile bleue) et icônes générées par script ; points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet ; panneau « Olivia n'est pas encore prête » ; messages d'erreur adaptés à l'application de bureau ; workflow de tests sur les PR |
+| 04/10/2026 — PR #5 | Application renommée « Oliv'IA » (nom affiché) ; nouveau logo (tuile bleue) et icônes générées par script ; points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet ; panneau « Oliv'IA n'est pas encore prête » ; messages d'erreur adaptés à l'application de bureau ; workflow de tests sur les PR |
 
 Détail : `git log`.

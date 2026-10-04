@@ -48,7 +48,7 @@ export const useAuthStore = defineStore('auth', () => {
       return { ok: true }
     } catch (e) {
       console.error('Connexion impossible :', e)
-      return { ok: false, error: "Olivia ne répond pas. Vérifiez qu'elle est bien démarrée." }
+      return { ok: false, error: "Oliv'IA ne répond pas. Vérifiez qu'elle est bien démarrée." }
     }
   }
 

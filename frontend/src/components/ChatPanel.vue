@@ -29,7 +29,7 @@
           <span
             v-if="doc.truncated"
             class="file-cut"
-            :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Olivia.`"
+            :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
           >
             ⚠️ tronqué
           </span>
@@ -46,7 +46,7 @@
         v-if="documentsTronques"
         class="file-warn"
       >
-        Certains documents sont trop longs : seul leur début est transmis à Olivia.
+        Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
         Retirez-en pour laisser plus de place aux autres.
       </p>
       <p
@@ -67,7 +67,7 @@
           :key="i"
           :class="['msg', m.role]"
         >
-          <strong>{{ m.role === 'user' ? 'Vous' : 'Olivia' }}</strong>
+          <strong>{{ m.role === 'user' ? 'Vous' : "Oliv'IA" }}</strong>
           <div
             v-if="m.role === 'user'"
             class="bubble plain"
@@ -256,7 +256,7 @@
             alt=""
             class="welcome-logo"
           >
-          <h2>Bonjour, je suis Olivia</h2>
+          <h2>Bonjour, je suis Oliv'IA</h2>
           <p class="welcome-lead">
             Votre assistante pour le secrétariat de direction. Posez votre demande,
             ou choisissez un exemple pour commencer :
@@ -296,7 +296,7 @@
       <div class="composer-inner">
         <textarea
           v-model="input"
-          placeholder="Écrivez votre demande à Olivia…"
+          placeholder="Écrivez votre demande à Oliv'IA…"
           :disabled="chat.isStreaming"
           rows="3"
           @keydown.enter.exact.prevent="send"
@@ -330,7 +330,7 @@
           v-if="webSearch"
           class="web-hint"
         >
-          Olivia consultera le web avant de répondre, et indiquera ses sources.
+          Oliv'IA consultera le web avant de répondre, et indiquera ses sources.
         </p>
       </div>
     </div>

@@ -35,7 +35,12 @@
 ; ni supprimées à la désinstallation (uninsneveruninstall, aucune entrée dans
 ; [UninstallDelete]).
 
-#define AppName "Olivia"
+; Nom affiché (assistant d'installation, menu Démarrer, Programmes et
+; fonctionnalités). Les noms techniques restent « Olivia » : dossier
+; d'installation, dossier des données, olivia.ini — les changer ferait perdre
+; à une mise à jour les comptes et conversations déjà enregistrés.
+#define AppName "Oliv'IA"
+#define AppDirName "Olivia"
 #define AppVersion "1.0.0"
 #define AppPublisher "Lycee de l'Olivier"
 #define AppExeName "ai-webapp.exe"
@@ -48,7 +53,7 @@ AppId={{BA4CF2C7-E3E6-447A-843F-3F27607A204D}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={autopf}\{#AppDirName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin

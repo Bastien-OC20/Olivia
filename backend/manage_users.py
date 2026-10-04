@@ -161,7 +161,7 @@ def _cmd_init(args) -> int:
     se choisit par son nom.
     """
     print("=" * 60)
-    print("Olivia - création d'un compte")
+    print("Oliv'IA - création d'un compte")
     print("=" * 60)
     profil, nouveau_nom = _choisir_organisation()
     while True:
@@ -182,14 +182,14 @@ def _cmd_init(args) -> int:
     user = users.create_user(identifiant, mot_de_passe, profil["id"])
     print()
     print(f"Compte « {user['username']} » créé pour « {profil['name']} ».")
-    print("Lancez Olivia et connectez-vous avec cet identifiant et ce mot de passe.")
+    print("Lancez Oliv'IA et connectez-vous avec cet identifiant et ce mot de passe.")
     return 0
 
 
 def main(argv: list[str] | None = None, prog: str = "manage_users.py") -> int:
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Crée les organisations (profils) et les comptes utilisateurs d'Olivia.",
+        description="Crée les organisations (profils) et les comptes utilisateurs d'Oliv'IA.",
     )
     parser.set_defaults(prog=prog)
     sous = parser.add_subparsers(dest="commande", required=True)

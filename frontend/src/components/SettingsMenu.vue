@@ -155,7 +155,7 @@
               />
               <p class="hint">
                 Un dossier par ligne. Ajoutez un libellé après une barre verticale :
-                C:\Dossier | Mes documents. Olivia ne peut lire et écrire que dans ces dossiers.
+                C:\Dossier | Mes documents. Oliv'IA ne peut lire et écrire que dans ces dossiers.
                 Laissez vide pour utiliser Documents. Appliqué après Enregistrer.
               </p>
             </div>
@@ -172,7 +172,7 @@
               <p class="hint">
                 Une circulaire passée au scanner ou un courrier reçu par fax est un
                 document fait d'images : sans cette option, son texte n'apparaît dans
-                aucune recherche. Olivia le déchiffre alors sur cette machine, sans
+                aucune recherche. Oliv'IA le déchiffre alors sur cette machine, sans
                 rien envoyer sur Internet. C'est plus lent la première fois (environ
                 une à trois secondes par page), puis le résultat est mémorisé.
                 La lecture automatique n'est jamais parfaite : les résultats obtenus
@@ -203,7 +203,7 @@
               >
               <p class="hint">
                 Utile seulement si Tesseract est installé ailleurs sur le poste.
-                Olivia cherche d'abord le moteur livré avec elle, puis celui du système.
+                Oliv'IA cherche d'abord le moteur livré avec elle, puis celui du système.
                 Le chemin doit désigner <code>tesseract.exe</code> ou le dossier qui le
                 contient : par sécurité, tout autre programme est refusé.
               </p>
@@ -211,13 +211,13 @@
 
             <h3>🧠 Recherche par le sens</h3>
             <p class="hint">
-              En plus de la recherche par mots-clés, Olivia peut retrouver un document
+              En plus de la recherche par mots-clés, Oliv'IA peut retrouver un document
               d'après l'idée qu'il contient, même si les mots exacts diffèrent. L'index
-              se construit et se met à jour tout seul (au démarrage d'Olivia, et après
+              se construit et se met à jour tout seul (au démarrage d'Oliv'IA, et après
               chaque import de fichier), à partir du modèle local <code>bge-m3</code>
               (via Ollama, sans rien envoyer sur Internet). Le bouton ci-dessous ne sert
               qu'à forcer une mise à jour immédiate — par exemple après avoir modifié des
-              documents en dehors d'Olivia.
+              documents en dehors d'Oliv'IA.
             </p>
             <p
               v-if="docIndexState"
@@ -258,7 +258,7 @@
               </button>
             </div>
 
-            <h3>📄 Documents Word créés par Olivia</h3>
+            <h3>📄 Documents Word créés par Oliv'IA</h3>
             <p
               v-if="modeleEtat"
               class="hint"
@@ -279,7 +279,7 @@
               >
               <p class="hint">
                 Indiquez un document Word de l'établissement (chemin affiché sous son
-                nom dans 📁 Documents). Olivia en retire tout le texte et n'en garde
+                nom dans 📁 Documents). Oliv'IA en retire tout le texte et n'en garde
                 que l'identité : logo, en-tête, pied de page, polices et marges. C'est
                 ce modèle qui habille ensuite les circulaires, courriers, convocations
                 et comptes rendus. À refaire le jour où la charte du lycée change.
@@ -309,7 +309,7 @@
           >
             <h3>✒️ Formules utilisées dans les documents</h3>
             <p class="hint">
-              Olivia les insère dans les courriers, convocations et comptes rendus
+              Oliv'IA les insère dans les courriers, convocations et comptes rendus
               qu'elle produit. Laissez un champ vide pour garder la formule d'usage
               indiquée en exemple. Appliqué après <b>Enregistrer</b>.
             </p>
@@ -412,7 +412,7 @@
               <p class="hint">
                 Limite la recherche aux sites de l'administration française
                 (education.gouv.fr, eduscol, Légifrance, Service-Public.fr, gouv.fr,
-                Onisep). Si aucun de ces sites n'a de réponse, Olivia l'indique
+                Onisep). Si aucun de ces sites n'a de réponse, Oliv'IA l'indique
                 clairement au lieu de proposer un résultat non officiel. Prend effet
                 après <b>Enregistrer</b> — le bouton « 🔍 Tester » ci-dessous applique
                 ce réglage une fois enregistré.
@@ -585,10 +585,10 @@
           >
             <h3>🔒 Vos données</h3>
             <p class="hint">
-              Olivia fonctionne <b>entièrement sur cette machine</b>. Aucune donnée
+              Oliv'IA fonctionne <b>entièrement sur cette machine</b>. Aucune donnée
               (conversations, fichiers, identifiants) n'est transmise à un serveur externe.
               Les paramètres et les conversations sont stockés sur ce poste, dans le
-              dossier des données d'Olivia, séparément pour chaque organisation.
+              dossier des données d'Oliv'IA, séparément pour chaque organisation.
             </p>
 
             <h3>Droit d'accès et de portabilité</h3>

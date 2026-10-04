@@ -153,7 +153,7 @@ async def _cycle_de_vie(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Olivia — assistante locale", version="3.0.0", lifespan=_cycle_de_vie)
+app = FastAPI(title="Oliv'IA — assistante locale", version="3.0.0", lifespan=_cycle_de_vie)
 
 
 # ---------- Middleware sécurité ----------
@@ -330,7 +330,7 @@ def auth_login(demande: DemandeConnexion, response: Response):
         # message, l'utilisatrice verrait une erreur 500 sans explication.
         raise HTTPException(
             500,
-            "Olivia ne peut pas enregistrer la session : le dossier de ses données "
+            "Oliv'IA ne peut pas enregistrer la session : le dossier de ses données "
             f"n'est pas modifiable ({profiles.PROFILES_DIR}). Prévenez la personne "
             "qui s'occupe de l'informatique.",
         ) from e
@@ -493,7 +493,7 @@ def safe_path(profile_id: str, virtual: str) -> tuple[Path, Path, str]:
             detail=f"Accès refusé : '{virtual}' sort du périmètre autorisé ({root})",
         )
     if zones.est_reserve(p, deja_resolu=True):
-        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Oliv'IA")
     return p, root, prefix
 
 
@@ -944,7 +944,7 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
     except ValueError:
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
     if zones.est_reserve(target_dir, deja_resolu=True):
-        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Oliv'IA")
 
     size = 0
     try:
@@ -1265,7 +1265,7 @@ async def update_settings(patch: dict, profile_id: str = Depends(get_current_pro
             if zones.est_reserve(Path(v)):
                 raise HTTPException(
                     400,
-                    f"Ce dossier est réservé au fonctionnement d'Olivia et ne peut pas "
+                    f"Ce dossier est réservé au fonctionnement d'Oliv'IA et ne peut pas "
                     f"servir de dossier de travail : {v}",
                 )
             cleaned.append({"path": v, "label": label})
@@ -1433,7 +1433,7 @@ async def documents_generate(demande: DemandeDocument,
     except ValueError:
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
     if zones.est_reserve(dossier, deja_resolu=True):
-        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Oliv'IA")
 
     profil = docgen.PROFILS[demande.type]
     defaut = demande.titre.strip() or profil["titre_defaut"]
@@ -1628,7 +1628,7 @@ async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
     # message d'erreur d'analyse aurait pu recopier des extraits.
     if zones.est_reserve(Path(cfg.get("path", ""))):
         return {"enabled": True, "events": [
-            {"error": "Ce fichier est réservé au fonctionnement d'Olivia."}]}
+            {"error": "Ce fichier est réservé au fonctionnement d'Oliv'IA."}]}
     return {"enabled": True, "events": calendar_list_events(cfg.get("path", ""), limit=20)}
 
 

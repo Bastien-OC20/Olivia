@@ -1,11 +1,11 @@
 @echo off
 rem ============================================================
-rem  Olivia - creation d'un compte (service informatique)
-rem  A lancer une premiere fois apres l'installation : Olivia
+rem  Oliv'IA - creation d'un compte (service informatique)
+rem  A lancer une premiere fois apres l'installation : Oliv'IA
 rem  demande une connexion, et aucun compte n'existe au depart.
 rem  Sert aussi, plus tard, a ajouter un compte.
 rem ============================================================
-title Olivia - creation d'un compte
+title Oliv'IA - creation d'un compte
 
 cd /d "%~dp0ai-webapp"
 
