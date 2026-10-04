@@ -14,11 +14,22 @@
         {{ titre }}
       </h2>
 
-      <!-- Moteur injoignable : l'installer, ou le démarrer. -->
+      <!-- Moteur injoignable : le redémarrer, l'installer, ou le démarrer. -->
       <template v-if="!etat.joignable">
-        <p>
+        <p v-if="bureau">
+          Le moteur d'IA livré avec Oliv'IA ne répond pas. Redémarrez Oliv'IA : cliquez sur son
+          icône (barre des menus sur Mac, zone de notification sous Windows), puis
+          « Redémarrer Oliv'IA ». Les documents restent consultables en attendant.
+        </p>
+        <p v-else>
           Oliv'IA a besoin du moteur d'IA <b>Ollama</b>, installé sur ce poste, pour converser.
           Les documents restent consultables en attendant.
+        </p>
+        <p
+          v-if="bureau"
+          class="note"
+        >
+          Si le problème persiste, Oliv'IA peut aussi utiliser un Ollama installé séparément :
         </p>
         <ol>
           <li>
@@ -43,41 +54,86 @@
         </p>
       </template>
 
-      <!-- Moteur joignable, mais des modèles manquent. -->
+      <!-- Moteur joignable, mais des modèles manquent : Oliv'IA les télécharge. -->
       <template v-else-if="manquants.length">
         <p>
           {{ bloquant
             ? "Le moteur d'IA fonctionne, mais le modèle de conversation n'est pas encore installé."
             : "Oliv'IA peut converser. Un modèle supplémentaire permettrait aussi de retrouver un document d'après l'idée qu'il contient." }}
-          Ouvrez {{ terminal }}, puis tapez :
+          Oliv'IA peut le télécharger : une seule fois, avec une connexion Internet. Ensuite,
+          tout reste sur ce poste.
         </p>
-        <ul class="commandes">
+        <ul class="modeles">
           <li
             v-for="m in manquants"
             :key="m.nom"
           >
-            <input
-              :ref="(el) => { champs[m.nom] = el }"
-              class="commande"
-              :value="`ollama pull ${m.nom}`"
-              :aria-label="`Commande à taper pour installer ${m.nom}`"
-              readonly
-              @focus="$event.target.select()"
+            <div class="ligne">
+              <span><b>{{ m.nom }}</b> <span class="role">— {{ m.role }}</span></span>
+              <button
+                v-if="!enCoursPour(m)"
+                type="button"
+                :disabled="demandes.has(m.nom)"
+                @click="telecharger(m.nom)"
+              >
+                {{ m.telechargement?.etat === 'erreur' ? '🔄 Réessayer' : '⬇ Télécharger' }}
+              </button>
+            </div>
+            <template v-if="enCoursPour(m)">
+              <progress
+                :value="m.telechargement.fait"
+                :max="m.telechargement.total || 1"
+                :aria-label="`Téléchargement de ${m.nom}`"
+              />
+              <span class="role">{{ avancement(m.telechargement) }}</span>
+            </template>
+            <p
+              v-else-if="m.telechargement?.etat === 'erreur'"
+              class="erreur"
             >
-            <button
-              type="button"
-              class="ghost"
-              @click="copier(m.nom)"
-            >
-              {{ copie === m.nom ? '✅ Copié' : '📋 Copier' }}
-            </button>
-            <span class="role">{{ m.role }}</span>
+              {{ m.telechargement.message }}
+            </p>
           </li>
         </ul>
+        <button
+          v-if="aLancer.length > 1"
+          type="button"
+          class="ghost"
+          @click="aLancer.forEach((m) => telecharger(m.nom))"
+        >
+          ⬇ Tout télécharger
+        </button>
         <p class="note">
-          Le téléchargement peut prendre plusieurs minutes. Ce message disparaît de lui-même
-          une fois le modèle installé.
+          Plusieurs Go : comptez de quelques minutes à une heure selon la connexion. Ce message
+          disparaît de lui-même une fois les modèles installés ; Oliv'IA reste utilisable pendant
+          ce temps pour les documents.
         </p>
+        <details class="note">
+          <summary>Autre méthode : ligne de commande (service informatique)</summary>
+          <p>Ouvrez {{ terminal }}, puis tapez :</p>
+          <ul class="commandes">
+            <li
+              v-for="m in manquants"
+              :key="m.nom"
+            >
+              <input
+                :ref="(el) => { champs[m.nom] = el }"
+                class="commande"
+                :value="`ollama pull ${m.nom}`"
+                :aria-label="`Commande à taper pour installer ${m.nom}`"
+                readonly
+                @focus="$event.target.select()"
+              >
+              <button
+                type="button"
+                class="ghost"
+                @click="copier(m.nom)"
+              >
+                {{ copie === m.nom ? '✅ Copié' : '📋 Copier' }}
+              </button>
+            </li>
+          </ul>
+        </details>
       </template>
 
       <p class="note">
@@ -148,6 +204,33 @@ const titre = computed(() => {
   return 'ℹ️ Recherche par le sens pas encore disponible'
 })
 
+// Téléchargement par Oliv'IA (POST /api/moteur/telecharger, backend/moteur.py).
+const demandes = ref(new Set())          // clic envoyé, réponse pas encore reçue
+const enCoursPour = (m) => m.telechargement?.etat === 'en_cours'
+const aLancer = computed(() => manquants.value
+  .filter((m) => !enCoursPour(m) && !demandes.value.has(m.nom)))
+
+async function telecharger(nom) {
+  demandes.value = new Set(demandes.value).add(nom)
+  try {
+    await moteur.telecharger(nom)
+  } finally {
+    const reste = new Set(demandes.value)
+    reste.delete(nom)
+    demandes.value = reste
+  }
+}
+
+const go = (octets) => (octets / 1e9).toLocaleString('fr-FR',
+  { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+
+/** « 2,3 Go sur 7,5 Go (31 %) », ou l'étape annoncée par Ollama avant. */
+function avancement(t) {
+  if (!t.total) return t.message || 'Préparation…'
+  const pourcent = Math.floor((100 * t.fait) / t.total)
+  return `${go(t.fait)} Go sur ${go(t.total)} Go (${pourcent} %)`
+}
+
 const champs = {}
 const copie = ref('')
 
@@ -193,6 +276,11 @@ async function copier(nom) {
   border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
 }
 .role { color: var(--muted); font-size: 12px; }
+.modeles { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; max-width: 560px; }
+.modeles .ligne { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.modeles progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.erreur { color: var(--danger); margin: 2px 0; }
+details summary { cursor: pointer; }
 .btns { display: flex; gap: 10px; }
 .ghost { background: var(--panel-2); color: var(--text); }
 .sr-only {

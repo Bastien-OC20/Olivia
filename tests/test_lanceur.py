@@ -39,3 +39,20 @@ def test_option_parent_stdin_reconnue():
     r = subprocess.run([sys.executable, "launch.py", "--help"], cwd=RACINE,
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and "--parent-stdin" in r.stdout
+
+
+def test_modeles_ollama_livres_avec_le_moteur(tmp_path, monkeypatch):
+    # Disque portable, installeur Inno Setup : modèles livrés dans ./ollama/models.
+    livres = tmp_path / "ollama" / "models"
+    livres.mkdir(parents=True)
+    monkeypatch.setattr(launch, "OLLAMA_MODELS_DIR", livres)
+    assert launch.dossier_modeles_ollama() == livres
+
+
+def test_modeles_ollama_dans_le_dossier_des_donnees(tmp_path, monkeypatch):
+    # Application de bureau : moteur embarqué sans modèles ; son dossier
+    # d'installation n'est pas modifiable, les modèles vont avec les données.
+    from backend import emplacements
+    monkeypatch.setattr(launch, "OLLAMA_MODELS_DIR", tmp_path / "absent" / "models")
+    monkeypatch.setattr(emplacements, "dossier_donnees", lambda: tmp_path / "donnees")
+    assert launch.dossier_modeles_ollama() == tmp_path / "donnees" / "modeles-ia"

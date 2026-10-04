@@ -140,12 +140,32 @@ def bind_child(proc: subprocess.Popen | None) -> None:
         pass  # best effort : le terminate() explicite reste le filet de sécurité
 
 
+def dossier_modeles_ollama() -> Path:
+    """Où le moteur embarqué range ses modèles (plusieurs Go).
+
+    1. ./ollama/models s'il existe : disque portable et installeur Inno Setup,
+       qui livrent les modèles avec le moteur ;
+    2. sinon le dossier des données d'Oliv'IA (backend/emplacements.py),
+       sous-dossier modeles-ia : c'est le cas de l'application de bureau, qui
+       embarque le moteur SANS les modèles (téléchargés au premier lancement,
+       depuis Oliv'IA). Son dossier d'installation (Program Files, Olivia.app)
+       n'est pas modifiable par un utilisateur standard et serait remplacé à
+       chaque mise à jour : les modèles n'y survivraient pas.
+    """
+    if OLLAMA_MODELS_DIR.is_dir():
+        return OLLAMA_MODELS_DIR
+    sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
+    from backend import emplacements
+    return emplacements.dossier_donnees() / "modeles-ia"
+
+
 def start_ollama():
-    """Démarre le moteur Ollama portable (modèles stockés dans le projet).
+    """Démarre le moteur Ollama portable (livré à côté de l'exécutable).
 
     - S'il tourne déjà sur :11434, on le réutilise.
-    - Sinon, si ./ollama/ollama(.exe) existe, on le lance avec OLLAMA_MODELS
-      pointant vers ./ollama/models.
+    - Sinon, si ./ollama/ollama(.exe) existe, on le lance ; ses modèles vont
+      dans le dossier donné par dossier_modeles_ollama(), sauf variable
+      d'environnement OLLAMA_MODELS déjà définie.
     - Sinon, on avertit et l'app démarre quand même (sans inférence).
     Renvoie le sous-process démarré (à arrêter en sortie) ou None.
     """
@@ -157,11 +177,15 @@ def start_ollama():
         print("   Installez la version portable dans ce dossier, ou lancez 'ollama serve'.")
         return None
 
-    OLLAMA_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    env["OLLAMA_MODELS"] = str(OLLAMA_MODELS_DIR)
+    modeles = Path(env.get("OLLAMA_MODELS") or dossier_modeles_ollama())
+    try:
+        modeles.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"⚠️  Dossier des modèles inaccessible ({modeles}) : {e}")
+    env["OLLAMA_MODELS"] = str(modeles)
     env.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
-    print(f"→ Démarrage d'Ollama (portable) — modèles : {OLLAMA_MODELS_DIR}")
+    print(f"→ Démarrage d'Ollama (portable) — modèles : {modeles}")
     proc = subprocess.Popen(
         [str(OLLAMA_EXE), "serve"], env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

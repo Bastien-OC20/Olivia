@@ -7,6 +7,8 @@ import { ref, computed } from 'vue'
 // prêt et complet, plus aucune vérification de fond : une panne ultérieure est
 // détectée par la conversation elle-même (voir `signalerPanne`).
 const INTERVALLE_MS = 10000
+// Pendant un téléchargement, la barre de progression doit avancer à vue d'œil.
+const INTERVALLE_TELECHARGEMENT_MS = 2000
 
 /**
  * État du moteur d'IA (Ollama) : joignable ? modèles nécessaires installés ?
@@ -26,6 +28,28 @@ export const useMoteurStore = defineStore('moteur', () => {
   const pret = computed(() => etat.value?.pret === true)
   const visible = computed(() => !!etat.value && !masque.value
     && (!etat.value.pret || !etat.value.complet))
+
+  const telechargementEnCours = computed(() => (etat.value?.modeles || [])
+    .some((m) => m.telechargement?.etat === 'en_cours'))
+
+  /** Demande au backend de faire télécharger un modèle par Ollama. */
+  async function telecharger(nom) {
+    try {
+      const r = await fetch('/api/moteur/telecharger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modele: nom }),
+      })
+      if (!r.ok) console.warn('Téléchargement refusé :', (await r.json().catch(() => ({}))).detail)
+    } catch (e) {
+      console.warn('Téléchargement impossible :', e.message)
+    }
+    masque.value = false
+    // Fil de vérification en cours éventuel : on attend qu'il rende la main
+    // pour repartir aussitôt avec la progression.
+    if (enCours.value) await new Promise((ok) => setTimeout(ok, 300))
+    await verifier()
+  }
 
   async function verifier() {
     if (enCours.value) return
@@ -52,8 +76,9 @@ export const useMoteurStore = defineStore('moteur', () => {
     minuteur = null
     // Aussi tant qu'un modèle conseillé manque et que le panneau est affiché :
     // il se retire de lui-même à la fin du téléchargement de bge-m3.
-    if (etat.value && (!pret.value || visible.value)) {
-      minuteur = setTimeout(verifier, INTERVALLE_MS)
+    if (etat.value && (!pret.value || visible.value || telechargementEnCours.value)) {
+      minuteur = setTimeout(verifier,
+        telechargementEnCours.value ? INTERVALLE_TELECHARGEMENT_MS : INTERVALLE_MS)
     }
   }
 
@@ -83,5 +108,8 @@ export const useMoteurStore = defineStore('moteur', () => {
     quandPret = null
   }
 
-  return { etat, enCours, masque, pret, visible, verifier, demarrer, signalerPanne, masquer, arreter }
+  return {
+    etat, enCours, masque, pret, visible, telechargementEnCours,
+    verifier, telecharger, demarrer, signalerPanne, masquer, arreter,
+  }
 })

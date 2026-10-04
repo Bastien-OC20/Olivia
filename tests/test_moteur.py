@@ -117,3 +117,102 @@ def test_est_installe():
 def test_message_ne_parle_plus_de_la_fenetre_noire():
     # Elle n'existe pas dans l'application de bureau.
     assert "fenêtre noire" not in main.MESSAGE_OLLAMA_INJOIGNABLE
+
+
+# ---------- Téléchargement des modèles depuis Oliv'IA ----------
+def _faux_client_sync(monkeypatch, gestionnaire):
+    vrai = httpx.Client
+
+    class _Client(vrai):
+        def __init__(self, *a, **k):
+            k["transport"] = httpx.MockTransport(gestionnaire)
+            super().__init__(*a, **k)
+    monkeypatch.setattr(moteur.httpx, "Client", _Client)
+
+
+@pytest.fixture
+def suivis_vides(monkeypatch):
+    monkeypatch.setattr(moteur, "_suivis", {})
+
+
+def _flux(*evenements):
+    return "\n".join(__import__("json").dumps(e) for e in evenements) + "\n"
+
+
+def test_telechargement_progression_puis_succes(monkeypatch, suivis_vides):
+    recu = {}
+
+    def _pull(requete):
+        recu.update(__import__("json").loads(requete.content))
+        return httpx.Response(200, text=_flux(
+            {"status": "pulling manifest"},
+            {"status": "pulling a", "digest": "sha256:a", "total": 100, "completed": 40},
+            {"status": "pulling b", "digest": "sha256:b", "total": 300, "completed": 300},
+            {"status": "success"},
+        ))
+    _faux_client_sync(monkeypatch, _pull)
+    moteur._suivis[CPU] = {"etat": moteur.EN_COURS, "fait": 0, "total": 0, "message": ""}
+    moteur._telecharger("http://ollama", CPU)
+    assert recu == {"model": CPU, "stream": True}
+    suivi = moteur.etat_telechargements()[CPU]
+    assert suivi["etat"] == moteur.TERMINE and suivi["fait"] == suivi["total"] == 400
+
+
+def test_telechargement_erreur_d_ollama(monkeypatch, suivis_vides):
+    erreur = {"error": "pull model manifest: file does not exist"}
+    _faux_client_sync(monkeypatch, lambda _r: httpx.Response(
+        200, text=_flux({"status": "pulling manifest"}, erreur)))
+    moteur._suivis[CPU] = {"etat": moteur.EN_COURS, "fait": 0, "total": 0, "message": ""}
+    moteur._telecharger("http://ollama", CPU)
+    suivi = moteur.etat_telechargements()[CPU]
+    assert suivi["etat"] == moteur.ERREUR and "file does not exist" in suivi["message"]
+
+
+def test_telechargement_ollama_injoignable(monkeypatch, suivis_vides):
+    def _refus(_r):
+        raise httpx.ConnectError("refusé")
+    _faux_client_sync(monkeypatch, _refus)
+    moteur._suivis[CPU] = {"etat": moteur.EN_COURS, "fait": 0, "total": 0, "message": ""}
+    moteur._telecharger("http://ollama", CPU)
+    suivi = moteur.etat_telechargements()[CPU]
+    assert suivi["etat"] == moteur.ERREUR and "ne répond pas" in suivi["message"]
+
+
+def test_flux_coupe_avant_la_fin(monkeypatch, suivis_vides):
+    partiel = {"status": "pulling a", "digest": "sha256:a", "total": 10, "completed": 3}
+    _faux_client_sync(monkeypatch, lambda _r: httpx.Response(200, text=_flux(partiel)))
+    moteur._suivis[CPU] = {"etat": moteur.EN_COURS, "fait": 0, "total": 0, "message": ""}
+    moteur._telecharger("http://ollama", CPU)
+    assert moteur.etat_telechargements()[CPU]["etat"] == moteur.ERREUR
+
+
+def test_pas_de_second_telechargement_simultane(monkeypatch, suivis_vides):
+    lances = []
+    monkeypatch.setattr(moteur.threading, "Thread",
+                        lambda **k: type("T", (), {"start": lambda self: lances.append(k)})())
+    assert moteur.lancer_telechargement("http://ollama", CPU) is True
+    assert moteur.lancer_telechargement("http://ollama", CPU) is False
+    assert len(lances) == 1
+
+
+def test_route_refuse_un_modele_non_prevu(client, suivis_vides):
+    r = client.post("/api/moteur/telecharger", json={"modele": "llama3:70b"})
+    assert r.status_code == 400
+
+
+def test_route_lance_un_modele_attendu(client, monkeypatch, suivis_vides):
+    lances = []
+    monkeypatch.setattr(moteur, "lancer_telechargement",
+                        lambda url, nom: lances.append(nom) or True)
+    r = client.post("/api/moteur/telecharger", json={"modele": "bge-m3"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "deja_en_cours": False}
+    assert lances == ["bge-m3"]
+
+
+def test_etat_rapporte_la_progression(client, monkeypatch, suivis_vides):
+    _faux_ollama(monkeypatch, _installes())
+    moteur._suivis["bge-m3"] = {"etat": moteur.EN_COURS, "fait": 5, "total": 10,
+                                "message": "pulling"}
+    m = _par_nom(client.get("/api/moteur/etat").json())
+    assert m["bge-m3"]["telechargement"]["fait"] == 5
+    assert m[GPU]["telechargement"] is None

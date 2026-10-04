@@ -18,9 +18,11 @@
 #   devient la source des mises à jour automatiques.
 #
 # Les installeurs ne sont PAS signés (CSC_IDENTITY_AUTO_DISCOVERY=false) : voir
-# le README, section « Application de bureau ». Les moteurs (Ollama, Tesseract)
-# et les modèles d'IA ne sont pas embarqués ici : l'application utilise ceux
-# installés sur le poste.
+# le README, section « Application de bureau ». Le moteur d'IA Ollama est
+# embarqué (version figée et vérifiée : desktop/scripts/embarquer_ollama.py) ;
+# les modèles ne le sont pas (plusieurs Go, au-delà des 2 Gio d'un fichier de
+# release) : Oliv'IA les télécharge au premier lancement. Tesseract (OCR) n'est
+# pas embarqué.
 name: Application de bureau
 
 on:
@@ -104,6 +106,9 @@ jobs:
 
       - name: Backend compilé (PyInstaller)
         run: pyinstaller build.spec --clean --noconfirm
+
+      - name: Moteur Ollama embarqué
+        run: python desktop/scripts/embarquer_ollama.py
 
       - name: Application de bureau (Electron)
         working-directory: desktop
