@@ -58,6 +58,9 @@ Elle s'utilise de quatre façons, avec le même code :
   fabriquer de référence, de texte de loi ou de date.
 - Erreurs du moteur (Ollama éteint, modèle absent, réponse coupée) **affichées dans la
   conversation**, en clair, au lieu d'une bulle vide.
+- Panneau **« Olivia n'est pas encore prête »** : si Ollama ne répond pas ou si un modèle
+  manque, Olivia explique quoi installer ou démarrer (commandes `ollama pull` à copier) et le
+  panneau disparaît de lui-même une fois le problème réglé.
 
 **Documents**
 - Explorateur de fichiers limité aux **dossiers de travail** choisis, choix des dossiers **à
@@ -261,6 +264,8 @@ choix assumé, cohérent avec le RGPD.
    ```
 2. Installer Olivia : `.dmg` (glisser dans *Applications*) ou `Olivia Setup <version>.exe`.
 3. Au premier lancement, créer le premier compte avec le bouton de l'écran de connexion.
+   Si Ollama ou un modèle manque, un panneau en haut de la fenêtre l'indique après la
+   connexion, avec les commandes à taper.
 4. Facultatif : Tesseract pour l'OCR (voir [OCR](#-documents-scannés--ocr)).
 
 Les installeurs n'étant **pas signés** : Windows affiche SmartScreen (*Informations
@@ -825,7 +830,7 @@ Toutes les routes exigent une session, sauf `POST /api/auth/login`, `GET /api/au
 | Domaine | Routes |
 |---|---|
 | Authentification | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/etat` (y a-t-il au moins un compte ?) |
-| Modèles et chat | `GET /api/models`, `POST /api/chat/stream` (SSE), `POST /api/chat` |
+| Modèles et chat | `GET /api/models`, `GET /api/moteur/etat` (Ollama joignable ? modèles nécessaires installés ?), `POST /api/chat/stream` (SSE), `POST /api/chat` |
 | Fichiers | `GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/preview`, `GET /api/fs/text`, `GET /api/fs/download`, `POST /api/fs/upload` |
 | Choix des dossiers | `GET /api/fs/drives`, `GET /api/fs/browse` |
 | Recherche documentaire | `GET /api/fs/search` (mots-clés), `GET /api/fs/search/semantic` (par le sens) |
@@ -850,8 +855,8 @@ pip install pytest
 python -m pytest tests
 ```
 
-110 tests, tous au vert en Python 3.11 au moment de cette mise à jour. Ils couvrent le
-cloisonnement entre organisations, les comptes et la connexion (temporisation, temps constant,
+118 tests, tous au vert en Python 3.11 au moment de cette mise à jour. Ils couvrent le
+cloisonnement entre organisations, l'état du moteur d'IA, les comptes et la connexion (temporisation, temps constant,
 remise à niveau du hachage), l'emplacement des données, l'import sans écrasement, la purge de
 l'index, les erreurs du moteur dans le chat, l'export RGPD, la validation des réglages et le
 lanceur (`--parent-stdin`).
@@ -863,6 +868,13 @@ cd desktop && npm test        # 10 tests
 ```
 
 **Interface** : `cd frontend && npm run lint`.
+
+**CI — workflow « Tests »** (`.github/workflows/tests.yml`), sur chaque pull request et
+chaque push sur `main` :
+- **backend** : flake8 + pytest, sous Linux en Python 3.10, 3.11, 3.12, 3.13 et 3.14, et
+  sous Windows et macOS en Python 3.12 (la version des installeurs) ;
+- **interface** : ESLint + build Vite ;
+- **application de bureau** : tests Node (sans télécharger Electron).
 
 **CI — workflow « Application de bureau »** (`.github/workflows/bureau.yml`) :
 - déclenchement manuel (*Actions → Application de bureau → Run workflow*) ou étiquette `v*` ;
@@ -881,8 +893,10 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
 
 | Symptôme | Piste |
 |---|---|
-| « Le moteur d'IA (Ollama) ne répond pas » dans le chat | Ollama n'est pas lancé, ou pas sur `OLLAMA_URL` ; vérifier `GET /api/health` |
-| Modèle absent / liste vide | `ollama pull` des trois modèles ([Versions](#️-versions)) |
+| « Le moteur d'IA (Ollama) ne répond pas » dans le chat | suivre le panneau affiché en haut de la fenêtre : installer ou démarrer Ollama ; vérifier aussi `OLLAMA_URL` |
+| Panneau « Olivia n'est pas encore prête » | taper les commandes `ollama pull` proposées ; le panneau disparaît seul une fois le modèle installé |
+| « Olivia ne répond plus » (application de bureau) | icône Olivia → *Redémarrer Olivia* ; sinon consulter `olivia.log` |
+| « Olivia ne répond pas » (navigateur) | la fenêtre noire du lanceur a été fermée : relancer Olivia |
 | Réponses extrêmement lentes | le mode GPU est choisi sur un poste sans carte adaptée : passer en 🧩 CPU |
 | L'écran de connexion dit qu'il n'y a aucun compte | créer le premier compte ([Comptes](#-comptes-et-organisations)) |
 | « Trop de tentatives » (HTTP 429) | attendre le délai affiché ; il double à chaque nouvel échec |
@@ -903,19 +917,21 @@ Publier une version : augmenter `version` dans `desktop/package.json`, commiter,
   moins d'une seconde à la fermeture comme après un plantage, navigation externe bloquée). Pas
   encore vérifiés sur de vrais postes : installeurs, premier lancement non signé sur macOS,
   droits de `C:\ProgramData\Olivia`, icônes, raccourci global, mise à jour automatique. Le
-  workflow CI n'a pas encore été exécuté.
+  workflow « Application de bureau » n'a pas encore été exécuté.
+- **Panneau « Olivia n'est pas encore prête »** : vérifié dans Chromium avec un Ollama simulé ;
+  les consignes d'installation (application Ollama, commande `ollama` dans le Terminal ou
+  l'Invite de commandes) restent à confirmer sur de vrais postes Mac et Windows.
 - **Mac Intel** : non couvert par la CI (`macos-latest` construit pour Apple Silicon).
 - **Installeur Inno Setup** et **ACL NSIS** : non recompilés ni testés après les dernières
   modifications.
 - **Fenêtre de contexte** : `num_ctx` n'est pas fixé, Ollama applique sa valeur par défaut ;
   de longs documents ajoutés à la conversation peuvent donc être tronqués par le moteur
   lui-même, au-delà des bornes signalées par Olivia.
-- Le message « moteur d'IA injoignable » parle de la « fenêtre noire » du lanceur, qui
-  n'existe pas dans l'application de bureau : texte à adapter.
 - **Versions non alignées** entre composants (voir [Versions](#️-versions)).
 - **Pas de suppression de compte** en ligne de commande.
 - **Connecteurs Obsidian et Notion** : squelettes.
-- **Python 3.10, 3.12 à 3.14** : déclarés compatibles par `requirements.txt`, non testés ici.
+- **Python 3.10, 3.12 à 3.14** : déclarés compatibles par `requirements.txt` ; testés par le
+  workflow « Tests » à partir de son premier passage.
 
 ---
 
@@ -930,6 +946,7 @@ Olivia/
 ├── start-ollama.ps1       ← lance Ollama seul (Windows)
 ├── ai-webapp.ico          ← icône de l'exécutable Windows
 ├── visuel/logo.png
+├── .github/workflows/tests.yml    ← CI : tests sur chaque PR
 ├── .github/workflows/bureau.yml   ← CI : installeurs macOS et Windows
 ├── installer Olivia/olivia.iss    ← installeur Inno Setup
 ├── portable/              ← Lancer-Olivia.bat, Creer-un-compte.bat, LISEZ-MOI.txt
@@ -964,6 +981,7 @@ Olivia/
 │   ├── ocr.py             ← OCR Tesseract
 │   ├── docgen.py          ← production des documents Word (types, formules)
 │   ├── docmodele.py       ← modèle Word de l'établissement
+│   ├── moteur.py          ← état du moteur d'IA (Ollama joignable, modèles installés)
 │   ├── connectors/        ← imap_client.py, oauth_providers.py (calendrier .ics)
 │   ├── requirements.txt
 │   └── .env.example
@@ -971,7 +989,7 @@ Olivia/
     ├── package.json, vite.config.js, index.html
     └── src/
         ├── main.js, App.vue, style.css
-        ├── stores/          ← chat.js, settings.js, auth.js
+        ├── stores/          ← chat.js, settings.js, auth.js, moteur.js
         └── components/
             ├── LoginView.vue         ← connexion (sans inscription)
             ├── ChatPanel.vue         ← conversation, recherche web, création de documents Word
@@ -983,6 +1001,7 @@ Olivia/
             ├── ModelPicker.vue       ← GPU / CPU
             ├── ConnectedTools.vue    ← barre des outils connectés
             ├── ConsentBanner.vue     ← bandeau RGPD
+            ├── MoteurAssistant.vue   ← panneau « Olivia n'est pas encore prête »
             └── SettingsMenu.vue      ← 6 onglets de Paramètres
 ```
 
@@ -1001,6 +1020,6 @@ Ignorés par Git : `backend/profiles/`, `backend/.env`, `olivia.ini`, `ollama/`,
 | 04/10/2026 — PR #2 | Import sans écrasement ; purge RGPD de l'index non annulable |
 | 04/10/2026 — PR #3 | Erreurs du moteur affichées dans le chat ; secrets masqués dans l'export RGPD |
 | 04/10/2026 — PR #4 | Connexion robuste (temporisation, temps constant, 600 000 itérations, sessions révoquées) ; validation des réglages ; dépendances npm à jour |
-| 04/10/2026 — PR #5 | Points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet |
+| 04/10/2026 — PR #5 | Points mineurs (aperçu PDF, GPU/CPU après effacement, `.env`, API dépréciées) ; **application de bureau macOS et Windows** ; README complet ; panneau « Olivia n'est pas encore prête » ; messages d'erreur adaptés à l'application de bureau ; workflow de tests sur les PR |
 
 Détail : `git log`.

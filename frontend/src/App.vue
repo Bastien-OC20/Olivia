@@ -88,6 +88,8 @@
       @open-mail="settings.show()"
     />
 
+    <MoteurAssistant />
+
     <main
       id="contenu"
       class="main"
@@ -155,6 +157,7 @@ import { onMounted, ref, computed, watch } from 'vue'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
 import { useAuthStore } from './stores/auth.js'
+import { useMoteurStore } from './stores/moteur.js'
 import LoginView from './components/LoginView.vue'
 import ModelPicker from './components/ModelPicker.vue'
 import FileExplorer from './components/FileExplorer.vue'
@@ -163,11 +166,13 @@ import ConversationList from './components/ConversationList.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
 import ConnectedTools from './components/ConnectedTools.vue'
 import ConsentBanner from './components/ConsentBanner.vue'
+import MoteurAssistant from './components/MoteurAssistant.vue'
 import logoUrl from './assets/logo-mark.png'
 
 const chat = useChatStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
+const moteur = useMoteurStore()
 const settingsMenu = ref(null)
 
 const device = computed(() => settings.data.compute_device || 'gpu')
@@ -191,19 +196,40 @@ onMounted(() => {
 // démonte LoginView avant que celui-ci n'ait pu émettre quoi que ce soit — un
 // `@connecte` ne partait jamais. Ici, une seule voie sert les deux cas (cookie
 // encore valide au démarrage, et connexion réussie).
-watch(() => auth.connecte, (ouverte) => { if (ouverte) demarrer() })
+watch(() => auth.connecte, (ouverte) => {
+  if (ouverte) demarrer()
+  else moteur.arreter()          // déconnexion ou session expirée
+})
+
+// Le modèle indispensable dépend du mode de calcul (⚡ GPU / 🧩 CPU) : après un
+// changement enregistré (barre du haut ou Paramètres), celui de l'autre mode
+// peut manquer. On revérifie une fois la sauvegarde terminée, pas avant : le
+// backend lit le réglage enregistré.
+let peripheriqueVerifie = null
+watch(() => settings.saving, (enCours) => {
+  if (enCours || !auth.connecte) return
+  if (settings.data.compute_device !== peripheriqueVerifie) {
+    peripheriqueVerifie = settings.data.compute_device
+    moteur.signalerPanne()
+  }
+})
 
 /** Charge les données de l'organisation connectée. Pas de `location.reload()` :
  *  l'application est déjà montée, un rechargement ne ferait que refaire ces
  *  trois appels en repartant de zéro. */
 async function demarrer() {
   await settings.load()
+  peripheriqueVerifie = settings.data.compute_device
   chat.loadModels(settings.data.device_models?.[device.value] || [])
   chat.loadConversations()
+  // Moteur d'IA prêt ? Sinon, panneau d'aide (poste neuf, Ollama arrêté). Quand
+  // il le devient, la liste des modèles est rechargée pour choisir le bon.
+  moteur.demarrer(() => chat.loadModels(settings.data.device_models?.[device.value] || []))
 }
 
 async function deconnexion() {
   await auth.deconnexion()
+  moteur.arreter()
   // Le poste peut être partagé : rien du compte précédent ne doit rester à
   // l'écran ni en mémoire pour la personne qui se connectera ensuite.
   chat.clear()
