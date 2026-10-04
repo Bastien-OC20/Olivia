@@ -405,6 +405,7 @@ En mode `-Update`, la synchronisation est un miroir, sauf ces éléments préser
 | `ai-webapp\tesseract\` | moteur OCR (~190 Mo) |
 | `ai-webapp\_internal\backend\profiles\` | comptes, organisations, sessions, et pour chaque organisation réglages, conversations, index et modèle Word |
 | `ai-webapp\_internal\backend\settings.json` | réglages de l'ancien mode mono-organisation (plus lus, conservés par prudence) |
+| `ai-webapp\_internal\backend\.env` | configuration propre au disque (`OLLAMA_URL`, `FS_ROOT`…), jamais embarquée dans le build |
 | `ai-webapp\_internal\backend\ocr_cache\` | cache OCR, reconstructible mais coûteux |
 
 Garde-fous : lecteur absent refusé ; dossier non vide qui ne ressemble pas à une installation
