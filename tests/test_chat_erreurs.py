@@ -29,10 +29,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(sessions, "SESSIONS_PATH", dossier / "sessions.json")
     monkeypatch.setattr(settings, "registry", settings.SettingsRegistry())
     pid = profiles.create_profile("Org")["id"]
-    users.create_user("marie", "secret1", pid)
+    users.create_user("marie", "Secret-01", pid)
     c = TestClient(main.app)
     assert c.post("/api/auth/login",
-                  json={"username": "marie", "password": "secret1"}).status_code == 200
+                  json={"username": "marie", "password": "Secret-01"}).status_code == 200
     c.profile_id = pid
     return c
 

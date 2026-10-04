@@ -45,15 +45,15 @@ def env(tmp_path, monkeypatch):
 
     pa = profiles.create_profile("Org A")
     pb = profiles.create_profile("Org B")
-    users.create_user("alice", "passA1", pa["id"])
-    users.create_user("bob", "passB1", pb["id"])
+    users.create_user("alice", "PassA-001", pa["id"])
+    users.create_user("bob", "PassB-001", pb["id"])
 
     alice = TestClient(main.app)
     bob = TestClient(main.app)
     assert alice.post("/api/auth/login",
-                      json={"username": "alice", "password": "passA1"}).status_code == 200
+                      json={"username": "alice", "password": "PassA-001"}).status_code == 200
     assert bob.post("/api/auth/login",
-                    json={"username": "bob", "password": "passB1"}).status_code == 200
+                    json={"username": "bob", "password": "PassB-001"}).status_code == 200
     assert alice.put("/api/settings", json={"fs_roots": [str(docs_a)]}).status_code == 200
     assert bob.put("/api/settings", json={
         "fs_roots": [str(docs_b)],

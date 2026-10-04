@@ -491,14 +491,29 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 - **CORS restreint** au poste local (plus de wildcard).
 - Écoute sur `127.0.0.1` par défaut.
 - Upload : allowlist d'extensions, nom assaini, taille max, sandbox.
+- **Réglages validés** (`PUT /api/settings`) : chaque réglage connu a un type et des bornes
+  (température de 0 à 2, choix fermés, textes de longueur bornée…) ; une valeur invalide est refusée
+  (HTTP 400, message nommant le champ) au lieu d'être enregistrée puis de faire échouer le modèle.
+  Une clé inconnue, héritée d'une ancienne version, est ignorée sans bloquer l'enregistrement.
 - **Comptes et sessions** — écran de connexion dans l'interface (voir
   [🔐 Comptes et organisations](#-comptes-et-organisations)) : `POST /api/auth/login` ouvre une
   session (cookie `olivia_session`, `HttpOnly`, `SameSite=Lax`, 8 h) ; `POST /api/auth/logout` la
   ferme ; `GET /api/auth/me` renvoie le compte et l'organisation connectés, et sert à l'interface
   à savoir si elle doit afficher l'écran de connexion. Les comptes se créent avec
-  `python backend/manage_users.py` (mots de passe dérivés en PBKDF2-HMAC-SHA256 salé, jamais
-  stockés en clair). Remplace l'ancien jeton statique partagé `API_TOKEN` / `X-API-Token`, qui
-  n'identifiait personne.
+  `ai-webapp.exe init` (ou `python backend/manage_users.py`). Remplace l'ancien jeton statique
+  partagé `API_TOKEN` / `X-API-Token`, qui n'identifiait personne.
+- **Mots de passe** — jamais stockés en clair : dérivé PBKDF2-HMAC-SHA256 salé, **600 000
+  itérations** (recommandation OWASP), nombre d'itérations stocké avec le dérivé ; un compte à
+  l'ancien format (200 000) est remis à niveau à sa connexion suivante. À la création :
+  **8 caractères minimum, 3 types parmi** minuscules, majuscules, chiffres, caractères spéciaux.
+- **Temporisation des échecs** (`backend/tentatives.py`) — à partir du 3ᵉ échec consécutif sur un
+  identifiant, attente qui double à chaque échec (20 s, 40 s, 80 s…, 1 h au plus), et 25 échecs
+  au plus sur 24 h glissantes ; pendant l'attente, même le bon mot de passe est refusé (HTTP 429).
+  Un identifiant inconnu est traité exactement comme un vrai, et répond dans le même temps : ni
+  la réponse ni le chronomètre ne révèlent quels comptes existent. Ces règles suivent le cas
+  « mot de passe + restriction d'accès » de la recommandation CNIL n° 2022-100 du 21 juillet 2022.
+- **Compte supprimé** — sa session est refusée et supprimée dès la requête suivante (auparavant,
+  elle restait valable jusqu'à 8 h).
 - Extensions lisibles : `.txt .md .py .js .ts .vue .json .yaml .yml .csv .html .css .log .sh`.
 
 ## 🔍 Recherche web
@@ -634,6 +649,7 @@ ai-webapp/
 │   ├── profiles.py        ← registre des organisations, cloisonnement par dossier
 │   ├── emplacements.py    ← où vivent les données (backend/ ou C:\ProgramData\Olivia)
 │   ├── users.py           ← comptes (mots de passe PBKDF2-HMAC-SHA256 salés)
+│   ├── tentatives.py      ← temporisation des échecs de connexion
 │   ├── sessions.py        ← sessions par cookie (jetons opaques, TTL 8 h)
 │   ├── manage_users.py    ← CLI de provisionnement (organisations + comptes)
 │   ├── conversations.py   ← historique par organisation : un JSON par conversation, écriture atomique

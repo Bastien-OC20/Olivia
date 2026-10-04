@@ -68,7 +68,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from .settings import reglages, style_directives
+from .settings import reglages, style_directives, valider_patch
 from .search import web_search
 from . import documents
 from . import docsearch
@@ -79,6 +79,7 @@ from . import ocr
 from . import conversations
 from . import profiles
 from . import sessions
+from . import tentatives
 from . import users
 from . import zones
 from .connectors import (
@@ -250,10 +251,22 @@ def _identite(user: dict) -> dict:
 
 
 def get_current_session(request: Request) -> dict:
-    """Session résolue depuis le cookie, ou 401 si absente/invalide/expirée."""
-    session = sessions.resolve_session(request.cookies.get(COOKIE_SESSION, ""))
+    """Session résolue depuis le cookie, ou 401 si absente/invalide/expirée.
+
+    Le compte doit aussi EXISTER encore, et appartenir toujours à l'organisation
+    de la session : un compte supprimé (ou rattaché ailleurs) dans users.json
+    gardait sinon l'accès aux données de son ancienne organisation jusqu'à
+    l'expiration de sa session, jusqu'à 8 heures plus tard. La session orpheline
+    est supprimée au passage.
+    """
+    jeton = request.cookies.get(COOKIE_SESSION, "")
+    session = sessions.resolve_session(jeton)
     if session is None:
         raise HTTPException(401, "Session absente, invalide ou expirée")
+    user = users.get_user(session.get("user_id", ""))
+    if user is None or user.get("profile_id") != session.get("profile_id"):
+        sessions.delete_session(jeton)
+        raise HTTPException(401, "Compte supprimé ou modifié : reconnectez-vous")
     return session
 
 
@@ -271,13 +284,31 @@ def get_current_profile(request: Request) -> str:
     return profile_id
 
 
+# Route volontairement SYNCHRONE (def et non async def) : la vérification du
+# mot de passe (PBKDF2, environ 0,2 s) est un calcul bloquant. En `async def`,
+# elle figeait tout le serveur — y compris les réponses du chat en cours chez
+# d'autres utilisatrices — le temps de chaque tentative ; FastAPI l'exécute
+# désormais dans son pool de threads.
 @app.post("/api/auth/login")
-async def auth_login(demande: DemandeConnexion, response: Response):
-    """Vérifie les identifiants et ouvre une session."""
+def auth_login(demande: DemandeConnexion, response: Response):
+    """Vérifie les identifiants et ouvre une session (avec temporisation des
+    échecs, voir tentatives.py)."""
+    attente = tentatives.attente_restante(demande.username)
+    if attente > 0:
+        # Contrôlé AVANT le mot de passe : pendant l'attente, même le bon est
+        # refusé, sans quoi la temporisation ne protégerait rien.
+        raise HTTPException(
+            429,
+            "Trop de tentatives de connexion pour cet identifiant. Réessayez dans "
+            f"{tentatives.formater_attente(attente)}.",
+            headers={"Retry-After": str(int(attente) + 1)},
+        )
     user = users.verify_credentials(demande.username, demande.password)
     if user is None:
+        tentatives.noter_echec(demande.username)
         # Message volontairement unique : ne dit pas si le compte existe.
         raise HTTPException(401, "Identifiant ou mot de passe incorrect")
+    tentatives.noter_succes(demande.username)
     try:
         token = sessions.create_session(user["id"], user["profile_id"])
     except OSError as e:
@@ -1133,8 +1164,13 @@ async def get_settings(profile_id: str = Depends(get_current_profile)):
 
 @app.put("/api/settings")
 async def update_settings(patch: dict, profile_id: str = Depends(get_current_profile)):
-    if not isinstance(patch, dict):
-        raise HTTPException(400, "Body doit être un objet JSON")
+    # Types et bornes de chaque réglage connu (voir settings.valider_patch) :
+    # une valeur invalide est refusée ici, avec un message qui nomme le champ,
+    # au lieu d'être enregistrée puis de faire échouer chaque appel au modèle.
+    try:
+        patch = valider_patch(patch)
+    except ValueError as e:
+        raise HTTPException(400, f"Réglage refusé : {e}")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
     # Plus un réglage : l'emplacement du modèle Word est fixé par le code, un

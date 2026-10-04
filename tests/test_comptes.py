@@ -64,7 +64,7 @@ def test_etat_sans_compte_puis_avec(stockage):
     assert client.get("/api/auth/etat").json() == {"comptes": False}
     pid = profiles.create_profile("Org")["id"]
     assert client.get("/api/auth/etat").json() == {"comptes": False}   # profil seul
-    users.create_user("marie", "secret1", pid)
+    users.create_user("marie", "Secret-01", pid)
     assert client.get("/api/auth/etat").json() == {"comptes": True}
 
 
@@ -76,18 +76,18 @@ def test_etat_fichier_illisible_n_invite_pas_a_creer(stockage):
 
 # ---------- Assistant `init` ----------
 def test_init_installation_neuve(stockage, monkeypatch, capsys):
-    _clavier(monkeypatch, ["Lycée de l'Olivier", "marie"], ["secret1", "secret1"])
+    _clavier(monkeypatch, ["Lycée de l'Olivier", "marie"], ["Secret-01", "Secret-01"])
     assert manage_users.main(["init"]) == 0
     noms = [p["name"] for p in profiles.list_profiles()]
     assert noms == ["Lycée de l'Olivier"]
-    assert _connexion("marie", "secret1").status_code == 200
+    assert _connexion("marie", "Secret-01").status_code == 200
     assert "Compte « marie » créé" in capsys.readouterr().out
 
 
 def test_init_abandon_ne_laisse_aucune_organisation_vide(stockage, monkeypatch):
     # Mot de passe confirmé de travers trois fois : abandon.
     _clavier(monkeypatch, ["Org fantôme", "marie"],
-             ["secret1", "autre1"] * manage_users.ESSAIS_MOT_DE_PASSE)
+             ["Secret-01", "Autre-001"] * manage_users.ESSAIS_MOT_DE_PASSE)
     assert manage_users.main(["init"]) == 1
     assert profiles.list_profiles() == []
     assert not users.existe_un_compte()
@@ -95,22 +95,22 @@ def test_init_abandon_ne_laisse_aucune_organisation_vide(stockage, monkeypatch):
 
 def test_init_rattache_a_une_organisation_existante(stockage, monkeypatch):
     org = profiles.create_profile("Mairie")
-    users.create_user("paul", "secret1", org["id"])
+    users.create_user("paul", "Secret-01", org["id"])
     # « x » : choix invalide ; « paul » : déjà pris ; « abc » : mot de passe trop court.
-    _clavier(monkeypatch, ["x", "1", "paul", "julie"], ["abc", "secret2", "secret2"])
+    _clavier(monkeypatch, ["x", "1", "paul", "julie"], ["abc", "Secret-02", "Secret-02"])
     assert manage_users.main(["init"]) == 0
     assert len(profiles.list_profiles()) == 1          # aucune organisation ajoutée
     julie = users.get_user_by_username("julie")
     assert julie["profile_id"] == org["id"]
-    assert _connexion("julie", "secret2").status_code == 200
+    assert _connexion("julie", "Secret-02").status_code == 200
 
 
 # ---------- create-user : mot de passe demandé, plus en argument ----------
 def test_create_user_demande_le_mot_de_passe(stockage, monkeypatch):
     pid = profiles.create_profile("Org")["id"]
-    _clavier(monkeypatch, [], ["secret1", "secret1"])
+    _clavier(monkeypatch, [], ["Secret-01", "Secret-01"])
     assert manage_users.main(["create-user", "marie", pid]) == 0
-    assert _connexion("marie", "secret1").status_code == 200
+    assert _connexion("marie", "Secret-01").status_code == 200
 
 
 def test_create_user_profil_inconnu_avant_toute_saisie(stockage, monkeypatch):
@@ -121,9 +121,9 @@ def test_create_user_profil_inconnu_avant_toute_saisie(stockage, monkeypatch):
 
 def test_create_user_ancienne_forme_acceptee_avec_avertissement(stockage, capsys):
     pid = profiles.create_profile("Org")["id"]
-    assert manage_users.main(["create-user", "marie", "secret1", pid]) == 0
+    assert manage_users.main(["create-user", "marie", "Secret-01", pid]) == 0
     assert "historique du terminal" in capsys.readouterr().err
-    assert _connexion("marie", "secret1").status_code == 200
+    assert _connexion("marie", "Secret-01").status_code == 200
 
 
 # ---------- Relais par le lanceur (ai-webapp.exe init) ----------
@@ -133,7 +133,7 @@ def test_lanceur_relaie_les_commandes_sans_rien_demarrer(stockage, monkeypatch):
     monkeypatch.setattr(launch, "start_ollama", _interdit)
     monkeypatch.setattr(launch, "run_source", _interdit)
     monkeypatch.setattr(launch, "run_frozen", _interdit)
-    _clavier(monkeypatch, ["Org", "marie"], ["secret1", "secret1"])
+    _clavier(monkeypatch, ["Org", "marie"], ["Secret-01", "Secret-01"])
     monkeypatch.setattr(sys, "argv", ["launch.py", "init"])
     assert launch.main() == 0
-    assert _connexion("marie", "secret1").status_code == 200
+    assert _connexion("marie", "Secret-01").status_code == 200

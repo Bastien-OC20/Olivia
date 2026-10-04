@@ -25,10 +25,10 @@ def client(tmp_path, monkeypatch):
     docs = tmp_path / "docs"
     docs.mkdir()
     pid = profiles.create_profile("Org")["id"]
-    users.create_user("marie", "secret1", pid)
+    users.create_user("marie", "Secret-01", pid)
     c = TestClient(main.app)
     assert c.post("/api/auth/login",
-                  json={"username": "marie", "password": "secret1"}).status_code == 200
+                  json={"username": "marie", "password": "Secret-01"}).status_code == 200
     assert c.put("/api/settings", json={"fs_roots": [str(docs)]}).status_code == 200
     c.docs = docs
     yield c
