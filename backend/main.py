@@ -48,6 +48,7 @@ une session ouverte et ne travaille que
 sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
 identifiant d'organisation n'est jamais accepté depuis le client.
 """
+import json
 import os
 import re
 import sys
@@ -484,23 +485,37 @@ def _list_dir_items(p: Path, root: Path, prefix: str) -> list[dict]:
 TOP_LEVEL_SECRET_KEYS = {"search_brave_api_key"}
 
 
-def _mask_secrets(data: dict) -> dict:
-    """Masque les secrets dans la réponse GET /api/settings (défense en profondeur).
-    L'UI n'a pas besoin de relire les mots de passe ; elle ne réécrit que ce qui change.
+def _masquer_secrets(data: dict) -> tuple[dict, list[str]]:
+    """Copie des réglages avec les secrets masqués, et la liste de ceux qui l'ont
+    été (« connectors.imap.password », « search_brave_api_key »…).
+
+    Seul point de masquage, partagé par GET/PUT /api/settings et par l'export
+    RGPD : un secret ajouté un jour aux réglages n'a qu'un endroit où être
+    déclaré pour n'apparaître dans aucune réponse.
     """
     import copy
     d = copy.deepcopy(data)
+    masques: list[str] = []
     secret_keys = {"password", "api_token", "client_secret_path"}
-    for conn in d.get("connectors", {}).values():
+    for nom, conn in d.get("connectors", {}).items():
         if isinstance(conn, dict):
             for k in list(conn.keys()):
                 if k in secret_keys and conn[k]:
                     conn[k] = "••••••••"
+                    masques.append(f"connectors.{nom}.{k}")
     # Secrets hors bloc connecteurs (clé d'API du moteur de recherche).
-    for k in TOP_LEVEL_SECRET_KEYS:
+    for k in sorted(TOP_LEVEL_SECRET_KEYS):
         if d.get(k):
             d[k] = "••••••••"
-    return d
+            masques.append(k)
+    return d, masques
+
+
+def _mask_secrets(data: dict) -> dict:
+    """Masque les secrets dans la réponse GET /api/settings (défense en profondeur).
+    L'UI n'a pas besoin de relire les mots de passe ; elle ne réécrit que ce qui change.
+    """
+    return _masquer_secrets(data)[0]
 
 
 # ---------- Routes Ollama ----------
@@ -594,15 +609,60 @@ async def chat_stream(req: ChatRequest, profile_id: str = Depends(get_current_pr
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=body) as resp:
+                    if resp.status_code >= 400:
+                        # Modèle absent, requête refusée… Ollama répond alors par
+                        # un code d'erreur et un corps {"error": "..."} : relayé
+                        # tel quel, il n'était pas reconnu par l'interface, qui
+                        # affichait une bulle vide.
+                        brut = (await resp.aread()).decode("utf-8", "replace")
+                        yield _ligne_sse({"error": _erreur_ollama_lisible(
+                            resp.status_code, brut, req.model)})
+                        return
                     async for line in resp.aiter_lines():
                         if line:
                             yield f"data: {line}\n\n"
+        except httpx.ConnectError:
+            yield _ligne_sse({"error": MESSAGE_OLLAMA_INJOIGNABLE})
         except httpx.HTTPError as e:
-            yield f'data: {{"error": "Ollama error: {str(e)}"}}\n\n'
+            yield _ligne_sse({"error": f"La connexion au moteur d'IA a été interrompue ({e})."})
         except Exception as e:
-            yield f'data: {{"error": "{str(e)}"}}\n\n'
+            yield _ligne_sse({"error": f"Erreur inattendue pendant la réponse : {e}"})
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# Ollama éteint : le cas le plus fréquent en pratique (fenêtre du lanceur fermée,
+# moteur pas encore démarré). Formulé pour l'utilisatrice, pas pour un technicien.
+MESSAGE_OLLAMA_INJOIGNABLE = (
+    "Le moteur d'IA (Ollama) ne répond pas. Vérifiez qu'Olivia a bien été lancée "
+    "et que sa fenêtre noire est toujours ouverte, puis réessayez."
+)
+
+
+def _ligne_sse(donnees: dict) -> str:
+    """Événement SSE dont la charge est TOUJOURS un JSON valide.
+
+    Les messages d'erreur étaient auparavant insérés dans un JSON écrit à la
+    main : un guillemet dans le message (fréquent, Ollama cite le nom du
+    modèle) rendait la ligne illisible, et l'interface l'ignorait en silence.
+    """
+    return f"data: {json.dumps(donnees, ensure_ascii=False)}\n\n"
+
+
+def _erreur_ollama_lisible(statut: int, corps: str, modele: str) -> str:
+    """Message en français pour une réponse d'erreur d'Ollama."""
+    detail = corps.strip()
+    try:
+        charge = json.loads(corps)
+        if isinstance(charge, dict) and charge.get("error"):
+            detail = str(charge["error"])
+    except ValueError:
+        pass
+    if statut == 404 and "not found" in detail.lower():
+        return (f"Le modèle « {modele} » n'est pas installé sur ce poste. "
+                "Choisissez-en un autre, ou demandez au service informatique de "
+                "l'installer.")
+    return f"Le moteur d'IA a refusé la demande (erreur {statut}) : {detail[:300]}"
 
 
 @app.post("/api/chat")
@@ -1492,14 +1552,30 @@ async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
 @app.get("/api/privacy/export")
 async def privacy_export(profile_id: str = Depends(get_current_profile)):
     """Droit d'accès/portabilité : export des données locales de l'organisation
-    connectée (ses réglages et ses conversations), et d'elle seule."""
+    connectée (ses réglages et ses conversations), et d'elle seule.
+
+    Les SECRETS (mot de passe IMAP, clé d'API, jeton Notion) sont masqués,
+    comme dans GET /api/settings. L'export est un fichier téléchargé, qui finit
+    dans un dossier Téléchargements, une pièce jointe ou une clé USB : y écrire
+    le mot de passe de la boîte mail professionnelle en clair le ferait fuiter
+    bien plus sûrement que l'application elle-même. Ce sont des identifiants
+    d'accès à des services tiers, pas des données sur la personne : l'export
+    dit qu'ils existent et qu'ils ont été masqués, ce qui suffit au droit
+    d'accès, et ils se ressaisissent dans les Paramètres.
+    """
     profil = profiles.get_profile(profile_id)
+    reglages_exportes, secrets_masques = _masquer_secrets(reglages(profile_id).get())
+    note = ("Toutes vos données restent sur cette machine. Aucun envoi externe. "
+            "Cet export ne contient que les données de votre organisation.")
+    if secrets_masques:
+        note += (" Par sécurité, les mots de passe et clés d'accès enregistrés sont "
+                 "masqués (••••••••) : voir « secrets_masques ».")
     payload = {
         "organisation": (profil or {}).get("name", ""),
-        "settings": reglages(profile_id).get(),
+        "settings": reglages_exportes,
+        "secrets_masques": secrets_masques,
         "conversations": conversations.export_all_conversations(profile_id),
-        "note": "Toutes vos données restent sur cette machine. Aucun envoi externe. "
-                "Cet export ne contient que les données de votre organisation.",
+        "note": note,
     }
     return JSONResponse(
         payload,
