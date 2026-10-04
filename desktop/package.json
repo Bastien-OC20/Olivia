@@ -2,7 +2,7 @@
   "name": "olivia-desktop",
   "productName": "Olivia",
   "version": "1.0.0",
-  "description": "Olivia, assistante locale pour le secrétariat — application de bureau (macOS, Windows)",
+  "description": "Oliv'IA, assistante locale pour le secrétariat — application de bureau (macOS, Windows)",
   "author": "Lycée de l'Olivier",
   "license": "UNLICENSED",
   "private": true,
@@ -53,10 +53,14 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "CFBundleName": "Oliv'IA",
+        "CFBundleDisplayName": "Oliv'IA"
+      }
     },
     "dmg": {
-      "title": "Olivia"
+      "title": "Oliv'IA"
     },
     "win": {
       "target": [
@@ -70,9 +74,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Olivia",
+      "shortcutName": "Oliv'IA",
       "include": "build/installer.nsh",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "Oliv'IA ${version}"
     },
     "linux": {
       "target": [

@@ -1,10 +1,10 @@
 ========================================================
-  OLIVIA - assistante locale, version portable
+  OLIV'IA - assistante locale, version portable
 ========================================================
 
 PREMIERE UTILISATION : CREER UN COMPTE
 --------------------------------------
-Olivia demande un identifiant et un mot de passe. Au depart,
+Oliv'IA demande un identifiant et un mot de passe. Au depart,
 aucun compte n'existe : la personne qui s'occupe de
 l'informatique en cree un, une seule fois.
 
@@ -16,10 +16,10 @@ POUR DEMARRER
 -------------
 Double-cliquez sur "Lancer-Olivia.bat".
 
-Le navigateur s'ouvre tout seul sur Olivia.
+Le navigateur s'ouvre tout seul sur Oliv'IA.
 Une fenetre noire reste ouverte : c'est normal, c'est elle
 qui fait tourner l'assistante. Ne la fermez pas tant que
-vous utilisez Olivia.
+vous utilisez Oliv'IA.
 
 POUR QUITTER
 ------------
@@ -64,7 +64,7 @@ BON A SAVOIR
   pas signee numeriquement : cliquez sur "Informations
   complementaires" puis "Executer quand meme".
 
-* Rapidite : au premier demarrage, Olivia choisit seule
+* Rapidite : au premier demarrage, Oliv'IA choisit seule
   entre la carte graphique (mode "Rapide") et le processeur
   (mode "Standard") selon l'ordinateur. Le bouton en haut
   de l'ecran permet de changer de mode a tout moment.

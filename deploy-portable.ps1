@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installe ou met à jour Olivia sur un disque portable (clé USB, disque externe).
+    Installe ou met à jour Oliv'IA sur un disque portable (clé USB, disque externe).
 
 .DESCRIPTION
     Enchaîne les étapes d'un déploiement portable :
@@ -58,7 +58,7 @@
 
 .PARAMETER Force
     Autorise l'écriture dans un dossier non vide qui ne ressemble pas à une
-    installation Olivia (garde-fou contre une erreur de lettre de lecteur).
+    installation Oliv'IA (garde-fou contre une erreur de lettre de lecteur).
 
 .EXAMPLE
     .\deploy-portable.ps1
@@ -145,7 +145,7 @@ function Select-Destination {
         $dejaInstalle = Test-Path "${lettre}:\Olivia\ai-webapp\ai-webapp.exe"
         $note = ''
         $couleur = 'Gray'
-        if ($dejaInstalle) { $note = '  <- Olivia deja installee'; $couleur = 'Green' }
+        if ($dejaInstalle) { $note = '  <- Oliv''IA deja installee'; $couleur = 'Green' }
         elseif ($libre -lt $ESPACE_MINI_GO) { $note = '  (espace insuffisant)'; $couleur = 'DarkGray' }
         elseif ($lettre -eq $systeme) { $note = '  (disque systeme)'; $couleur = 'DarkGray' }
         Write-Host ("  {0}:  {1,7} Go libres   {2}{3}" -f $lettre, $libre, $nom, $note) `
@@ -171,12 +171,12 @@ function Select-Destination {
                'Branchez le disque portable, ou indiquez -Destination explicitement.')
     }
     $defaut = "$($choix.Lettre):\Olivia"
-    return Read-Choix "Ou installer Olivia ? [$defaut]" $defaut
+    return Read-Choix "Ou installer Oliv'IA ? [$defaut]" $defaut
 }
 
 
 Write-Host ''
-Write-Host 'Olivia - deploiement portable' -ForegroundColor Green
+Write-Host 'Oliv''IA - deploiement portable' -ForegroundColor Green
 Write-Host "Source : $root"
 
 if (-not $ollamaSource -or -not (Test-Path $ollamaSource)) {
@@ -315,7 +315,7 @@ if (Test-Path (Join-Path $ollamaDest 'ollama.exe')) {
     if ($LASTEXITCODE -ge 8) { throw "robocopy (ollama) a echoue (code $LASTEXITCODE)." }
 } else {
     Write-Etape 'Moteur Ollama : introuvable dans le projet, etape ignoree'
-    Write-Host '  Olivia demarrera, mais ne pourra pas repondre sans moteur.' -ForegroundColor Yellow
+    Write-Host '  Oliv''IA demarrera, mais ne pourra pas repondre sans moteur.' -ForegroundColor Yellow
 }
 
 # --- 3 bis. Moteur de reconnaissance de caracteres (OCR) -------------------

@@ -93,8 +93,8 @@ function lancerBackend (port) {
     pythonDev: outils.pythonDeveloppement({ plateforme: process.platform, depot, existe: fs.existsSync, env: process.env }),
   })
   if (empaquete && !fs.existsSync(commande)) {
-    throw new Error(`Le moteur d'Olivia est introuvable dans l'application (${commande}). `
-      + 'Réinstallez Olivia.')
+    throw new Error(`Le moteur d'Oliv'IA est introuvable dans l'application (${commande}). `
+      + "Réinstallez Oliv'IA.")
   }
   noter(`Lancement : ${commande} ${args.join(' ')}`)
   backend = spawn(commande, args, {
@@ -110,12 +110,12 @@ function lancerBackend (port) {
     noter(`Backend arrêté (code ${code}, signal ${signal})`)
     const inattendu = !enFermeture
     backend = null
-    if (inattendu) afficherErreur("Le moteur d'Olivia s'est arrêté de façon inattendue.")
+    if (inattendu) afficherErreur("Le moteur d'Oliv'IA s'est arrêté de façon inattendue.")
   })
   backend.on('error', (e) => {
     noter(`Échec du lancement : ${e.message}`)
     backend = null
-    afficherErreur(`Impossible de lancer le moteur d'Olivia : ${e.message}`)
+    afficherErreur(`Impossible de lancer le moteur d'Oliv'IA : ${e.message}`)
   })
 }
 
@@ -123,7 +123,7 @@ function attendreBackend () {
   const fin = Date.now() + DELAI_DEMARRAGE_MS
   return new Promise((resolve, reject) => {
     const essayer = () => {
-      if (!backend) return reject(new Error("Le moteur d'Olivia n'a pas pu démarrer."))
+      if (!backend) return reject(new Error("Le moteur d'Oliv'IA n'a pas pu démarrer."))
       const req = http.get(`${baseUrl}/api/health`, (res) => {
         res.resume()
         if (res.statusCode === 200) return resolve()
@@ -133,7 +133,7 @@ function attendreBackend () {
       req.setTimeout(2000, () => req.destroy())
     }
     const planifier = () => {
-      if (Date.now() > fin) return reject(new Error("Olivia met trop de temps à démarrer."))
+      if (Date.now() > fin) return reject(new Error("Oliv'IA met trop de temps à démarrer."))
       setTimeout(essayer, 500)
     }
     essayer()
@@ -171,7 +171,7 @@ function creerFenetre () {
     height: 820,
     minWidth: 900,
     minHeight: 600,
-    title: 'Olivia',
+    title: 'Oliv\'IA',
     icon: path.join(__dirname, 'icons', 'fenetre.png'),
     autoHideMenuBar: true,
     show: false,
@@ -192,8 +192,8 @@ function creerFenetre () {
     if (process.platform === 'win32' && tray && !avertiArrierePlan) {
       avertiArrierePlan = true
       tray.displayBalloon({
-        title: 'Olivia reste disponible',
-        content: 'Olivia continue en arrière-plan. Clic sur son icône, ou Ctrl+Alt+O, '
+        title: 'Oliv\'IA reste disponible',
+        content: 'Oliv\'IA continue en arrière-plan. Clic sur son icône, ou Ctrl+Alt+O, '
           + 'pour la rouvrir. Pour la quitter : clic droit sur l\'icône > Quitter.',
         iconType: 'info',
       })
@@ -226,13 +226,13 @@ function afficherErreur (message) {
 function creerTray () {
   const image = nativeImage.createFromPath(path.join(__dirname, 'icons', 'tray.png'))
   tray = new Tray(image)
-  tray.setToolTip('Olivia')
+  tray.setToolTip('Oliv\'IA')
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Ouvrir Olivia', click: montrerFenetre },
+    { label: 'Ouvrir Oliv\'IA', click: montrerFenetre },
     { label: 'Créer un compte…', click: creerCompte },
     { type: 'separator' },
-    { label: 'Redémarrer Olivia', click: () => { app.relaunch(); app.quit() } },
-    { label: 'Quitter Olivia', click: () => app.quit() },
+    { label: 'Redémarrer Oliv\'IA', click: () => { app.relaunch(); app.quit() } },
+    { label: 'Quitter Oliv\'IA', click: () => app.quit() },
   ]))
   // Windows : un clic sur l'icône ouvre la fenêtre (le menu est au clic droit).
   tray.on('click', basculerFenetre)
@@ -242,24 +242,24 @@ function creerMenu () {
   const surMac = process.platform === 'darwin'
   const modele = [
     ...(surMac ? [{
-      label: 'Olivia',
+      label: 'Oliv\'IA',
       submenu: [
-        { role: 'about', label: 'À propos d\'Olivia' },
+        { role: 'about', label: 'À propos d\'Oliv\'IA' },
         { type: 'separator' },
         { label: 'Créer un compte…', click: creerCompte },
         { type: 'separator' },
-        { role: 'hide', label: 'Masquer Olivia' },
+        { role: 'hide', label: 'Masquer Oliv\'IA' },
         { role: 'hideOthers', label: 'Masquer les autres' },
         { role: 'unhide', label: 'Tout afficher' },
         { type: 'separator' },
-        { role: 'quit', label: 'Quitter Olivia' },
+        { role: 'quit', label: 'Quitter Oliv\'IA' },
       ],
     }] : [{
       label: 'Fichier',
       submenu: [
         { label: 'Créer un compte…', click: creerCompte },
         { type: 'separator' },
-        { role: 'quit', label: 'Quitter Olivia' },
+        { role: 'quit', label: 'Quitter Oliv\'IA' },
       ],
     }]),
     // Indispensable sur macOS : sans menu Édition, Cmd+C / Cmd+V ne
@@ -410,8 +410,8 @@ function verifierMisesAJour () {
       type: 'info',
       buttons: ['Redémarrer maintenant', 'Plus tard'],
       defaultId: 0,
-      message: `Une nouvelle version d'Olivia (${info.version}) est prête.`,
-      detail: 'Elle sera installée au prochain redémarrage d\'Olivia.',
+      message: `Une nouvelle version d'Oliv'IA (${info.version}) est prête.`,
+      detail: "Elle sera installée au prochain redémarrage d'Oliv'IA.",
     })
     if (response === 0) {
       enFermeture = true

@@ -10,7 +10,7 @@
         class="logo"
       >
       <h1 class="titre">
-        Olivia
+        Oliv'IA
       </h1>
       <p class="sous-titre">
         votre assistante — connectez-vous pour commencer
@@ -43,13 +43,13 @@
             Ouvrir l'assistant de création de compte
           </button>
           <span class="discret">
-            (aussi dans le menu, et sur l'icône d'Olivia : « Créer un compte… »)
+            (aussi dans le menu, et sur l'icône d'Oliv'IA : « Créer un compte… »)
           </span>
         </template>
         <ul v-else>
-          <li>Olivia installée : menu Démarrer, <b>Créer un compte Olivia</b> ;</li>
+          <li>Oliv'IA installée : menu Démarrer, <b>Créer un compte Oliv'IA</b> ;</li>
           <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
-          <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Olivia.</li>
+          <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Oliv'IA.</li>
         </ul>
         Revenez ensuite sur cette page pour vous connecter.
       </div>

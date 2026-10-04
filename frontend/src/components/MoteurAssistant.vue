@@ -17,7 +17,7 @@
       <!-- Moteur injoignable : l'installer, ou le démarrer. -->
       <template v-if="!etat.joignable">
         <p>
-          Olivia a besoin du moteur d'IA <b>Ollama</b>, installé sur ce poste, pour converser.
+          Oliv'IA a besoin du moteur d'IA <b>Ollama</b>, installé sur ce poste, pour converser.
           Les documents restent consultables en attendant.
         </p>
         <ol>
@@ -39,7 +39,7 @@
           class="note"
         >
           Version portable ou installée par le service informatique : le moteur est livré avec
-          Olivia et démarre avec elle. S'il ne répond pas, fermez Olivia puis relancez-la.
+          Oliv'IA et démarre avec elle. S'il ne répond pas, fermez Oliv'IA puis relancez-la.
         </p>
       </template>
 
@@ -48,7 +48,7 @@
         <p>
           {{ bloquant
             ? "Le moteur d'IA fonctionne, mais le modèle de conversation n'est pas encore installé."
-            : "Olivia peut converser. Un modèle supplémentaire permettrait aussi de retrouver un document d'après l'idée qu'il contient." }}
+            : "Oliv'IA peut converser. Un modèle supplémentaire permettrait aussi de retrouver un document d'après l'idée qu'il contient." }}
           Ouvrez {{ terminal }}, puis tapez :
         </p>
         <ul class="commandes">
@@ -144,7 +144,7 @@ const bloquant = computed(() => !etat.value.pret)
 
 const titre = computed(() => {
   if (!etat.value.joignable) return "⚠️ Le moteur d'IA ne répond pas"
-  if (bloquant.value) return '⚠️ Olivia n\'est pas encore prête à converser'
+  if (bloquant.value) return '⚠️ Oliv\'IA n\'est pas encore prête à converser'
   return 'ℹ️ Recherche par le sens pas encore disponible'
 })
 

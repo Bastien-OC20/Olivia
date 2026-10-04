@@ -20,7 +20,7 @@
           alt=""
           class="brand-logo"
         >
-        <span class="brand-name">Olivia</span>
+        <span class="brand-name">Oliv'IA</span>
         <span class="brand-sub">votre assistante</span>
       </h1>
 

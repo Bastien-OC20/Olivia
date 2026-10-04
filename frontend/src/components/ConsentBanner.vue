@@ -12,7 +12,7 @@
           Cette application fonctionne <b>100 % en local</b> : vos conversations, fichiers et
           identifiants restent sur cette machine et ne sont envoyés à aucun serveur externe.
           Réglages et conversations sont enregistrés sur ce poste, dans le dossier des données
-          d'Olivia. Vous pouvez à tout
+          d'Oliv'IA. Vous pouvez à tout
           moment exporter ou supprimer vos données depuis <b>Paramètres → Confidentialité</b>.
         </span>
       </div>

@@ -19,10 +19,10 @@ const MESSAGE_MOTEUR_ETEINT = "Le moteur d'IA (Ollama) ne répond pas : il n'est
 // noire, mais l'icône Olivia (desktop/main.js, menu « Redémarrer Olivia ») ;
 // sinon, c'est la fenêtre noire du lanceur qui a été fermée.
 const MESSAGE_OLIVIA_INJOIGNABLE = (typeof window !== 'undefined' && window.oliviaBureau)
-  ? "Olivia ne répond plus. Cliquez sur l'icône Olivia (barre des menus sur Mac, zone "
-    + 'de notification sous Windows), choisissez « Redémarrer Olivia », puis réessayez.'
-  : "Olivia ne répond pas. Vérifiez que sa fenêtre noire est toujours ouverte (sinon, "
-    + 'relancez Olivia), puis réessayez.'
+  ? "Oliv'IA ne répond plus. Cliquez sur l'icône Oliv'IA (barre des menus sur Mac, zone "
+    + 'de notification sous Windows), choisissez « Redémarrer Oliv\'IA », puis réessayez.'
+  : "Oliv'IA ne répond pas. Vérifiez que sa fenêtre noire est toujours ouverte (sinon, "
+    + 'relancez Oliv\'IA), puis réessayez.'
 
 // ---------- Contexte documentaire ----------
 // Un petit modèle local n'a qu'une fenêtre de contexte limitée : on borne donc
@@ -397,7 +397,7 @@ export const useChatStore = defineStore('chat', () => {
         }),
         signal: abortController.value.signal
       })
-      if (!r.ok) throw new Error(`Olivia ne répond pas (erreur ${r.status}).`)
+      if (!r.ok) throw new Error(`Oliv'IA ne répond pas (erreur ${r.status}).`)
       const reader = r.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''

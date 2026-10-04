@@ -294,7 +294,7 @@ def verifier_dossier_donnees() -> bool:
         print(f"❌ Impossible d'écrire dans le dossier des données ({e}).")
         print("   Les connexions échoueront. Le service informatique doit donner le droit")
         print(f"   de modification sur {dossier} aux utilisateurs du poste,")
-        print("   ou réinstaller Olivia avec l'installeur.")
+        print("   ou réinstaller Oliv'IA avec l'installeur.")
         return False
 
 
@@ -408,7 +408,7 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] in COMMANDES_COMPTES:
         return run_comptes(sys.argv[1:])
 
-    parser = argparse.ArgumentParser(description="Lanceur Olivia")
+    parser = argparse.ArgumentParser(description="Lanceur Oliv'IA")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-dev", action="store_true", help="Ne pas lancer Vite (backend seul)")
@@ -422,7 +422,7 @@ def main() -> int:
     args = parser.parse_args()
 
     print("=" * 60)
-    print("🌷 Olivia — lanceur" + ("  [.exe]" if FROZEN else ""))
+    print("🌷 Oliv'IA — lanceur" + ("  [.exe]" if FROZEN else ""))
     print("=" * 60)
     verifier_dossier_donnees()
 

@@ -298,10 +298,10 @@ const texteAucunResultat = computed(() => {
 
 // Texte d'aide sous le champ de recherche, adapté au mode choisi.
 const searchHelpText = computed(() => (searchMode.value === 'semantic'
-  ? 'Décrivez l\'idée recherchée avec vos propres mots — Olivia comprend le sens, '
+  ? 'Décrivez l\'idée recherchée avec vos propres mots — Oliv\'IA comprend le sens, '
     + 'pas seulement les mots exacts. Nécessite d\'avoir construit l\'index dans '
     + 'Paramètres → Documents.'
-  : 'Écrivez simplement les mots à retrouver. Olivia cherche à l\'intérieur de vos '
+  : 'Écrivez simplement les mots à retrouver. Oliv\'IA cherche à l\'intérieur de vos '
     + 'documents Word, Excel, PDF et texte. Ni les majuscules ni les accents n\'ont '
     + 'd\'importance.'))
 
