@@ -37,6 +37,9 @@ backend/ocr_cache/
 backend/docindex/
 backend/.env
 .env
+# Emplacement des données propre au poste (écrit par l'installeur, voir
+# backend/emplacements.py) : jamais versionné.
+olivia.ini
 *.pem
 *.key
 

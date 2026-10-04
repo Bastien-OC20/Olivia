@@ -45,6 +45,7 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
+from . import emplacements
 from .settings import reglages_lus
 
 LANGUE = "fra"
@@ -72,10 +73,11 @@ MAX_CONCURRENCE = 2
 _verrou_moteur = threading.BoundedSemaphore(MAX_CONCURRENCE)
 
 # ---------- Cache disque ----------
-# Volontairement placé dans backend/, à côté des conversations : sur le disque
-# portable, le cache voyage donc avec l'application — c'est voulu, il survit au
-# redémarrage et au débranchement de la clé.
-DOSSIER_CACHE = Path(__file__).resolve().parent / "ocr_cache"
+# Placé avec les autres données d'Olivia (voir emplacements.py) : dans backend/
+# sur le disque portable, où le cache voyage avec l'application et survit au
+# débranchement de la clé ; dans C:\ProgramData\Olivia sur un poste installé,
+# Program Files n'étant pas modifiable par un utilisateur standard.
+DOSSIER_CACHE = emplacements.dossier_donnees() / "ocr_cache"
 VERSION_CACHE = 1                  # à incrémenter si le format du texte produit change
 MAX_FICHIERS_CACHE = 400
 _verrou_cache = threading.Lock()
@@ -146,12 +148,31 @@ def chemin_moteur(profile_id: str) -> Optional[Path]:
     except Exception:
         regle = ""
     if regle:
-        candidat = Path(regle)
-        if candidat.is_dir():
-            candidat = candidat / NOM_EXE
-        if candidat.is_file():
+        candidat = chemin_tesseract_acceptable(Path(regle))
+        if candidat is not None and candidat.is_file():
             return candidat
     return None
+
+
+def chemin_tesseract_acceptable(chemin: Path) -> Optional[Path]:
+    """Exécutable désigné par le réglage `ocr_tesseract_path`, ou None si son
+    nom n'est pas celui du moteur.
+
+    Ce chemin est EXÉCUTÉ (voir `_tesseract`) et il vient d'un réglage modifiable
+    depuis l'interface : sans ce filtre, un compte pouvait faire lancer par
+    Olivia n'importe quel programme du poste. Seul le nom attendu est accepté —
+    aucune route d'Olivia ne permet de créer un fichier portant ce nom.
+    L'existence du fichier n'est PAS vérifiée ici (c'est le rôle de
+    `chemin_moteur`) : un moteur désinstallé ne doit pas empêcher d'enregistrer
+    les autres réglages.
+    """
+    try:
+        candidat = chemin / NOM_EXE if chemin.is_dir() else chemin
+    except OSError:
+        return None
+    if candidat.name.lower() != NOM_EXE:
+        return None
+    return candidat
 
 
 def langues_disponibles(exe: Path) -> list[str]:

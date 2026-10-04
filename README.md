@@ -46,13 +46,27 @@ identifiant deviné d'une autre organisation ne donne accès à rien.
 
 **Créer une organisation et un compte** — volontairement en ligne de commande et non
 dans l'interface (même logique que les connecteurs OAuth : préparé une fois par le
-service informatique, pas par l'utilisatrice finale) :
+service informatique, pas par l'utilisatrice finale).
 
-```bash
-python backend/manage_users.py create-profile "Nom de l'organisation"
-python backend/manage_users.py create-user <identifiant> <mot-de-passe> <id-du-profil>
-python backend/manage_users.py list-profiles
+Une installation neuve (installeur, disque portable, `.exe`) démarre **sans aucun
+compte** : `build.spec` n'embarque jamais `backend/profiles/`. L'écran de connexion le
+détecte (`GET /api/auth/etat`) et explique comment créer le premier compte. Les
+commandes passent par l'exécutable lui-même, qui écrit donc au bon endroit — aucun
+Python n'est requis sur le poste :
+
+```powershell
+# Disque portable : double-clic sur Creer-un-compte.bat (assistant guidé)
+ai-webapp.exe init                                  # assistant : organisation + compte
+ai-webapp.exe create-profile "Nom de l'organisation"
+ai-webapp.exe create-user <identifiant> <id-du-profil>
+ai-webapp.exe list-profiles
 ```
+
+Depuis le dépôt source, mêmes commandes avec `python launch.py init` (ou
+`python backend/manage_users.py init`). Le mot de passe est **demandé au clavier,
+masqué et confirmé** : passé en argument, il resterait dans l'historique du terminal.
+L'ancienne forme `create-user <identifiant> <mot-de-passe> <id-du-profil>` reste
+acceptée pour les scripts existants, avec un avertissement.
 
 Aucune commande de suppression n'existe à ce jour : le retrait d'un compte ou d'une
 organisation se fait en éditant `backend/profiles/registry.json` / `users.json` et en
@@ -142,6 +156,32 @@ Le binaire **n'embarque ni les réglages ni les conversations** : `build.spec` l
 retire explicitement. Une installation neuve démarre donc sur les valeurs par défaut,
 et un `.exe` distribué ne transporte aucun secret (clé d'API, mot de passe IMAP).
 
+## 💾 Installeur Windows et emplacement des données
+
+L'installeur (`installer Olivia/olivia.iss`, Inno Setup) place l'application dans
+**Program Files**, qu'un utilisateur standard ne peut pas modifier. Les données
+(comptes, sessions, réglages, conversations, index, cache OCR) vivent donc ailleurs,
+dans **`C:\ProgramData\Olivia`** :
+
+- l'installeur crée ce dossier en le rendant modifiable par les utilisateurs du poste,
+  et écrit `ai-webapp\olivia.ini` pour le désigner (`[donnees] dossier=…`) ;
+- dossier **commun au poste** et non propre à chaque session Windows : les comptes
+  créés par le service informatique servent à toutes les sessions. Conséquence à
+  connaître : tout utilisateur Windows du poste peut lire ces fichiers, comme sur un
+  disque portable ;
+- une installation antérieure qui avait écrit ses données dans Program Files est
+  **recopiée** au premier démarrage (l'ancien dossier reste en place, en sauvegarde) ;
+- la désinstallation ne supprime jamais ce dossier ;
+- l'installeur propose de **créer le premier compte** à la fin de l'installation (case
+  cochée seulement s'il n'en existe aucun), et ajoute un raccourci « Créer un compte
+  Olivia » au menu Démarrer.
+
+Règle générale (`backend/emplacements.py`), par ordre de priorité : variable
+d'environnement `OLIVIA_DATA_DIR`, puis `olivia.ini` à côté de l'application, sinon le
+dossier `backend/` comme avant — c'est le cas du **disque portable** (les données
+voyagent avec la clé) et du développement. Le lanceur affiche l'emplacement retenu au
+démarrage, et signale clairement un dossier non modifiable.
+
 ## 🔌 Version portable (clé USB / disque externe)
 
 Olivia tourne entièrement depuis un disque amovible : application, moteur, modèles,
@@ -205,6 +245,7 @@ Structure produite (`ollama\` doit être **dans** `ai-webapp\` : le lanceur le c
 ```
 G:\Olivia\
 ├── Lancer-Olivia.bat      ← double-clic (source versionnée : portable/)
+├── Creer-un-compte.bat    ← création d'un compte (service informatique)
 ├── LISEZ-MOI.txt          ← notice non technique
 └── ai-webapp\
     ├── ai-webapp.exe
@@ -326,7 +367,8 @@ secondes pour rien.
   date ou un numéro de circulaire dans un courrier officiel.
 
 Réglages dans **Paramètres → Documents** : activation, état du moteur, et chemin
-d'un Tesseract installé ailleurs.
+d'un Tesseract installé ailleurs. Ce chemin étant **exécuté**, il doit désigner
+`tesseract.exe` (ou le dossier qui le contient) : tout autre programme est refusé.
 
 **Installation du moteur** — il n'est pas fourni par `pip` :
 
@@ -428,6 +470,19 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
   (`chemin | libellé`, path-traversal → **HTTP 403**). Ces dossiers se changent dans
   *Paramètres → Réglages avancés → Préférences*, sans redémarrage ; la variable d'environnement
   `FS_ROOT` reste la valeur par défaut si aucun dossier n'est configuré.
+- **Dossiers réservés** (`backend/zones.py`) : le paquet `backend/` (comptes, sessions, réglages
+  et conversations de toutes les organisations, cache OCR), `modeles/`, `tesseract/`, `ollama/`
+  et, dans l'`.exe`, `_internal/`. Ils ne peuvent pas devenir un dossier de travail (HTTP 400),
+  et sous une racine plus large (la racine du disque, le dossier de la clé USB) ils sont
+  invisibles et refusés (HTTP 403), y compris via un lien symbolique, pour la lecture, l'import,
+  la recherche et l'index sémantique. Sans cela, une organisation pouvait lire les jetons de
+  session et les réglages des autres.
+- **Modèle Word** : un fichier par organisation (`backend/profiles/<profile_id>/modele-etablissement.docx`),
+  avec repli sur le modèle commun `modeles/modele-etablissement.docx` déposé par le service
+  informatique. L'ancien réglage `docgen_template_path` (emplacement libre, qui permettait
+  d'écrire et de lire des fichiers n'importe où) est supprimé et ignoré s'il subsiste.
+- Le chemin du moteur OCR (`ocr_tesseract_path`) n'accepte qu'un exécutable nommé `tesseract`.
+- Tests de cloisonnement : `pip install pytest` puis `python -m pytest tests` (depuis la racine).
 - En-têtes de sécurité sur toutes les réponses : `Content-Security-Policy`, `X-Content-Type-Options`,
   `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`.
 - **CORS restreint** au poste local (plus de wildcard).
@@ -567,12 +622,14 @@ ai-webapp/
 ├── build.spec             ← config PyInstaller (embarque backend + frontend/dist)
 ├── deploy-portable.ps1    ← build + synchro vers un disque portable (préserve modèles et données)
 ├── portable/              ← lanceur .bat et notice copiés sur le disque portable
+├── tests/                 ← tests de cloisonnement entre organisations (pytest)
 ├── .gitignore
 ├── backend/
 │   ├── main.py            ← FastAPI : auth + chat + fs + upload/download/preview + settings + search + connectors + RGPD
 │   ├── settings.py        ← persistance JSON par organisation + CPU/GPU + modèle par périphérique
 │   ├── hardware.py        ← détection VRAM (nvidia-smi) pour le choix GPU/CPU par défaut
 │   ├── profiles.py        ← registre des organisations, cloisonnement par dossier
+│   ├── emplacements.py    ← où vivent les données (backend/ ou C:\ProgramData\Olivia)
 │   ├── users.py           ← comptes (mots de passe PBKDF2-HMAC-SHA256 salés)
 │   ├── sessions.py        ← sessions par cookie (jetons opaques, TTL 8 h)
 │   ├── manage_users.py    ← CLI de provisionnement (organisations + comptes)
@@ -582,6 +639,7 @@ ai-webapp/
 │   ├── docsearch.py       ← recherche en langage courant dans les documents
 │   ├── docindex.py        ← index sémantique FAISS (embeddings bge-m3 via Ollama)
 │   ├── ocr.py             ← reconnaissance de caractères (documents scannés)
+│   ├── zones.py           ← dossiers réservés à Olivia (jamais accessibles depuis l'interface)
 │   ├── connectors/
 │   │   ├── __init__.py
 │   │   ├── imap_client.py      ← IMAP + comptage des non-lus

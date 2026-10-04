@@ -18,6 +18,12 @@ Usage :
   python launch.py --no-dev         # backend seul, UI buildée sur /ui
   python launch.py --no-browser     # ne pas ouvrir le navigateur
   python launch.py --port 9000      # changer le port backend
+
+Comptes (service informatique) — n'importe quel mode, sans rien démarrer :
+  ai-webapp.exe init                # assistant : organisation + compte
+  ai-webapp.exe create-user <identifiant> <profile_id>
+  ai-webapp.exe list-profiles
+  (python launch.py init, etc. depuis le dépôt source)
 """
 import argparse
 import os
@@ -209,6 +215,53 @@ def run_frozen(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------- comptes (service informatique)
+# Sous-commandes de backend/manage_users.py, relayées par le lanceur. Raison :
+# une installation neuve (installeur, disque portable) démarre SANS aucun compte,
+# puisque build.spec exclut backend/profiles/ du binaire — et l'écran de
+# connexion est obligatoire. Sans ce relais, le seul moyen de créer un compte
+# était de lancer manage_users.py depuis le dépôt source, qui écrit dans le
+# backend/profiles/ du dépôt et non dans celui de l'installation : une
+# installation neuve était inutilisable. Passer par l'exécutable lui-même
+# garantit d'écrire au bon endroit (_internal/backend/profiles/ en mode gelé).
+COMMANDES_COMPTES = {"init", "create-profile", "create-user", "list-profiles"}
+
+
+def run_comptes(argv: list[str]) -> int:
+    """Exécute une commande de comptes, sans démarrer ni Ollama ni le serveur."""
+    sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
+    from backend import manage_users
+    prog = Path(sys.executable).name if FROZEN else "python launch.py"
+    return manage_users.main(argv, prog=prog)
+
+
+def verifier_dossier_donnees() -> bool:
+    """Affiche où sont les données et vérifie qu'on peut y écrire.
+
+    Sur un poste installé, les données vivent dans C:\\ProgramData\\Olivia et non
+    dans Program Files (voir backend/emplacements.py). Si ce dossier n'est pas
+    modifiable, chaque connexion échouera : mieux vaut le dire ici, en clair,
+    que laisser l'utilisatrice face à un écran de connexion qui refuse tout.
+    N'empêche pas le démarrage — le message d'erreur de la connexion le redit.
+    """
+    sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
+    from backend import emplacements
+    print(f"→ Données : {emplacements.description()}")
+    dossier = emplacements.dossier_donnees()
+    essai = dossier / ".olivia-essai-ecriture"
+    try:
+        dossier.mkdir(parents=True, exist_ok=True)
+        essai.write_text("ok", encoding="utf-8")
+        essai.unlink()
+        return True
+    except OSError as e:
+        print(f"❌ Impossible d'écrire dans le dossier des données ({e}).")
+        print("   Les connexions échoueront. Le service informatique doit donner le droit")
+        print(f"   de modification sur {dossier} aux utilisateurs du poste,")
+        print("   ou réinstaller Olivia avec l'installeur.")
+        return False
+
+
 # ------------------------------------------------------------- mode SOURCE (dev)
 def find_venv_python() -> str | None:
     candidate = (BACKEND_DIR / ".venv" / ("Scripts" if IS_WINDOWS else "bin")
@@ -316,6 +369,9 @@ def main() -> int:
         except Exception:
             pass
 
+    if len(sys.argv) > 1 and sys.argv[1] in COMMANDES_COMPTES:
+        return run_comptes(sys.argv[1:])
+
     parser = argparse.ArgumentParser(description="Lanceur Olivia")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -329,6 +385,7 @@ def main() -> int:
     print("=" * 60)
     print("🌷 Olivia — lanceur" + ("  [.exe]" if FROZEN else ""))
     print("=" * 60)
+    verifier_dossier_donnees()
 
     ollama_proc = None if args.no_ollama else start_ollama()
     try:

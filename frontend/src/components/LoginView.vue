@@ -24,6 +24,23 @@
         {{ auth.avis }}
       </p>
 
+      <!-- Installation neuve : aucun compte n'existe, le formulaire ne peut pas
+           aboutir. On dit comment en créer un plutôt que de laisser échouer. -->
+      <div
+        v-if="aucunCompte"
+        class="avis premier-compte"
+        role="status"
+      >
+        <strong>Aucun compte n'a encore été créé sur ce poste.</strong>
+        La personne qui s'occupe de l'informatique doit d'abord en créer un :
+        <ul>
+          <li>Olivia installée : menu Démarrer, <b>Créer un compte Olivia</b> ;</li>
+          <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
+          <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Olivia.</li>
+        </ul>
+        Revenez ensuite sur cette page pour vous connecter.
+      </div>
+
       <label for="champ-identifiant">Identifiant</label>
       <input
         id="champ-identifiant"
@@ -60,7 +77,10 @@
         {{ enCours ? 'Connexion en cours…' : 'Se connecter' }}
       </button>
 
-      <p class="aide">
+      <p
+        v-if="!aucunCompte"
+        class="aide"
+      >
         Pas encore d'identifiant ? Demandez-le à la personne qui s'occupe de
         l'informatique : les comptes sont créés par elle.
       </p>
@@ -80,8 +100,24 @@ const motDePasse = ref('')
 const erreur = ref('')
 const enCours = ref(false)
 const champIdentifiant = ref(null)
+// Vrai seulement si le serveur confirme qu'AUCUN compte n'existe. Une erreur
+// réseau ou un fichier de comptes illisible (`comptes: null`) laisse l'écran
+// habituel : ce n'est pas la même situation.
+const aucunCompte = ref(false)
 
-onMounted(() => champIdentifiant.value?.focus())
+async function verifierComptes() {
+  try {
+    const r = await fetch('/api/auth/etat')
+    if (r.ok) aucunCompte.value = (await r.json()).comptes === false
+  } catch (e) {
+    console.warn('État des comptes indisponible :', e.message)
+  }
+}
+
+onMounted(() => {
+  champIdentifiant.value?.focus()
+  verifierComptes()
+})
 
 async function soumettre() {
   if (enCours.value) return
@@ -91,6 +127,9 @@ async function soumettre() {
   enCours.value = false
   if (!res.ok) {
     erreur.value = res.error
+    // Le compte a pu être créé depuis l'affichage de la page : on revérifie,
+    // pour retirer (ou afficher) l'explication du premier compte.
+    verifierComptes()
     // Seul le mot de passe est vidé : réécrire son identifiant à chaque faute
     // de frappe serait pénible, et il n'a rien de secret.
     motDePasse.value = ''
@@ -132,6 +171,8 @@ button[type="submit"] { margin-top: 20px; padding: 10px 16px; font-size: 15px; }
   border-radius: 6px; font-size: 13px; line-height: 1.4;
 }
 .avis { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.premier-compte ul { margin: 6px 0; padding-left: 18px; }
+.premier-compte li { margin: 2px 0; }
 .erreur {
   margin-top: 14px;
   background: rgba(239,68,68,0.12); color: var(--text);

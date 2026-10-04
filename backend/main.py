@@ -3,6 +3,7 @@ FastAPI backend pour Olivia (assistante locale).
 
 Routes principales :
   POST /api/auth/login                   : ouvre une session (cookie HttpOnly)
+  GET  /api/auth/etat                    : au moins un compte existe-t-il ? (public)
   POST /api/auth/logout                  : ferme la session courante
   GET  /api/auth/me                      : compte et organisation connectés
   GET  /api/health                       : diagnostic de service
@@ -41,8 +42,9 @@ Routes principales :
   DELETE /api/conversations/{conv_id}    : supprime une conversation
   /ui                                    : interface Vue buildée (frontend/dist)
 
-CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service) et
-/api/auth/login, toute route /api/* exige une session ouverte et ne travaille que
+CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service),
+/api/auth/login et /api/auth/etat (écran de connexion), toute route /api/* exige
+une session ouverte et ne travaille que
 sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
 identifiant d'organisation n'est jamais accepté depuis le client.
 """
@@ -77,6 +79,7 @@ from . import conversations
 from . import profiles
 from . import sessions
 from . import users
+from . import zones
 from .connectors import (
     read_inbox,
     unread_count,
@@ -274,13 +277,43 @@ async def auth_login(demande: DemandeConnexion, response: Response):
     if user is None:
         # Message volontairement unique : ne dit pas si le compte existe.
         raise HTTPException(401, "Identifiant ou mot de passe incorrect")
-    token = sessions.create_session(user["id"], user["profile_id"])
+    try:
+        token = sessions.create_session(user["id"], user["profile_id"])
+    except OSError as e:
+        # Dossier des données non modifiable (voir emplacements.py) : sans ce
+        # message, l'utilisatrice verrait une erreur 500 sans explication.
+        raise HTTPException(
+            500,
+            "Olivia ne peut pas enregistrer la session : le dossier de ses données "
+            f"n'est pas modifiable ({profiles.PROFILES_DIR}). Prévenez la personne "
+            "qui s'occupe de l'informatique.",
+        ) from e
     response.set_cookie(
         COOKIE_SESSION, token,
         max_age=sessions.SESSION_TTL_SECONDS,
         httponly=True, samesite="lax", secure=False, path="/",
     )
     return _identite(user)
+
+
+@app.get("/api/auth/etat")
+async def auth_etat():
+    """Le poste a-t-il au moins un compte ? Sans authentification, par nécessité :
+    c'est l'écran de connexion qui pose la question.
+
+    Une installation neuve démarre sans aucun compte (build.spec exclut
+    backend/profiles/ du binaire). L'écran de connexion peut alors expliquer
+    comment créer le premier, au lieu d'un formulaire voué à l'échec. La réponse
+    ne révèle qu'un booléen — ni nom de compte, ni nom d'organisation — et le
+    service n'écoute que sur 127.0.0.1.
+
+    `comptes` vaut None si le fichier des comptes est illisible : ce n'est pas
+    « aucun compte », et l'écran ne doit pas inviter à en créer un.
+    """
+    try:
+        return {"comptes": users.existe_un_compte()}
+    except RuntimeError:
+        return {"comptes": None}
 
 
 @app.post("/api/auth/logout")
@@ -326,6 +359,10 @@ def get_fs_root_entries(profile_id: str) -> list[tuple[Path, str]]:
     (env FS_ROOT / ~/Documents). Ne renvoie jamais une liste vide.
 
     Lue à chaque appel : un changement de réglage s'applique donc sans redémarrage.
+
+    Une racine située dans un dossier réservé à Olivia (voir zones.py) est
+    écartée, même si elle a été enregistrée par une version antérieure qui ne
+    la refusait pas : elle ouvrirait sinon les données des autres organisations.
     """
     s = reglages(profile_id).get()
     configured = s.get("fs_roots")
@@ -346,6 +383,8 @@ def get_fs_root_entries(profile_id: str) -> list[tuple[Path, str]]:
                 p = Path(raw_path)
                 if p.is_dir():
                     rp = p.resolve()
+                    if zones.est_reserve(rp, deja_resolu=True):
+                        continue
                     if rp not in seen:
                         seen.add(rp)
                         entries.append((rp, label))
@@ -358,7 +397,7 @@ def get_fs_root_entries(profile_id: str) -> list[tuple[Path, str]]:
     if legacy:
         try:
             p = Path(legacy)
-            if p.is_dir():
+            if p.is_dir() and not zones.est_reserve(p):
                 return [(p.resolve(), "")]
         except OSError:
             pass
@@ -380,8 +419,10 @@ def safe_path(profile_id: str, virtual: str) -> tuple[Path, Path, str]:
     désigne un dossier différent pour deux profils, et un `rN` que le profil
     appelant n'a pas configuré répond 404.
 
-    Refuse les chemins absolus (403), les préfixes `rN` inconnus (404), et toute
-    tentative de sortie de la racine désignée par traversal (403).
+    Refuse les chemins absolus (403), les préfixes `rN` inconnus (404), toute
+    tentative de sortie de la racine désignée par traversal (403), et tout
+    chemin situé dans un dossier réservé à Olivia (403, voir zones.py) — y
+    compris sous une racine large qui le contiendrait, comme la racine du disque.
     """
     raw = (virtual or "").strip().replace("\\", "/")
     if raw.startswith("/") or (len(raw) > 1 and raw[1] == ":"):
@@ -405,6 +446,8 @@ def safe_path(profile_id: str, virtual: str) -> tuple[Path, Path, str]:
             status_code=403,
             detail=f"Accès refusé : '{virtual}' sort du périmètre autorisé ({root})",
         )
+    if zones.est_reserve(p, deja_resolu=True):
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
     return p, root, prefix
 
 
@@ -417,6 +460,10 @@ def _virtual_path(p: Path, root: Path, prefix: str) -> str:
 def _list_dir_items(p: Path, root: Path, prefix: str) -> list[dict]:
     items = []
     for entry in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        # Dossier réservé (voir zones.py) : ni affiché, ni ouvrable — safe_path()
+        # le refuserait de toute façon, autant ne pas le montrer.
+        if zones.est_reserve(entry):
+            continue
         try:
             stat = entry.stat()
             items.append({
@@ -723,6 +770,8 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
         target_dir.relative_to(root)  # revérifie le sandbox après création
     except ValueError:
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
+    if zones.est_reserve(target_dir, deja_resolu=True):
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
     dest = target_dir / safe_name
 
     size = 0
@@ -755,19 +804,24 @@ def _iter_searchable_files(targets):
 
     Sécurité : `os.walk` ne suit pas les liens symboliques, et chaque fichier
     retenu est en plus revérifié comme étant bien sous sa racine — un lien
-    pointant hors du périmètre ne peut donc pas être lu.
+    pointant hors du périmètre ne peut donc pas être lu. Les dossiers réservés
+    à Olivia (voir zones.py) sont élagués : sous une racine large, la recherche
+    et l'index sémantique ne liraient sinon les données des autres organisations.
     """
     for search_dir, root, prefix in targets:
         for dirpath, dirnames, filenames in os.walk(search_dir):
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")
-                           and d.lower() not in docsearch.IGNORED_DIRS]
             base = Path(dirpath)
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")
+                           and d.lower() not in docsearch.IGNORED_DIRS
+                           and not zones.est_reserve(base / d)]
             for name in filenames:
                 fp = base / name
                 try:
                     reel = fp.resolve()
                     reel.relative_to(root)
                 except (OSError, ValueError):
+                    continue
+                if zones.est_reserve(reel, deja_resolu=True):
                     continue
                 yield fp, _virtual_path(fp, root, prefix)
 
@@ -790,7 +844,10 @@ def _resolve_search_targets(profile_id: str, path: str) -> list[tuple[Path, Path
 
 def _virtual_for_abs(profile_id: str, p: Path) -> str | None:
     """Chemin virtuel rN/... pour un chemin absolu, ou None s'il ne tombe sous
-    aucune racine actuellement autorisée pour cette organisation."""
+    aucune racine actuellement autorisée pour cette organisation, ou s'il est
+    dans un dossier réservé à Olivia (voir zones.py)."""
+    if zones.est_reserve(p):
+        return None
     for i, root in enumerate(get_fs_roots(profile_id)):
         try:
             rel = p.resolve().relative_to(root)
@@ -980,6 +1037,18 @@ async def update_settings(patch: dict, profile_id: str = Depends(get_current_pro
         raise HTTPException(400, "Body doit être un objet JSON")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
+    # Plus un réglage : l'emplacement du modèle Word est fixé par le code, un
+    # fichier par organisation (voir docmodele.chemin_modele). Laissé libre, il
+    # permettait d'ÉCRIRE un fichier n'importe où sur le disque (fabrication du
+    # modèle) et de LIRE n'importe quel .docx (génération). Retiré en silence,
+    # et non refusé : une interface d'une version antérieure renvoie encore la
+    # clé à chaque « Enregistrer », et refuser ferait échouer toute sauvegarde.
+    patch.pop("docgen_template_path", None)
+    if "ocr_tesseract_path" in patch:
+        patch["ocr_tesseract_path"] = _valider_chemin_tesseract(
+            patch["ocr_tesseract_path"],
+            reglages(profile_id).get().get("ocr_tesseract_path", ""),
+        )
     if "fs_roots" in patch:
         raw_list = patch.get("fs_roots")
         if not isinstance(raw_list, list):
@@ -999,11 +1068,53 @@ async def update_settings(patch: dict, profile_id: str = Depends(get_current_pro
             # Une liste vide signifie "revenir au défaut" : toujours autorisée.
             if not Path(v).is_dir():
                 raise HTTPException(400, f"Dossier introuvable : {v}")
+            # Un dossier interne d'Olivia (comptes, sessions, réglages des
+            # organisations, moteurs) ne peut pas devenir un dossier de travail.
+            # get_fs_root_entries() l'écarterait de toute façon ; le refuser ici
+            # donne à l'utilisatrice un message clair au lieu d'un dossier qui
+            # disparaît sans explication.
+            if zones.est_reserve(Path(v)):
+                raise HTTPException(
+                    400,
+                    f"Ce dossier est réservé au fonctionnement d'Olivia et ne peut pas "
+                    f"servir de dossier de travail : {v}",
+                )
             cleaned.append({"path": v, "label": label})
         patch["fs_roots"] = cleaned
     reglages_profil = reglages(profile_id)
     reglages_profil.update(patch)
     return JSONResponse(_mask_secrets(reglages_profil.get()))
+
+
+def _valider_chemin_tesseract(brut, actuel: str = "") -> str:
+    """Chemin du moteur OCR saisi dans les Paramètres : vide, ou un exécutable
+    nommé `tesseract` (`tesseract.exe` sous Windows), ou le dossier qui le
+    contient.
+
+    Ce chemin est EXÉCUTÉ par ocr.py. Sans contrôle, n'importe quel compte
+    pouvait faire lancer par Olivia n'importe quel programme du poste. On
+    n'accepte donc que le nom attendu : aucune route d'Olivia ne permet de créer
+    un fichier portant ce nom (l'import refuse les exécutables, la génération
+    n'écrit que des .docx). ocr.chemin_moteur() applique la même règle aux
+    valeurs déjà enregistrées. L'existence n'est pas exigée : un moteur
+    désinstallé ne doit pas bloquer l'enregistrement des autres réglages.
+
+    Seule une valeur NOUVELLE est contrôlée ici : l'interface renvoie tous les
+    réglages à chaque « Enregistrer », et une valeur déjà enregistrée dont le
+    dossier a disparu (moteur désinstallé) ferait sinon échouer toute
+    sauvegarde. Elle ne peut de toute façon rien lancer d'autre que le moteur :
+    ocr.chemin_moteur() la refiltre avant chaque exécution.
+    """
+    valeur = str(brut or "").strip()
+    if not valeur or valeur == str(actuel or "").strip():
+        return valeur
+    if ocr.chemin_tesseract_acceptable(Path(valeur)) is None:
+        raise HTTPException(
+            400,
+            f"Chemin du moteur de reconnaissance refusé : il doit désigner "
+            f"« {ocr.NOM_EXE} » ou le dossier qui le contient ({valeur}).",
+        )
+    return valeur
 
 
 def _strip_masked(patch: dict):
@@ -1089,8 +1200,10 @@ async def documents_modele(body: dict, profile_id: str = Depends(get_current_pro
     """(Re)fabrique le modèle de l'établissement à partir d'un document réel.
 
     `source` est un chemin virtuel `rN/...` : la lecture reste sandboxée. Le
-    modèle produit est écrit hors du sandbox, dans `modeles/`, à côté de
-    l'application — il n'a pas à traîner dans les documents de l'utilisatrice.
+    modèle produit est écrit hors du sandbox, dans le dossier de l'organisation
+    (`profiles/<profile_id>/`, voir docmodele.chemin_modele_organisation) — il
+    n'a pas à traîner dans les documents de l'utilisatrice, et il ne remplace
+    jamais celui d'une autre organisation.
     """
     source = (body.get("source") or "").strip()
     if not source:
@@ -1099,7 +1212,8 @@ async def documents_modele(body: dict, profile_id: str = Depends(get_current_pro
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Document introuvable : {source}")
     try:
-        infos = docmodele.construire_modele(p, profile_id=profile_id)
+        infos = docmodele.construire_modele(
+            p, destination=docmodele.chemin_modele_organisation(profile_id))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -1129,6 +1243,8 @@ async def documents_generate(demande: DemandeDocument,
         dossier.relative_to(root)          # revérifie le sandbox après création
     except ValueError:
         raise HTTPException(403, "Accès refusé : cible hors du périmètre autorisé")
+    if zones.est_reserve(dossier, deja_resolu=True):
+        raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Olivia")
 
     profil = docgen.PROFILS[demande.type]
     defaut = demande.titre.strip() or profil["titre_defaut"]
@@ -1318,6 +1434,12 @@ async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
     cfg = reglages(profile_id).get().get("connectors", {}).get("calendar_ics", {})
     if not cfg.get("enabled") or not cfg.get("path"):
         return {"enabled": False, "events": []}
+    # Le chemin du .ics est un réglage libre : sans ce contrôle, il pouvait
+    # désigner un fichier interne (réglages d'une autre organisation…), dont un
+    # message d'erreur d'analyse aurait pu recopier des extraits.
+    if zones.est_reserve(Path(cfg.get("path", ""))):
+        return {"enabled": True, "events": [
+            {"error": "Ce fichier est réservé au fonctionnement d'Olivia."}]}
     return {"enabled": True, "events": calendar_list_events(cfg.get("path", ""), limit=20)}
 
 
