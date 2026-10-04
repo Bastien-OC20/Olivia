@@ -24,6 +24,7 @@ Fichiers produits (tous versionnés) :
   desktop/build/icon.ico              comme ai-webapp.ico (application et installeur Windows)
   desktop/icons/fenetre.png           marque, 256 px   (fenêtre, écran de démarrage)
   desktop/icons/tray.png, tray@2x.png marque, 32 et 64 px (barre des menus / notification)
+  visuel/logo-transparent.png         logo, 512 px     (en-tête du README)
 """
 import io
 import struct
@@ -215,6 +216,9 @@ def main() -> None:
     reduire(mq, 256).save(RACINE / "desktop/icons/fenetre.png", optimize=True)
     reduire(mq, 32).save(RACINE / "desktop/icons/tray.png", optimize=True)
     reduire(mq, 64).save(RACINE / "desktop/icons/tray@2x.png", optimize=True)
+    # Coins transparents : le logo source a des coins blancs, visibles sur le
+    # thème sombre de GitHub.
+    reduire(logo, 512).save(RACINE / "visuel/logo-transparent.png", optimize=True)
     print("Icônes générées depuis", SOURCE.relative_to(RACINE))
 
 

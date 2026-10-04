@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="visuel/logo-transparent.png" alt="Logo d'Oliv'IA : tuile bleue avec un O traversé d'un rameau d'olivier" width="180">
+</p>
+
 #  Oliv'IA — assistante locale pour le secrétariat
 
 **Oliv'IA** est une assistante IA **100 % locale**, pensée d'abord pour une **assistante de
@@ -970,6 +974,7 @@ Le script en tire deux variantes (coins rendus transparents) :
 | `desktop/build/icon.png` | logo, 1024 px avec marge transparente | application macOS |
 | `desktop/icons/fenetre.png` | marque, 256 px | fenêtre, écran de démarrage |
 | `desktop/icons/tray.png`, `tray@2x.png` | marque, 32 et 64 px | barre des menus / zone de notification |
+| `visuel/logo-transparent.png` | logo, 512 px | en-tête de ce README |
 
 Le script fixe deux réglages :
 - **marge macOS** : la tuile occupe 824 px d'une toile de 1024. C'est la convention de la
@@ -990,6 +995,7 @@ Olivia/
 ├── start-ollama.ps1       ← lance Ollama seul (Windows)
 ├── ai-webapp.ico          ← icône de l'exécutable Windows
 ├── visuel/logo.png        ← logo source (toutes les icônes en sont tirées)
+├── visuel/logo-transparent.png ← logo à coins transparents (en-tête du README)
 ├── visuel/generer_icones.py ← régénère toutes les icônes
 ├── .github/workflows/tests.yml    ← CI : tests sur chaque PR
 ├── .github/workflows/bureau.yml   ← CI : installeurs macOS et Windows
