@@ -485,23 +485,37 @@ def _list_dir_items(p: Path, root: Path, prefix: str) -> list[dict]:
 TOP_LEVEL_SECRET_KEYS = {"search_brave_api_key"}
 
 
-def _mask_secrets(data: dict) -> dict:
-    """Masque les secrets dans la réponse GET /api/settings (défense en profondeur).
-    L'UI n'a pas besoin de relire les mots de passe ; elle ne réécrit que ce qui change.
+def _masquer_secrets(data: dict) -> tuple[dict, list[str]]:
+    """Copie des réglages avec les secrets masqués, et la liste de ceux qui l'ont
+    été (« connectors.imap.password », « search_brave_api_key »…).
+
+    Seul point de masquage, partagé par GET/PUT /api/settings et par l'export
+    RGPD : un secret ajouté un jour aux réglages n'a qu'un endroit où être
+    déclaré pour n'apparaître dans aucune réponse.
     """
     import copy
     d = copy.deepcopy(data)
+    masques: list[str] = []
     secret_keys = {"password", "api_token", "client_secret_path"}
-    for conn in d.get("connectors", {}).values():
+    for nom, conn in d.get("connectors", {}).items():
         if isinstance(conn, dict):
             for k in list(conn.keys()):
                 if k in secret_keys and conn[k]:
                     conn[k] = "••••••••"
+                    masques.append(f"connectors.{nom}.{k}")
     # Secrets hors bloc connecteurs (clé d'API du moteur de recherche).
-    for k in TOP_LEVEL_SECRET_KEYS:
+    for k in sorted(TOP_LEVEL_SECRET_KEYS):
         if d.get(k):
             d[k] = "••••••••"
-    return d
+            masques.append(k)
+    return d, masques
+
+
+def _mask_secrets(data: dict) -> dict:
+    """Masque les secrets dans la réponse GET /api/settings (défense en profondeur).
+    L'UI n'a pas besoin de relire les mots de passe ; elle ne réécrit que ce qui change.
+    """
+    return _masquer_secrets(data)[0]
 
 
 # ---------- Routes Ollama ----------
@@ -1538,14 +1552,30 @@ async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
 @app.get("/api/privacy/export")
 async def privacy_export(profile_id: str = Depends(get_current_profile)):
     """Droit d'accès/portabilité : export des données locales de l'organisation
-    connectée (ses réglages et ses conversations), et d'elle seule."""
+    connectée (ses réglages et ses conversations), et d'elle seule.
+
+    Les SECRETS (mot de passe IMAP, clé d'API, jeton Notion) sont masqués,
+    comme dans GET /api/settings. L'export est un fichier téléchargé, qui finit
+    dans un dossier Téléchargements, une pièce jointe ou une clé USB : y écrire
+    le mot de passe de la boîte mail professionnelle en clair le ferait fuiter
+    bien plus sûrement que l'application elle-même. Ce sont des identifiants
+    d'accès à des services tiers, pas des données sur la personne : l'export
+    dit qu'ils existent et qu'ils ont été masqués, ce qui suffit au droit
+    d'accès, et ils se ressaisissent dans les Paramètres.
+    """
     profil = profiles.get_profile(profile_id)
+    reglages_exportes, secrets_masques = _masquer_secrets(reglages(profile_id).get())
+    note = ("Toutes vos données restent sur cette machine. Aucun envoi externe. "
+            "Cet export ne contient que les données de votre organisation.")
+    if secrets_masques:
+        note += (" Par sécurité, les mots de passe et clés d'accès enregistrés sont "
+                 "masqués (••••••••) : voir « secrets_masques ».")
     payload = {
         "organisation": (profil or {}).get("name", ""),
-        "settings": reglages(profile_id).get(),
+        "settings": reglages_exportes,
+        "secrets_masques": secrets_masques,
         "conversations": conversations.export_all_conversations(profile_id),
-        "note": "Toutes vos données restent sur cette machine. Aucun envoi externe. "
-                "Cet export ne contient que les données de votre organisation.",
+        "note": note,
     }
     return JSONResponse(
         payload,

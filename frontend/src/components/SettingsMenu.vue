@@ -587,12 +587,16 @@
             <p class="hint">
               Olivia fonctionne <b>entièrement sur cette machine</b>. Aucune donnée
               (conversations, fichiers, identifiants) n'est transmise à un serveur externe.
-              Les paramètres sont stockés dans <code>backend/settings.json</code>.
+              Les paramètres et les conversations sont stockés sur ce poste, dans le
+              dossier des données d'Olivia, séparément pour chaque organisation.
             </p>
 
             <h3>Droit d'accès et de portabilité</h3>
             <p class="hint">
               Exportez l'ensemble de vos paramètres et données locales au format JSON.
+              Par sécurité, les mots de passe et clés d'accès enregistrés (boîte mail,
+              moteur de recherche…) y sont masqués : le fichier peut circuler sans les
+              divulguer.
             </p>
             <button @click="exportData">
               ⬇ Exporter mes données

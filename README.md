@@ -450,7 +450,10 @@ Tout reste **local** (aucun envoi externe). Onglet **Paramètres → Confidentia
 - **Suppression** (`POST /api/privacy/delete`) : réinitialise les paramètres et purge le dossier
   `_uploads` (vos autres documents ne sont pas touchés).
 - **Consentement** : bandeau informatif au premier lancement.
-- Les secrets ne sont **jamais renvoyés en clair** par l'API (`GET /api/settings` les masque).
+- Les secrets (mot de passe IMAP, clé Brave, jeton Notion) ne sont **jamais renvoyés en clair**
+  par l'API : `GET`/`PUT /api/settings` les masquent, et l'**export RGPD aussi** — un fichier
+  téléchargé circule (pièce jointe, clé USB). L'export indique dans `secrets_masques` lesquels
+  ont été masqués ; ils se ressaisissent dans les Paramètres.
 
 ## ♿ RGAA / WCAG AA
 
