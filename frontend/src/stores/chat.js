@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useMoteurStore } from './moteur.js'
 
 // Recherche web : nombre de résultats injectés et longueur max de la requête
 // envoyée au moteur (une demande de chat peut être un paragraphe entier).
@@ -8,11 +9,20 @@ const WEB_QUERY_MAX = 300
 
 // Moteur d'IA (Ollama) injoignable : même texte que MESSAGE_OLLAMA_INJOIGNABLE
 // côté backend (main.py), pour que l'utilisatrice lise la même consigne quel que
-// soit le moment où la panne est constatée.
-const MESSAGE_MOTEUR_ETEINT = "Le moteur d'IA (Ollama) ne répond pas. Vérifiez qu'Olivia "
-  + 'a bien été lancée et que sa fenêtre noire est toujours ouverte, puis réessayez.'
-const MESSAGE_OLIVIA_INJOIGNABLE = "Olivia ne répond pas. Vérifiez qu'elle est bien "
-  + 'démarrée, puis réessayez.'
+// soit le moment où la panne est constatée. Le détail (installer ou démarrer
+// Ollama, modèles à tirer) est dans le panneau MoteurAssistant.vue.
+const MESSAGE_MOTEUR_ETEINT = "Le moteur d'IA (Ollama) ne répond pas : il n'est pas "
+  + 'démarré, ou pas installé sur ce poste. Suivez les indications affichées en haut '
+  + 'de la fenêtre, puis réessayez.'
+// Olivia elle-même ne répond plus (le backend s'est arrêté). Le remède dépend de
+// la façon dont elle a été lancée : dans l'application de bureau, pas de fenêtre
+// noire, mais l'icône Olivia (desktop/main.js, menu « Redémarrer Olivia ») ;
+// sinon, c'est la fenêtre noire du lanceur qui a été fermée.
+const MESSAGE_OLIVIA_INJOIGNABLE = (typeof window !== 'undefined' && window.oliviaBureau)
+  ? "Olivia ne répond plus. Cliquez sur l'icône Olivia (barre des menus sur Mac, zone "
+    + 'de notification sous Windows), choisissez « Redémarrer Olivia », puis réessayez.'
+  : "Olivia ne répond pas. Vérifiez que sa fenêtre noire est toujours ouverte (sinon, "
+    + 'relancez Olivia), puis réessayez.'
 
 // ---------- Contexte documentaire ----------
 // Un petit modèle local n'a qu'une fenêtre de contexte limitée : on borne donc
@@ -159,12 +169,14 @@ export const useChatStore = defineStore('chat', () => {
         availableModels.value = []
         modelsErreur.value = r.status === 502 ? MESSAGE_MOTEUR_ETEINT
           : `Liste des modèles indisponible (erreur ${r.status}).`
+        if (r.status === 502) useMoteurStore().signalerPanne()
         return
       }
       availableModels.value = data.models || []
       modelsErreur.value = availableModels.value.length ? ''
         : "Aucun modèle de conversation n'est installé sur ce poste. "
-          + "Le service informatique doit en installer un."
+          + 'Suivez les indications affichées en haut de la fenêtre.'
+      if (!availableModels.value.length) useMoteurStore().signalerPanne()
       if (availableModels.value.length && !currentModel.value) {
         const noms = new Set(availableModels.value.map((m) => m.name))
         const conseille = recommandes.find((n) => noms.has(n))
@@ -444,6 +456,10 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       isStreaming.value = false
       abortController.value = null
+      // Échec sans aucun texte produit : moteur arrêté, modèle désinstallé…
+      // On revérifie l'état du moteur pour réafficher le panneau d'aide si
+      // besoin (sans effet si le moteur va bien : l'erreur venait d'ailleurs).
+      if (assistantMsg.erreur && !assistantMsg.content) useMoteurStore().signalerPanne()
       // Sauvegarde en fin de streaming, y compris après un « Stop ».
       await persist()
     }

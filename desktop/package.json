@@ -1,0 +1,91 @@
+{
+  "name": "olivia-desktop",
+  "productName": "Olivia",
+  "version": "1.0.0",
+  "description": "Olivia, assistante locale pour le secrétariat — application de bureau (macOS, Windows)",
+  "author": "Lycée de l'Olivier",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "preparer": "node scripts/preparer.mjs",
+    "dist:mac": "node scripts/preparer.mjs && electron-builder --mac --publish never",
+    "dist:win": "node scripts/preparer.mjs && electron-builder --win --publish never",
+    "dist:dir": "node scripts/preparer.mjs && electron-builder --dir --publish never"
+  },
+  "olivia": {
+    "majAutoMac": false
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "fr.olivia.assistante",
+    "productName": "Olivia",
+    "copyright": "Lycée de l'Olivier",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "chargement.html",
+      "lib/**",
+      "icons/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/ressources/backend",
+        "to": "backend"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "title": "Olivia"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Olivia",
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Office"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Bastien-OC20",
+        "repo": "Olivia"
+      }
+    ]
+  }
+}

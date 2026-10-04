@@ -32,6 +32,7 @@
       - ai-webapp\ollama\                          (moteur + modèles)
       - ai-webapp\_internal\backend\conversations\ (historique)
       - ai-webapp\_internal\backend\settings.json  (réglages, dont secrets)
+      - ai-webapp\_internal\backend\.env           (configuration : OLLAMA_URL, FS_ROOT…)
       - ai-webapp\_internal\backend\profiles\      (comptes et organisations)
 
 .PARAMETER Destination
@@ -414,7 +415,7 @@ $profilesDest = Join-Path $app '_internal\backend\profiles'
 
 if ($installExistante) {
     Write-Host "  Preserve : conversations\ ($nbConversations enregistrees)"
-    Write-Host '  Preserve : settings.json'
+    Write-Host '  Preserve : settings.json et .env (configuration)'
     Write-Host '  Preserve : profiles\ (comptes et organisations)'
     Write-Host '  Preserve : ocr_cache\ et docindex\ (caches reconstructibles)'
 }
@@ -430,8 +431,12 @@ $exclusionsDossiers = @(
     $ocrCacheDest,
     $docindexDest
 )
+# backend\.env : configuration propre au disque (OLLAMA_URL, FS_ROOT,
+# OLIVIA_DATA_DIR), lue au demarrage par backend/__init__.py et jamais embarquee
+# par build.spec ; sans exclusion, chaque -Update l'effacerait en silence.
 $exclusionsFichiers = @(
-    (Join-Path $app '_internal\backend\settings.json')
+    (Join-Path $app '_internal\backend\settings.json'),
+    (Join-Path $app '_internal\backend\.env')
 )
 
 & robocopy $dist $app /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 `

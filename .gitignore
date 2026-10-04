@@ -108,3 +108,7 @@ desktop.ini
 # Dossier de travail de la présentation commerciale/interne (captures
 # d'écran + .pptx) : contenu généré, jamais versionné.
 presentation/
+
+# Ressources de l application de bureau (icônes, script NSIS) : versionnées,
+# malgré la règle build/ ci-dessus. Le contenu assemblé est ignoré par desktop/.gitignore.
+!desktop/build/

@@ -314,9 +314,17 @@ class Settings:
             return self.get()
 
     def reset(self) -> dict:
-        """RGPD : réinitialise tous les paramètres aux valeurs par défaut."""
+        """RGPD : réinitialise tous les paramètres aux valeurs par défaut.
+
+        Le périphérique de calcul est RE-DÉTECTÉ, comme au tout premier
+        lancement (voir `_load`), et non remis au « gpu » codé dans DEFAULTS :
+        sur un poste sans carte graphique, un effacement des données ramenait
+        sinon le modèle GPU et ses réponses de plusieurs dizaines de minutes —
+        précisément ce que la détection matérielle évite.
+        """
         with self._lock:
             self._data = _deep_default()
+            self._data["compute_device"] = hardware.detect_default_device()
             self._save()
             return self.get()
 

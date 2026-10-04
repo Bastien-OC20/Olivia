@@ -206,13 +206,40 @@ def run_frozen(args) -> int:
     if not args.no_browser:
         time.sleep(0.5)
         open_browser(ui_url)
-    print("\n⏹  Fermez cette fenêtre pour arrêter le serveur.\n")
+    arret = threading.Event()
+    if args.parent_stdin:
+        # Lancé par l'application de bureau (desktop/main.js) : elle garde notre
+        # entrée standard ouverte et la ferme pour nous arrêter. Si elle plante,
+        # le système ferme le tube aussi : le backend — et Ollama, arrêté par le
+        # `finally` de main() — ne survivent jamais à la fenêtre.
+        threading.Thread(target=surveiller_parent, args=(sys.stdin, arret),
+                         daemon=True).start()
+    else:
+        print("\n⏹  Fermez cette fenêtre pour arrêter le serveur.\n")
     try:
-        while server_thread.is_alive():
+        while server_thread.is_alive() and not arret.is_set():
             server_thread.join(timeout=1)
     except KeyboardInterrupt:
         print("\n→ Arrêt demandé.")
+    if arret.is_set():
+        print("→ Application de bureau fermée : arrêt.")
     return 0
+
+
+def surveiller_parent(flux, arret) -> None:
+    """Lit `flux` jusqu'à sa fin, puis lève `arret`.
+
+    La fin de flux (EOF) signifie que le processus parent a fermé le tube ou a
+    disparu. Lire ligne à ligne plutôt qu'un `read()` global : rien n'est
+    attendu sur ce canal, seule sa fermeture compte, et une ligne parasite ne
+    doit pas l'arrêter.
+    """
+    try:
+        for _ligne in flux:
+            pass
+    except (OSError, ValueError):
+        pass
+    arret.set()
 
 
 # ------------------------------------------------------------- comptes (service informatique)
@@ -232,7 +259,16 @@ def run_comptes(argv: list[str]) -> int:
     sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
     from backend import manage_users
     prog = Path(sys.executable).name if FROZEN else "python launch.py"
-    return manage_users.main(argv, prog=prog)
+    code = manage_users.main(argv, prog=prog)
+    # Ouvert dans sa propre fenêtre par l'application de bureau (menu « Créer un
+    # compte… ») : sans cette pause, la fenêtre se fermerait aussitôt l'assistant
+    # terminé, avant qu'on ait pu lire son compte rendu.
+    if os.environ.get("OLIVIA_PAUSE_FIN") == "1":
+        try:
+            input("\nAppuyez sur Entrée pour fermer cette fenêtre…")
+        except (EOFError, KeyboardInterrupt):
+            pass
+    return code
 
 
 def verifier_dossier_donnees() -> bool:
@@ -380,6 +416,9 @@ def main() -> int:
     parser.add_argument("--no-ollama", action="store_true",
                         help="Ne pas démarrer Ollama automatiquement")
     parser.add_argument("--max-wait", type=int, default=30)
+    parser.add_argument("--parent-stdin", action="store_true",
+                        help="S'arrêter quand l'entrée standard se ferme "
+                             "(usage interne : application de bureau)")
     args = parser.parse_args()
 
     print("=" * 60)
