@@ -1,4 +1,4 @@
-# 🌷 Oliv'IA — assistante locale pour le secrétariat
+#  Oliv'IA — assistante locale pour le secrétariat
 
 **Oliv'IA** est une assistante IA **100 % locale**, pensée d'abord pour une **assistante de
 direction en lycée**, et utilisable par toute petite structure (mairie, association, PME,
