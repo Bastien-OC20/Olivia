@@ -135,7 +135,8 @@ un endroit différent et a évolué séparément.
 
 Les **mises à jour automatiques** de l'application de bureau comparent la version de
 `desktop/package.json` à celle de la dernière release GitHub : c'est ce numéro qu'il faut
-augmenter avant d'étiqueter une nouvelle version (`git tag v1.1.0`).
+augmenter avant de publier une nouvelle version (voir
+[Intégration continue](#-tests-et-intégration-continue)).
 
 **Principales dépendances** (minimums déclarés ; la version réellement installée est celle
 du fichier de verrouillage ou du dernier `pip install`) :
@@ -894,12 +895,18 @@ chaque push sur `main` :
 - déclenchement manuel (*Actions → Application de bureau → Run workflow*) ou étiquette `v*` ;
 - sur `macos-latest` (Apple Silicon) et `windows-latest` : tests du backend, build de
   l'interface, PyInstaller, tests et build Electron **non signé** ;
-- installeurs déposés dans les **artefacts** du run ; avec une étiquette `v*`, publiés en plus
-  dans une **release GitHub brouillon** (source des mises à jour automatiques, à publier à la
-  main).
+- installeurs déposés dans les **artefacts** du run ;
+- avec la case **« publier »** cochée (ou une étiquette `v*`), joints en plus à une **release
+  GitHub brouillon** `v<version>`, créée une seule fois avant les deux constructions. Une fois
+  publiée, elle sert de source aux mises à jour automatiques.
 
-Publier une version : augmenter `version` dans `desktop/package.json`, commiter, puis
-`git tag v1.1.0 && git push origin v1.1.0`.
+Publier une version :
+1. augmenter `version` dans `desktop/package.json` et fusionner sur `main` ;
+2. *Actions → Application de bureau → Run workflow*, branche `main`, cocher **publier** ;
+3. vérifier la release brouillon (*Releases*), puis **Publish release**. GitHub crée alors
+   l'étiquette `v<version>`.
+
+Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le même résultat.
 
 ---
 
