@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useMoteurStore } from './moteur.js'
+import { useTableauxStore } from './tableaux.js'
+import {
+  sujetCommandeTableau, messagesTableau,
+  analyserSchema, schemaExploitable, titreTableau, versMermaid, sceneDepuisMermaid,
+} from '../tableauIA.js'
 
 // Recherche web : nombre de résultats injectés et longueur max de la requête
 // envoyée au moteur (une demande de chat peut être un paragraphe entier).
@@ -199,6 +204,8 @@ export const useChatStore = defineStore('chat', () => {
       sources: m.sources || [],
       searchNote: m.searchNote || '',
       erreur: m.erreur || '',
+      // Tableau créé par /tableau : garde le bouton « Ouvrir le tableau ».
+      ...(m.tableau ? { tableau: m.tableau } : {}),
     }))
   }
 
@@ -228,6 +235,7 @@ export const useChatStore = defineStore('chat', () => {
         sources: m.sources || [],
         searchNote: m.searchNote || '',
         erreur: m.erreur || '',
+        ...(m.tableau ? { tableau: m.tableau } : {}),
       }))
       currentId.value = data.id ?? id
       historyUnavailable.value = false
@@ -465,6 +473,142 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // ---------- Commande /tableau ----------
+
+  const AIDE_TABLEAU = 'Écrivez ce que vous voulez schématiser après /tableau, par exemple : '
+    + "/tableau étapes de l'inscription d'un élève"
+  const ECHEC_SCHEMA = "Oliv'IA n'a pas réussi à produire un schéma à partir de cette demande. "
+    + 'Reformulez-la plus simplement (par exemple « /tableau étapes de … »), '
+    + 'puis réessayez.'
+  const ECHEC_DESSIN = "Oliv'IA a imaginé un schéma, mais n'a pas pu le dessiner dans le "
+    + 'tableau blanc. Réessayez, ou reformulez la demande.'
+
+  /**
+   * `/tableau <sujet>` : Oliv'IA fait écrire un schéma par le modèle (format simple,
+   * voir tableauIA.js), le dessine dans un nouveau tableau blanc Excalidraw, puis
+   * l'ouvre. Même cycle de vie que `send()` : composeur bloqué et bouton Stop
+   * pendant le travail, erreurs affichées sur la réponse, sauvegarde en fin.
+   */
+  async function creerTableau(userMessage) {
+    if (isStreaming.value) return
+    const sujet = sujetCommandeTableau(userMessage)
+    if (sujet === null) return
+    const texteSaisi = userMessage.trim()
+
+    if (!sujet) {
+      messages.value.push({ role: 'user', content: texteSaisi })
+      messages.value.push({
+        role: 'assistant', content: AIDE_TABLEAU, sources: [], searchNote: '', erreur: '',
+      })
+      await persist()
+      return
+    }
+    if (!currentModel.value) await loadModels()
+    if (!currentModel.value) {
+      messages.value.push({ role: 'user', content: texteSaisi })
+      messages.value.push({
+        role: 'assistant', content: '', sources: [], searchNote: '',
+        erreur: modelsErreur.value || MESSAGE_MOTEUR_ETEINT,
+      })
+      await persist()
+      return
+    }
+
+    messages.value.push({ role: 'user', content: texteSaisi })
+    isStreaming.value = true
+    messages.value.push({ role: 'assistant', content: '', sources: [], searchNote: '', erreur: '' })
+    // Proxy réactif repris depuis le tableau, comme dans send().
+    const assistantMsg = messages.value[messages.value.length - 1]
+    abortController.value = new AbortController()
+    const signal = abortController.value.signal
+    let aOuvrir = null
+
+    // Historique transmis au modèle : la conversation jusqu'ici (documents joints
+    // compris), sans les anciennes commandes /tableau ni leurs confirmations, qui
+    // l'inciteraient à répondre par une phrase plutôt que par le format demandé.
+    const base = []
+    const plan = fileContextPlan.value
+    if (plan.length) base.push({ role: 'user', content: withDocuments(plan) })
+    for (const m of messages.value.slice(0, -2)) {
+      if (m.tableau || (m.role === 'user' && sujetCommandeTableau(m.content) !== null)) continue
+      if (m.role === 'assistant' && !(m.content || '').trim()) continue
+      base.push({ role: m.role, content: m.content })
+    }
+
+    // Réponse non diffusée : il faut le texte entier avant de pouvoir dessiner.
+    async function demanderSchema(consignes) {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: currentModel.value,
+          messages: [...base, ...consignes],
+          stream: false,
+          // Format strict à respecter : on bride la fantaisie du modèle.
+          temperature: 0.2,
+        }),
+        signal,
+      })
+      if (!r.ok) {
+        if (r.status === 502) throw new Error(MESSAGE_MOTEUR_ETEINT)
+        throw new Error(`Oliv'IA ne répond pas (erreur ${r.status}).`)
+      }
+      const data = await r.json().catch(() => null)
+      return data?.message?.content || ''
+    }
+
+    try {
+      let schema = analyserSchema(await demanderSchema(messagesTableau(sujet)))
+      // Un petit modèle rate parfois le format : une seule nouvelle tentative,
+      // avec un rappel plus strict.
+      if (!schemaExploitable(schema)) {
+        schema = analyserSchema(await demanderSchema(messagesTableau(sujet, true)))
+      }
+      if (!schemaExploitable(schema)) {
+        assistantMsg.erreur = ECHEC_SCHEMA
+      } else {
+        let scene = null
+        try {
+          scene = await sceneDepuisMermaid(versMermaid(schema))
+        } catch (e) {
+          console.error('Dessin du schéma impossible :', e)
+          assistantMsg.erreur = ECHEC_DESSIN
+        }
+        // Stop pressé pendant le dessin : rien n'est créé.
+        if (scene && !signal.aborted) {
+          const cree = await useTableauxStore().creerAvecScene(titreTableau(schema, sujet), scene)
+          assistantMsg.content = `J'ai créé le tableau « ${cree.titre} » : `
+            + `${schema.noeuds.length} éléments reliés. Vous pouvez le modifier librement ; `
+            + "il est aussi dans l'onglet 🎨 Tableaux."
+          assistantMsg.tableau = { id: cree.id, titre: cree.titre }
+          aOuvrir = cree.id
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        assistantMsg.erreur = e instanceof TypeError
+          ? MESSAGE_OLIVIA_INJOIGNABLE
+          : (e.message || 'Erreur inconnue.')
+      }
+    } finally {
+      isStreaming.value = false
+      abortController.value = null
+      if (assistantMsg.erreur && !assistantMsg.content) useMoteurStore().signalerPanne()
+      // Sauvegarde AVANT d'ouvrir le tableau : à la première sauvegarde d'une
+      // conversation neuve, `currentId` change et App.vue ferme alors tout tableau
+      // ouvert (watch sur chat.currentId).
+      await persist()
+    }
+    if (aOuvrir) {
+      await nextTick()
+      try {
+        await useTableauxStore().ouvrir(aOuvrir)
+      } catch (e) {
+        console.warn('Ouverture du tableau impossible :', e.message)
+      }
+    }
+  }
+
   function stop() {
     if (abortController.value) abortController.value.abort()
   }
@@ -477,7 +621,7 @@ export const useChatStore = defineStore('chat', () => {
            conversations, currentId, historyUnavailable,
            fileContexts, fileContextPlan, fileContextNotice,
            addFileContext, removeFileContext, clearFileContexts,
-           loadModels, send, stop, clear,
+           loadModels, send, creerTableau, stop, clear,
            loadConversations, openConversation, newConversation,
            renameConversation, deleteConversation }
 })

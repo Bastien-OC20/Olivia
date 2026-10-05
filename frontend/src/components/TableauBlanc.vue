@@ -77,6 +77,28 @@ let derniereScene = null      // dernière scène enregistrée (texte JSON)
 let sceneEnAttente = null     // scène à enregistrer au prochain passage
 let racineReact = null
 let serialiser = null
+let apiExcalidraw = null      // interface d'Excalidraw (remise par excalidrawAPI)
+let cadre = false             // le cadrage de départ n'a lieu qu'une fois
+
+// Cadre tout le contenu dans la vue à l'ouverture : un schéma plus grand que
+// l'écran (typique d'un tableau produit par /tableau) ne doit pas déborder sous
+// la barre d'outils. `fitToContent` ne dépasse jamais 100 % : un petit dessin
+// reste à sa taille, simplement centré. Appelée depuis onChange car c'est le
+// premier moment où la scène est chargée ET la taille de la zone connue — avant,
+// le calcul porterait sur une zone de taille 0. Le zoom et le défilement ne font
+// pas partie de la scène enregistrée (format 'local'), donc aucune sauvegarde
+// inutile n'en découle.
+function cadrerUneFois(elements, appState) {
+  if (cadre || !apiExcalidraw || !appState.width || !appState.height) return
+  cadre = true
+  if (!elements.some(e => !e.isDeleted)) return       // tableau vide : rien à cadrer
+  apiExcalidraw.scrollToContent(undefined, {
+    fitToContent: true,
+    viewportZoomFactor: 0.9,        // petite marge autour du dessin
+    canvasOffsets: { top: 70 },     // la barre d'outils flotte sur le haut de la zone
+    animate: false,
+  })
+}
 
 const libelleEtat = computed(() => ({
   en_cours: 'Enregistrement…',
@@ -107,8 +129,8 @@ onMounted(async () => {
         elements: scene.elements || [],
         appState: { ...(scene.appState || {}), theme: scene.appState?.theme || 'dark' },
         files: scene.files || {},
-        scrollToContent: true,
       },
+      excalidrawAPI: (api) => { apiExcalidraw = api },
       langCode: 'fr-FR',
       name: tableau.titre,
       // Fonctions d'IA d'Excalidraw (texte → diagramme…) : elles passent par un
@@ -118,6 +140,7 @@ onMounted(async () => {
       // externes dans le tableau. Refusés.
       validateEmbeddable: () => false,
       onChange: (elements, appState, files) => {
+        cadrerUneFois(elements, appState)
         sceneEnAttente = { elements, appState, files }
         clearTimeout(minuteur)
         minuteur = setTimeout(enregistrer, DELAI_SAUVEGARDE_MS)
@@ -163,6 +186,7 @@ onBeforeUnmount(() => {
   if (sceneEnAttente) enregistrer()
   racineReact?.unmount()
   racineReact = null
+  apiExcalidraw = null
 })
 </script>
 

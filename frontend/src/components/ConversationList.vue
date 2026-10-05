@@ -2,7 +2,7 @@
   <div class="conversations">
     <button
       class="new-conv"
-      @click="chat.newConversation()"
+      @click="nouvelle"
     >
       ＋ Nouvelle conversation
     </button>
@@ -44,7 +44,7 @@
           <button
             class="conv-open"
             :aria-current="c.id === chat.currentId ? 'true' : undefined"
-            @click="chat.openConversation(c.id)"
+            @click="ouvrir(c.id)"
           >
             <span class="conv-title">{{ c.title || 'Sans titre' }}</span>
             <span class="conv-meta">
@@ -83,8 +83,10 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import { useTableauxStore } from '../stores/tableaux.js'
 
 const chat = useChatStore()
+const tableaux = useTableauxStore()
 const renamingId = ref(null)
 const renameText = ref('')
 const renameInput = ref(null)
@@ -98,6 +100,20 @@ const UNITS = [
   ['hour', 3600],
   ['minute', 60],
 ]
+
+// Un clic ici doit toujours montrer la conversation. Le watcher d'App.vue sur
+// `currentId` ne suffit pas : il ne bouge pas quand on ré-ouvre la conversation
+// déjà courante, ni quand on demande une nouvelle conversation alors que la
+// courante est déjà vide — le tableau resterait alors affiché sans rien dire.
+function nouvelle() {
+  chat.newConversation()
+  tableaux.fermer()
+}
+
+function ouvrir(id) {
+  chat.openConversation(id)
+  tableaux.fermer()
+}
 
 /** Date relative en français : « il y a 5 minutes », « hier »… */
 function relativeDate(ts) {

@@ -241,6 +241,19 @@ watch(() => auth.connecte, (ouverte) => {
 // tableau en cours envoie sa dernière sauvegarde en se fermant (TableauBlanc.vue).
 watch(() => chat.currentId, () => tableaux.fermer())
 
+// La barre latérale suit la zone principale : un tableau qui s'ouvre depuis la
+// conversation (bouton sous une réponse, commande /tableau) apparaît en
+// surbrillance dans sa liste ; en revenant à la conversation, on retrouve la
+// liste des conversations. L'onglet Documents n'est jamais touché : c'est là que
+// l'utilisatrice travaille, y compris quand un ajout referme le tableau. Passer
+// d'un tableau à un autre (identifiant différent, toujours ouvert) ne change rien.
+watch(() => tableaux.courant?.id ?? null, (id, avant) => {
+  const ouvert = id !== null
+  if (ouvert === (avant !== null)) return
+  if (ouvert && sideTab.value === 'conversations') sideTab.value = 'tableaux'
+  else if (!ouvert && sideTab.value === 'tableaux') sideTab.value = 'conversations'
+})
+
 // Le modèle indispensable dépend du mode de calcul (⚡ / 🧩 / 🪶) : après un
 // changement enregistré (barre du haut ou Paramètres), celui de l'autre mode
 // peut manquer. On revérifie une fois la sauvegarde terminée, pas avant : le

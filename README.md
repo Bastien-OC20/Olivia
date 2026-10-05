@@ -666,6 +666,11 @@ la zone principale ; « ← Conversation » y revient. L'éditeur est
 [Excalidraw](https://github.com/excalidraw/excalidraw) (licence MIT), le composant
 `@excalidraw/excalidraw` 0.18.1, intégré à l'interface : pas de site externe, pas de compte.
 
+- **Commande `/tableau <sujet>`** dans la conversation (par exemple
+  `/tableau étapes de l'inscription d'un élève`) : Oliv'IA dessine un schéma dans un nouveau
+  tableau blanc, puis l'ouvre (bouton « 🎨 Ouvrir le tableau » sous sa réponse). Le modèle
+  n'écrit qu'une liste de flèches (« A -> B ») que l'interface dessine elle-même
+  (`@excalidraw/mermaid-to-excalidraw`) : fiable même avec un très petit modèle.
 - **Enregistrement automatique** 1,5 s après la dernière modification, et en revenant à la
   conversation ; l'état (« Enregistrement… », « ✓ Enregistré », erreur) est affiché en haut.
 - Stockage : `profiles/<profile_id>/tableaux/<id>.json` (titre, dates, scène au format

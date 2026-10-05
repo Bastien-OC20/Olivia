@@ -22,7 +22,7 @@
           type="button"
           @click="onInject"
         >
-          <span aria-hidden="true">➕</span> Injecter dans le chat
+          <span aria-hidden="true">➕</span> Utiliser dans la conversation
         </button>
         <button
           class="btn-close"

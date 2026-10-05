@@ -54,6 +54,26 @@ export const useTableauxStore = defineStore('tableaux', () => {
     await charger()
   }
 
+  /**
+   * Crée un tableau déjà dessiné (schéma produit par /tableau), SANS l'ouvrir :
+   * l'appelant choisit le moment de l'ouvrir. Renvoie le tableau créé ; lève une
+   * erreur lisible si le serveur refuse ou ne répond pas.
+   */
+  async function creerAvecScene(titre, scene) {
+    const r = await fetch('/api/tableaux', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ titre, scene }),
+    })
+    if (!r.ok) {
+      const detail = (await r.json().catch(() => ({}))).detail
+      throw new Error(detail || `Le tableau n'a pas pu être créé (erreur ${r.status}).`)
+    }
+    const cree = await r.json()
+    await charger()
+    return cree
+  }
+
   async function renommer(id, titre) {
     const r = await fetch(`/api/tableaux/${encodeURIComponent(id)}`, {
       method: 'PUT',
@@ -116,6 +136,6 @@ export const useTableauxStore = defineStore('tableaux', () => {
 
   return {
     liste, indisponible, courant, sauvegarde, erreurSauvegarde,
-    charger, ouvrir, nouveau, renommer, enregistrerScene, supprimer, fermer, reinitialiser,
+    charger, ouvrir, nouveau, creerAvecScene, renommer, enregistrerScene, supprimer, fermer, reinitialiser,
   }
 })

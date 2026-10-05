@@ -24,6 +24,8 @@ from . import profiles
 
 TITLE_MAX_LEN = 60
 TITLE_FALLBACK = "Nouvelle conversation"
+# Même plafond que le titre d'un tableau blanc (tableaux.TITRE_MAX).
+TABLEAU_TITRE_MAX = 80
 
 SOUS_DOSSIER = "conversations"
 _lock = RLock()
@@ -74,6 +76,13 @@ def _clean_messages(messages: list[dict] | None) -> list[dict]:
         # manque, et gardée HORS de `content`, qui est renvoyé au modèle.
         if m.get("erreur"):
             entry["erreur"] = m["erreur"]
+        # Tableau blanc créé par /tableau : le bouton « Ouvrir le tableau » doit
+        # survivre à un rechargement. L'identifiant sert ensuite à une URL côté
+        # interface : on n'accepte que la forme d'un vrai identifiant.
+        tableau = m.get("tableau")
+        if (isinstance(tableau, dict) and isinstance(tableau.get("id"), str)
+                and _is_valid_id(tableau["id"]) and isinstance(tableau.get("titre"), str)):
+            entry["tableau"] = {"id": tableau["id"], "titre": tableau["titre"][:TABLEAU_TITRE_MAX]}
         cleaned.append(entry)
     return cleaned
 

@@ -10,7 +10,7 @@
 #                 backend/requirements.txt (Linux), et sur Windows et macOS
 #                 avec la version utilisée par bureau.yml — c'est là que les
 #                 installeurs sont construits, autant y voir les tests passer ;
-#   - interface : ESLint + build Vite ;
+#   - interface : ESLint + tests Node des fonctions pures de l'interface + build Vite ;
 #   - bureau    : tests Node des fonctions pures de desktop/ (sans télécharger
 #                 Electron, inutile pour ces tests).
 name: Tests
@@ -79,6 +79,7 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   bureau:

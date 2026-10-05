@@ -117,6 +117,15 @@
             </ol>
           </details>
 
+          <!-- Tableau blanc créé par la commande /tableau. -->
+          <button
+            v-if="m.tableau"
+            class="doc-open"
+            @click="tableaux.ouvrir(m.tableau.id)"
+          >
+            🎨 Ouvrir le tableau
+          </button>
+
           <!-- Transformer une réponse d'Olivia en document Word. C'est le geste
                attendu par un secrétariat : la réponse existe, il ne reste qu'à
                la mettre en page. Toujours visible, y compris en mode simple. -->
@@ -274,6 +283,9 @@
           <p class="tip">
             <small>💡 Astuce : ouvrez l'onglet 📁 Documents à gauche pour que j'utilise un fichier dans ma réponse.</small>
           </p>
+          <p class="tip tip-suite">
+            <small>🎨 Astuce : tapez /tableau suivi d'un sujet (par exemple « /tableau étapes de l'inscription d'un élève ») et je dessine un schéma dans un tableau blanc.</small>
+          </p>
         </div>
         <div
           v-if="chat.isSearching"
@@ -340,11 +352,14 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, reactive } from 'vue'
 import { useChatStore } from '../stores/chat.js'
+import { useTableauxStore } from '../stores/tableaux.js'
+import { sujetCommandeTableau } from '../tableauIA.js'
 import MessageBubble from './MessageBubble.vue'
 import FilePreview from './FilePreview.vue'
 import logoUrl from '../assets/logo-mark.png'
 
 const chat = useChatStore()
+const tableaux = useTableauxStore()
 const input = ref('')
 const messagesEl = ref(null)
 // Recherche web : choix explicite de l'utilisatrice, conservé d'un message à l'autre.
@@ -386,7 +401,9 @@ watch(() => chat.messages[chat.messages.length - 1]?.content, async () => {
 
 function send() {
   if (!input.value.trim()) return
-  chat.send(input.value, webSearch.value)
+  // « /tableau <sujet> » : schéma dessiné dans un tableau blanc, pas une réponse écrite.
+  if (sujetCommandeTableau(input.value) !== null) chat.creerTableau(input.value)
+  else chat.send(input.value, webSearch.value)
   input.value = ''
 }
 
@@ -418,6 +435,8 @@ const besoinObjet = computed(
 /** Bouton proposé sur une réponse d'Olivia terminée et non vide. */
 function peutCreerDocument(m, i) {
   if (m.role !== 'assistant') return false
+  // Le message d'un tableau créé n'est pas un texte à mettre en page.
+  if (m.tableau) return false
   if (chat.isStreaming && i === chat.messages.length - 1) return false
   return (m.content || '').trim().length > 0
 }
@@ -633,6 +652,7 @@ onMounted(chargerEtatModele)
 }
 .example:hover { border-color: var(--accent); }
 .tip { margin-top: 20px; }
+.tip.tip-suite { margin-top: 6px; }
 .typing span { display: inline-block; width: 8px; height: 8px;
                background: var(--muted); border-radius: 50%;
                margin-right: 4px; animation: blink 1.4s infinite; }

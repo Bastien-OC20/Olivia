@@ -156,13 +156,6 @@
       >
         ➕ Tout utiliser dans la conversation ({{ searchData.results.length }})
       </button>
-      <p
-        v-if="injectMsg"
-        class="inject-msg"
-        aria-live="polite"
-      >
-        {{ injectMsg }}
-      </p>
 
       <article
         v-for="r in searchData.results"
@@ -216,6 +209,18 @@
       </article>
     </div>
 
+    <!-- Confirmation / erreur d'un ajout à la conversation, d'où qu'il parte
+         (résultat de recherche ou aperçu d'un fichier de l'arborescence). Collée
+         en haut de la barre latérale : l'arborescence peut être longue et
+         l'aperçu loin sous l'écran. -->
+    <p
+      v-if="injectMsg"
+      class="inject-msg"
+      aria-live="polite"
+    >
+      {{ injectMsg }}
+    </p>
+
     <ul class="tree">
       <li
         v-for="item in items"
@@ -258,9 +263,11 @@ import FilePreview from './FilePreview.vue'
 import FolderPickerModal from './FolderPickerModal.vue'
 import { useSettingsStore } from '../stores/settings.js'
 import { useChatStore } from '../stores/chat.js'
+import { useTableauxStore } from '../stores/tableaux.js'
 
 const settings = useSettingsStore()
 const chat = useChatStore()
+const tableaux = useTableauxStore()
 const items = ref([])
 const currentPath = ref('')
 const rootPath = ref('')
@@ -403,12 +410,21 @@ function annonce(texte) {
   setTimeout(() => { if (injectMsg.value === texte) injectMsg.value = '' }, 5000)
 }
 
-/** Ajoute un document à la conversation depuis un résultat de recherche. */
+// Après un ajout réussi, un tableau blanc affiché garderait l'utilisatrice devant
+// un écran qui n'a pas bougé : on ramène à la conversation, où le bandeau
+// « N documents » confirme l'ajout. En cas d'échec, on ne change rien : le
+// message d'erreur doit rester lisible ici.
+function montrerConversation() {
+  tableaux.fermer()
+}
+
+/** Ajoute un document à la conversation (résultat de recherche ou aperçu). */
 async function injectPath(path, name) {
   try {
     const doc = await loadDocument(path, name)
     if (chat.addFileContext(doc)) {
       annonce(`✓ « ${doc.name} » est maintenant utilisé dans la conversation.`)
+      montrerConversation()
     } else {
       annonce(chat.fileContextNotice)
     }
@@ -431,6 +447,7 @@ async function injectAll() {
   }
   const suite = echecs.length ? ` — non ajouté(s) : ${echecs.join(', ')}` : ''
   annonce(`✓ ${ok} document(s) ajouté(s) à la conversation${suite}`)
+  if (ok > 0) montrerConversation()
 }
 
 // Injection depuis l'aperçu d'un fichier (bouton du panneau de prévisualisation).
@@ -502,7 +519,11 @@ async function doSearch() {
 .search-summary { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
 .search-notice { font-size: 12px; color: var(--warn); line-height: 1.4; margin: 0 0 6px; }
 .inject-all { width: 100%; font-size: 13px; margin-bottom: 6px; }
-.inject-msg { font-size: 12px; color: var(--accent); line-height: 1.4; margin: 0 0 6px; }
+.inject-msg {
+  position: sticky; top: 52px; z-index: 1;   /* sous la barre d'onglets de la barre latérale */
+  font-size: 12px; color: var(--accent); line-height: 1.4; margin: 8px 0 6px;
+  padding: 6px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+}
 .doc-hit {
   padding: 8px; margin-bottom: 6px; border: 1px solid var(--border);
   border-radius: 6px; background: var(--panel);
