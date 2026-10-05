@@ -381,7 +381,7 @@ backend\.venv\Scripts\pyinstaller.exe build.spec --clean --noconfirm
   **à côté de `ai-webapp.exe`** ; sinon il réutilise un Ollama déjà lancé sur le port 11434.
 - Le binaire **n'embarque ni comptes, ni réglages, ni conversations** (`build.spec` les retire) :
   une installation neuve démarre vide et ne transporte aucun secret.
-- Icône : `ai-webapp.ico` (racine du dépôt), générée depuis `visuel/logo.png` (voir
+- Icône : `ai-webapp.ico` (racine du dépôt), générée depuis `visuel/logos_olivia/oliv-ia.png` (voir
   [Logo et icônes](#-logo-et-icônes)).
 - Le même exécutable sert à créer les comptes : `ai-webapp.exe init`.
 
@@ -1031,9 +1031,11 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
 
 ## 🎨 Logo et icônes
 
-Toutes les icônes viennent d'**un seul fichier**, `visuel/logo.png` : tuile bleue aux coins
-arrondis, « O » au rameau d'olivier et mot « Oliv'IA ». Pour changer de logo, remplacer ce
-fichier puis :
+Toutes les icônes viennent d'**un seul fichier**, `visuel/logos_olivia/oliv-ia.png` :
+tuile bleue aux coins arrondis, « O » au rameau d'olivier et mot « Oliv'ia ». Le dossier
+`logos_olivia/` contient aussi le fichier source `olivia.psd` et ses exports à d'autres tailles
+(`olivia@0,5x.png`, `olivia@2x.png`…). Pour changer de logo, remplacer `oliv-ia.png` (PNG carré,
+coins transparents ou blancs) puis :
 
 ```bash
 pip install pillow numpy
@@ -1056,13 +1058,16 @@ Le script en tire deux variantes (coins rendus transparents) :
 | `desktop/icons/tray.png`, `tray@2x.png` | marque, 32 et 64 px | barre des menus / zone de notification |
 | `visuel/logo-transparent.png` | logo, 512 px | en-tête de ce README |
 
-Le script fixe deux réglages :
+Le script fixe trois réglages :
+- **cadrage du « O »** : les lignes 100 à 868 de l'image source (1254 px), juste au-dessus
+  du mot. À ajuster dans le script (`O_HAUT`, `O_BAS`) si la mise en page du logo change ;
 - **marge macOS** : la tuile occupe 824 px d'une toile de 1024. C'est la convention de la
   grille d'icônes macOS, non revérifiée sur la documentation d'Apple ;
 - **format du `.ico`** : bitmap classique jusqu'à 128 px, PNG à 256 px.
 
-Le logo complet affiche le mot « Olivia » tel qu'il figure sur l'image fournie. Pour qu'il
-affiche « Oliv'IA », remplacer `visuel/logo.png` par une version modifiée et relancer le script.
+L'export PNG du `.psd` laisse le blanc du « O » transparent : le script ne garde
+transparents que les coins et rebouche ces trous en blanc. Sans cela, le « O » prendrait la
+couleur du fond (noir sur le thème sombre de GitHub).
 
 ## 📁 Arborescence
 
@@ -1074,9 +1079,9 @@ Olivia/
 ├── deploy-portable.ps1    ← build + synchro vers un disque portable
 ├── start-ollama.ps1       ← lance Ollama seul (Windows)
 ├── ai-webapp.ico          ← icône de l'exécutable Windows
-├── visuel/logo.png        ← logo source (toutes les icônes en sont tirées)
+├── visuel/logos_olivia/   ← logo source (oliv-ia.png), son .psd et ses exports
 ├── visuel/logo-transparent.png ← logo à coins transparents (en-tête du README)
-├── visuel/generer_icones.py ← régénère toutes les icônes
+├── visuel/generer_icones.py ← régénère toutes les icônes depuis visuel/logos_olivia/oliv-ia.png
 ├── .github/workflows/tests.yml    ← CI : tests sur chaque PR
 ├── .github/workflows/bureau.yml   ← CI : installeurs macOS et Windows
 ├── installer Olivia/olivia.iss    ← installeur Inno Setup

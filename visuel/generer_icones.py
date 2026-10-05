@@ -1,15 +1,17 @@
 """
-Génère toutes les icônes d'Olivia à partir d'un seul fichier : visuel/logo.png.
+Génère toutes les icônes d'Olivia à partir d'un seul fichier :
+visuel/logos_olivia/oliv-ia.png.
 
     pip install pillow numpy
     python visuel/generer_icones.py            # depuis la racine du dépôt
 
-Le logo source est une tuile bleue aux coins arrondis, posée sur un fond blanc
-carré, avec le « O » au rameau d'olivier et le mot « Olivia ». Deux variantes en
+Le logo source est une tuile bleue aux coins arrondis, avec le « O » au rameau
+d'olivier et le mot « Oliv'ia ». Ses coins sont soit transparents (PNG avec canal
+alpha, export du .psd), soit posés sur un fond blanc carré. Deux variantes en
 sont tirées :
 
   - le LOGO COMPLET, coins rendus transparents : grandes icônes (application
-    macOS, tailles ≥ 64 px de l'icône Windows), où le mot « Olivia » reste
+    macOS, tailles ≥ 64 px de l'icône Windows), où le mot « Oliv'ia » reste
     lisible ;
   - la MARQUE : même tuile, avec le seul « O » au rameau, agrandi et centré.
     Pour les petites tailles (16 à 48 px, favicon, barre des menus, barre du
@@ -34,11 +36,11 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 RACINE = Path(__file__).resolve().parent.parent
-SOURCE = RACINE / "visuel" / "logo.png"
+SOURCE = RACINE / "visuel" / "logos_olivia" / "oliv-ia.png"
 
 # Lignes du logo source (1254 px) occupées par le « O » au rameau ; le mot
-# « Olivia » commence juste en dessous (mesuré : O de 122 à 852, texte dès 859).
-O_HAUT, O_BAS = 100, 856
+# « Oliv'ia » commence en dessous (mesuré : O de 122 à 852, texte dès 885).
+O_HAUT, O_BAS = 100, 868
 
 # Grille des icônes macOS : la tuile occupe 824 px d'une toile de 1024, le reste
 # est une marge transparente. Sans elle, l'icône paraît plus grosse que les
@@ -49,8 +51,47 @@ TAILLES_MARQUE = (16, 24, 32, 48)
 TAILLES_LOGO = (64, 128, 256)
 
 
-def _tableau(img: Image.Image) -> np.ndarray:
-    return np.asarray(img.convert("RGB")).astype(np.float64)
+def _depuis_coins(passable: np.ndarray) -> np.ndarray:
+    """Zone atteinte par remplissage depuis les quatre coins, à travers les
+    pixels « passables »."""
+    h, w = passable.shape
+    atteint = np.zeros((h, w), bool)
+    pile = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
+    while pile:
+        y, x = pile.pop()
+        if atteint[y, x] or not passable[y, x]:
+            continue
+        atteint[y, x] = True
+        if y > 0:
+            pile.append((y - 1, x))
+        if y < h - 1:
+            pile.append((y + 1, x))
+        if x > 0:
+            pile.append((y, x - 1))
+        if x < w - 1:
+            pile.append((y, x + 1))
+    return atteint
+
+
+def preparer(source: Image.Image) -> tuple[np.ndarray, np.ndarray]:
+    """Couleurs et opacité de la tuile.
+
+    Source avec canal alpha : seuls les coins, reliés au bord, restent
+    transparents. L'export du .psd laisse aussi le blanc du « O » transparent :
+    ces trous intérieurs sont rebouchés en blanc, sans quoi le « O » prendrait
+    la couleur du fond (noir sur le thème sombre de GitHub).
+    Source sans canal alpha : l'opacité se déduit du fond blanc des coins.
+    """
+    rgb = np.asarray(source.convert("RGB")).astype(np.float64)
+    if "A" not in source.getbands():
+        return rgb, masque_tuile(rgb)
+    alpha = np.asarray(source.getchannel("A")).astype(np.float64) / 255.0
+    exterieur = _depuis_coins(alpha < 1.0)
+    trou = ~exterieur & (alpha < 1.0)
+    a = alpha[trou][:, None]
+    rgb[trou] = rgb[trou] * a + 255.0 * (1.0 - a)
+    alpha[trou] = 1.0
+    return rgb, alpha
 
 
 def masque_tuile(rgb: np.ndarray) -> np.ndarray:
@@ -62,22 +103,7 @@ def masque_tuile(rgb: np.ndarray) -> np.ndarray:
     déduit de la distance au blanc.
     """
     h, w, _ = rgb.shape
-    blanc = (rgb.min(axis=2) > 235)
-    exterieur = np.zeros((h, w), bool)
-    pile = [(0, 0), (0, w - 1), (h - 1, 0), (h - 1, w - 1)]
-    while pile:
-        y, x = pile.pop()
-        if exterieur[y, x] or not blanc[y, x]:
-            continue
-        exterieur[y, x] = True
-        if y > 0:
-            pile.append((y - 1, x))
-        if y < h - 1:
-            pile.append((y + 1, x))
-        if x > 0:
-            pile.append((y, x - 1))
-        if x < w - 1:
-            pile.append((y, x + 1))
+    exterieur = _depuis_coins(rgb.min(axis=2) > 235)
     alpha = np.ones((h, w))
     alpha[exterieur] = 0.0
     # Liseré : pixels voisins du fond, ni tout blancs ni tout bleus.
@@ -113,8 +139,7 @@ def rgba(rgb: np.ndarray, alpha: np.ndarray) -> Image.Image:
 
 
 def logo_complet(source: Image.Image) -> Image.Image:
-    rgb = _tableau(source)
-    alpha = masque_tuile(rgb)
+    rgb, alpha = preparer(source)
     # Sous le liseré, la couleur garde un reste de blanc : on la ramène au bleu.
     fond = degrade_fond(rgb, alpha)
     bord = (alpha > 0) & (alpha < 1)
@@ -124,9 +149,8 @@ def logo_complet(source: Image.Image) -> Image.Image:
 
 def marque(source: Image.Image) -> Image.Image:
     """Tuile bleue et « O » au rameau seul, agrandi et centré."""
-    rgb = _tableau(source)
+    rgb, alpha = preparer(source)
     h, w, _ = rgb.shape
-    alpha = masque_tuile(rgb)
     fond = degrade_fond(rgb, alpha)
 
     # Premier plan du « O » : ce qui s'écarte du fond bleu (blanc, vert).
@@ -135,7 +159,10 @@ def marque(source: Image.Image) -> Image.Image:
     opacite = np.clip((ecart - 12.0) / 48.0, 0.0, 1.0)
     # Seulement à l'intérieur de la tuile : le blanc des coins, au bord de ces
     # lignes, n'appartient pas au dessin.
-    interieur = np.asarray(Image.fromarray(((alpha < 1) * 255).astype(np.uint8))
+    # Le bord de l'image compte aussi comme extérieur : la tuile peut le toucher.
+    hors_tuile = alpha < 1
+    hors_tuile[:, :8] = hors_tuile[:, -8:] = True
+    interieur = np.asarray(Image.fromarray((hors_tuile * 255).astype(np.uint8))
                            .filter(ImageFilter.MaxFilter(15)))[O_HAUT:O_BAS] == 0
     opacite *= interieur
     colonnes = np.nonzero(opacite.max(axis=0) > 0.5)[0]
@@ -216,8 +243,8 @@ def main() -> None:
     reduire(mq, 256).save(RACINE / "desktop/icons/fenetre.png", optimize=True)
     reduire(mq, 32).save(RACINE / "desktop/icons/tray.png", optimize=True)
     reduire(mq, 64).save(RACINE / "desktop/icons/tray@2x.png", optimize=True)
-    # Coins transparents : le logo source a des coins blancs, visibles sur le
-    # thème sombre de GitHub.
+    # Coins transparents : des coins blancs seraient visibles sur le thème
+    # sombre de GitHub.
     reduire(logo, 512).save(RACINE / "visuel/logo-transparent.png", optimize=True)
     print("Icônes générées depuis", SOURCE.relative_to(RACINE))
 
