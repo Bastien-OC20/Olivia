@@ -637,6 +637,8 @@ def _build_options(profile_id: str, temperature: float | None) -> dict:
     eff_temp = s.get("temperature", 0.7) if temperature is None else temperature
     options = {"temperature": eff_temp, "num_predict": MAX_TOKENS_REPONSE}
     # CPU/GPU : num_gpu=0 force le calcul CPU ; sinon Ollama utilise le GPU auto.
+    # Le mode « leger » n'impose rien : son modèle (~1 Go) tient aussi sur une
+    # petite carte graphique, qu'Ollama emploie alors d'office.
     if s.get("compute_device") == "cpu":
         options["num_gpu"] = 0
     return options

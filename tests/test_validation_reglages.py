@@ -75,6 +75,11 @@ def test_valeurs_valides_enregistrees(client):
     assert corps["connectors"]["imap"]["host"] == "imap.exemple.fr"
 
 
+def test_mode_leger_accepte(client):
+    r = client.put("/api/settings", json={"compute_device": "leger"})
+    assert r.status_code == 200 and r.json()["compute_device"] == "leger"
+
+
 def test_cle_inconnue_ignoree_sans_bloquer_l_enregistrement(client):
     # Clés d'anciennes versions renvoyées par l'interface : ignorées, pas refusées.
     r = client.put("/api/settings", json={

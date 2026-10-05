@@ -6,6 +6,7 @@ const DEVICE_MODELS = {
   gpu: ["mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
         "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
   cpu: ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
+  leger: ["qwen2.5:1.5b"],
 }
 
 const DEFAULTS = {

@@ -116,7 +116,9 @@ Elle s'utilise de quatre façons, avec le même code :
 - **Boîte mail professionnelle (IMAP)** avec nombre de non-lus, **calendrier `.ics`**.
 
 **Matériel et distribution**
-- Bascule **GPU ↔ CPU**, **détectée automatiquement** au premier lancement (VRAM NVIDIA).
+- Trois modes de calcul : **⚡ Rapide (GPU)**, **🧩 Standard (CPU)**, détectés automatiquement
+  au premier lancement (VRAM NVIDIA), et **🪶 Léger** pour les postes anciens ou peu puissants
+  (choix manuel).
 - **Mode simple** par défaut (réglages techniques masqués).
 - **Application de bureau** macOS et Windows : fenêtre native, icône dans la barre des menus /
   zone de notification, raccourci global, instance unique, mises à jour automatiques
@@ -169,6 +171,7 @@ dans `backend/settings.py`, `DEVICE_MODELS`) :
 |---|---|---|
 | Conversation, GPU (cible : RTX 5060 8 Go) | `mistral-nemo:12b-instruct-2407-q4_K_M` | ~7,5 Go |
 | Conversation, CPU / bureautique | `gemma2:2b` | ~1,6 Go |
+| Conversation, mode 🪶 Léger (postes anciens) — **non testé** | `qwen2.5:1.5b` | 986 Mo |
 | Recherche par le sens (embeddings) | `bge-m3` | — |
 
 ---
@@ -178,7 +181,7 @@ dans `backend/settings.py`, `DEVICE_MODELS`) :
 | Outil | Rôle | Remarque |
 |---|---|---|
 | **Ollama** (https://ollama.com) | moteur d'IA local | installé sur le poste (port 11434) ou en portable dans `./ollama` |
-| Modèles Ollama | voir [Versions](#️-versions) | `ollama pull mistral-nemo:12b-instruct-2407-q4_K_M`, `ollama pull gemma2:2b`, `ollama pull bge-m3` |
+| Modèles Ollama | voir [Versions](#️-versions) | `ollama pull mistral-nemo:12b-instruct-2407-q4_K_M`, `ollama pull gemma2:2b`, `ollama pull bge-m3` ; mode Léger : `ollama pull qwen2.5:1.5b` |
 | **Python** 3.10 ou plus | backend (sources, construction) | `requirements.txt` vise 3.10 → 3.14 ; **testé en 3.11** ; la CI est configurée en 3.12 |
 | **Node.js** | interface, application de bureau | **testé avec Node 22** (aussi celui de la CI) |
 | **Tesseract** (facultatif) | OCR des documents scannés | voir [OCR](#-documents-scannés--ocr) |
@@ -574,10 +577,19 @@ Chaque valeur enregistrée est **validée** (type, choix fermés, bornes, longue
 invalide est refusée (HTTP 400, message nommant le champ) ; une clé inconnue héritée d'une
 ancienne version est ignorée.
 
-### GPU / CPU
+### GPU / CPU / Léger
 
-Sélecteur **⚡ Rapide (GPU) / 🧩 Standard (CPU)** dans la barre du haut (et dans les
-Paramètres en mode avancé). En CPU, le backend force `num_gpu=0` à chaque requête.
+Sélecteur **⚡ Rapide (GPU) / 🧩 Standard (CPU) / 🪶 Léger** dans la barre du haut (et dans
+les Paramètres en mode avancé). En CPU, le backend force `num_gpu=0` à chaque requête.
+
+Le mode **🪶 Léger** utilise `qwen2.5:1.5b` (Alibaba Cloud, licence Apache 2.0, 986 Mo), pour
+les postes où `gemma2:2b` (1,6 Go) est trop lourd. Le français fait partie des langues
+annoncées par Qwen ; les réponses seront plus simples qu'en mode Standard. Il n'impose pas
+`num_gpu=0` : sur un poste doté d'une petite carte graphique, Ollama s'en sert d'office. Ce mode
+n'est **jamais** choisi par la détection automatique, et son modèle n'est pas embarqué dans
+l'installeur Inno Setup ni la version portable : le panneau « Oliv'IA n'est pas encore prête »
+propose de le télécharger. Écartés sans test : `gemma3:1b` (815 Mo, annoncé en anglais
+seulement pour la taille 1B), `llama3.2:1b` (1,3 Go par défaut, n'allège presque pas).
 
 **Détection automatique** (`backend/hardware.py`) : une organisation **jamais configurée**
 interroge `nvidia-smi` et retient `gpu` si une carte NVIDIA d'au moins ~8 Go de VRAM est
@@ -974,7 +986,7 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
 | Téléchargement des modèles impossible | le poste n'a pas accès à Internet, ou un pare-feu bloque le registre de modèles d'Ollama : utiliser l'installeur Inno Setup ou le disque portable, qui embarquent les modèles |
 | « Oliv'IA ne répond plus » (application de bureau) | icône Oliv'IA → *Redémarrer Oliv'IA* ; sinon consulter `olivia.log` |
 | « Oliv'IA ne répond pas » (navigateur) | la fenêtre noire du lanceur a été fermée : relancer Oliv'IA |
-| Réponses extrêmement lentes | le mode GPU est choisi sur un poste sans carte adaptée : passer en 🧩 CPU |
+| Réponses extrêmement lentes | le mode GPU est choisi sur un poste sans carte adaptée : passer en 🧩 CPU, ou en 🪶 Léger sur un poste ancien |
 | L'écran de connexion dit qu'il n'y a aucun compte | créer le premier compte ([Comptes](#-comptes-et-organisations)) |
 | « Trop de tentatives » (HTTP 429) | attendre le délai affiché ; il double à chaque nouvel échec |
 | Échec de connexion juste après l'installation | dossier des données non modifiable : le lanceur l'affiche au démarrage ([Emplacement](#-emplacement-des-données)) |
@@ -995,6 +1007,9 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
   encore vérifiés sur de vrais postes : installeurs, premier lancement non signé sur macOS,
   droits de `C:\ProgramData\Olivia`, icônes, raccourci global, mise à jour automatique. Le
   workflow « Application de bureau » n'a pas encore été exécuté.
+- **Mode 🪶 Léger** : `qwen2.5:1.5b` n'a **pas** été passé au prompt de référence qui a servi à
+  choisir les deux autres modèles (Ollama injoignable depuis l'environnement où il a été
+  ajouté). Qualité du français administratif et vitesse à vérifier sur un vrai poste.
 - **Ollama embarqué** : archives et extraction vérifiées ici ; démarrage du moteur embarqué,
   utilisation du GPU et taille réelle de l'installeur Windows à confirmer sur de vrais postes.
 - **Panneau « Oliv'IA n'est pas encore prête »** : téléchargement vérifié dans Chromium avec un

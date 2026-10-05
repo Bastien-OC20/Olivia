@@ -15,6 +15,7 @@ from backend import main, moteur, profiles, sessions, settings, users
 
 GPU = settings.DEVICE_MODELS["gpu"][0]
 CPU = settings.DEVICE_MODELS["cpu"][0]
+LEGER = settings.DEVICE_MODELS["leger"][0]
 
 
 @pytest.fixture
@@ -91,6 +92,27 @@ def test_pret_avec_le_modele_du_peripherique_choisi(client, monkeypatch):
     m = _par_nom(etat)
     assert m[CPU]["niveau"] == moteur.INDISPENSABLE
     assert m[GPU]["niveau"] == moteur.FACULTATIF and m[GPU]["installe"] is False
+
+
+def test_mode_leger(client, monkeypatch):
+    # Mode « léger » : son petit modèle suffit ; ceux des deux autres modes
+    # restent facultatifs (jamais proposés au téléchargement par le panneau).
+    settings.reglages(client.profile_id).update({"compute_device": "leger"})
+    _faux_ollama(monkeypatch, _installes(LEGER, "bge-m3"))
+    etat = client.get("/api/moteur/etat").json()
+    assert etat["pret"] is True and etat["complet"] is True
+    m = _par_nom(etat)
+    assert m[LEGER]["niveau"] == moteur.INDISPENSABLE
+    assert m[GPU]["niveau"] == m[CPU]["niveau"] == moteur.FACULTATIF
+
+
+def test_modes_sans_doublon():
+    # Chaque mode demande son modèle, l'index et les modèles des autres modes,
+    # une seule fois chacun.
+    for mode in settings.DEVICE_MODELS:
+        noms = [m["nom"] for m in moteur.modeles_attendus(mode)]
+        assert len(noms) == len(set(noms)) == len(settings.DEVICE_MODELS) + 1
+        assert noms[0] == settings.DEVICE_MODELS[mode][0]
 
 
 def test_pret_sans_bge_m3_mais_incomplet(client, monkeypatch):
