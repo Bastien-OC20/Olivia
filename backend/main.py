@@ -42,6 +42,9 @@ Routes principales :
   POST /api/conversations                : crée une conversation
   PUT  /api/conversations/{conv_id}      : met à jour une conversation
   DELETE /api/conversations/{conv_id}    : supprime une conversation
+  GET  /api/tableaux                     : liste des tableaux blancs (métadonnées)
+  GET|PUT|DELETE /api/tableaux/{id}      : tableau (scène Excalidraw) : lire, enregistrer, supprimer
+  POST /api/tableaux                     : crée un tableau blanc
   /ui                                    : interface Vue buildée (frontend/dist)
 
 CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service),
@@ -82,6 +85,7 @@ from . import docmodele
 from . import moteur
 from . import ocr
 from . import conversations
+from . import tableaux
 from . import profiles
 from . import sessions
 from . import tentatives
@@ -1571,6 +1575,52 @@ async def delete_conversation(conv_id: str, profile_id: str = Depends(get_curren
     return {"ok": True}
 
 
+# ---------- Routes Tableaux blancs (Excalidraw) ----------
+@app.get("/api/tableaux")
+async def tableaux_liste(profile_id: str = Depends(get_current_profile)):
+    """Tableaux de l'organisation (métadonnées seules), du plus récent au plus ancien."""
+    return {"tableaux": tableaux.lister(profile_id)}
+
+
+@app.get("/api/tableaux/{tableau_id}")
+async def tableau_lire(tableau_id: str, profile_id: str = Depends(get_current_profile)):
+    """Tableau complet, scène Excalidraw comprise."""
+    donnees = tableaux.lire(profile_id, tableau_id)
+    if donnees is None:
+        raise HTTPException(404, "Tableau introuvable")
+    return donnees
+
+
+@app.post("/api/tableaux")
+async def tableau_creer(body: dict, profile_id: str = Depends(get_current_profile)):
+    """Crée un tableau (vide, ou à partir d'une scène fournie) et le renvoie."""
+    try:
+        return tableaux.creer(profile_id, titre=body.get("titre"), scene=body.get("scene"))
+    except tableaux.TableauInvalide as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/tableaux/{tableau_id}")
+async def tableau_modifier(tableau_id: str, body: dict,
+                           profile_id: str = Depends(get_current_profile)):
+    """Met à jour le titre et/ou la scène (sauvegarde automatique de l'interface)."""
+    try:
+        donnees = tableaux.modifier(profile_id, tableau_id,
+                                    titre=body.get("titre"), scene=body.get("scene"))
+    except tableaux.TableauInvalide as e:
+        raise HTTPException(400, str(e))
+    if donnees is None:
+        raise HTTPException(404, "Tableau introuvable")
+    return {"id": donnees["id"], "titre": donnees["titre"], "modifie_le": donnees["modifie_le"]}
+
+
+@app.delete("/api/tableaux/{tableau_id}")
+async def tableau_supprimer(tableau_id: str, profile_id: str = Depends(get_current_profile)):
+    if not tableaux.supprimer(profile_id, tableau_id):
+        raise HTTPException(404, "Tableau introuvable")
+    return {"ok": True}
+
+
 # ---------- Routes Connecteurs ----------
 @app.get("/api/connectors/status")
 async def connectors_status(profile_id: str = Depends(get_current_profile)):
@@ -1682,6 +1732,7 @@ async def privacy_export(profile_id: str = Depends(get_current_profile)):
         "settings": reglages_exportes,
         "secrets_masques": secrets_masques,
         "conversations": conversations.export_all_conversations(profile_id),
+        "tableaux": tableaux.exporter_tout(profile_id),
         "note": note,
     }
     return JSONResponse(
@@ -1693,7 +1744,7 @@ async def privacy_export(profile_id: str = Depends(get_current_profile)):
 @app.post("/api/privacy/delete")
 async def privacy_delete(profile_id: str = Depends(get_current_profile)):
     """Droit à l'effacement, POUR LA SEULE ORGANISATION CONNECTÉE : réinitialise
-    ses réglages, supprime ses conversations et son index sémantique, purge la zone
+    ses réglages, supprime ses conversations, ses tableaux et son index sémantique, purge la zone
     d'upload de l'app dans chacune de SES racines documentaires, et retire du cache
     OCR les entrées venues de ces mêmes racines.
 
@@ -1726,9 +1777,11 @@ async def privacy_delete(profile_id: str = Depends(get_current_profile)):
     docindex_removed = docindex.purger_index(profile_id)
     reglages(profile_id).reset()
     conversations_removed = conversations.delete_all_conversations(profile_id)
+    tableaux_removed = tableaux.supprimer_tout(profile_id)
     return {
         "ok": True, "settings_reset": True, "uploads_removed": removed,
         "conversations_removed": conversations_removed,
+        "tableaux_removed": tableaux_removed,
         "ocr_cache_removed": ocr_cache_removed,
         "docindex_removed": docindex_removed,
     }

@@ -138,12 +138,31 @@
         >
           <FileExplorer />
         </div>
+        <div
+          v-show="sideTab === 'tableaux'"
+          id="panel-tableaux"
+          role="tabpanel"
+          aria-labelledby="tab-tableaux"
+          tabindex="0"
+        >
+          <TableauList v-if="auth.connecte" />
+        </div>
       </aside>
+      <!-- Un tableau ouvert remplace la conversation ; celle-ci reste montée
+           (v-show) pour ne rien perdre d'une réponse en cours. -->
       <section
+        v-show="!tableaux.courant"
         class="content"
         aria-label="Conversation"
       >
         <ChatPanel />
+      </section>
+      <section
+        v-if="tableaux.courant"
+        class="content"
+        aria-label="Tableau blanc"
+      >
+        <TableauBlanc :key="tableaux.courant.id" />
       </section>
     </main>
 
@@ -162,6 +181,9 @@ import LoginView from './components/LoginView.vue'
 import ModelPicker from './components/ModelPicker.vue'
 import FileExplorer from './components/FileExplorer.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import TableauList from './components/TableauList.vue'
+import TableauBlanc from './components/TableauBlanc.vue'
+import { useTableauxStore } from './stores/tableaux.js'
 import ConversationList from './components/ConversationList.vue'
 import SettingsMenu from './components/SettingsMenu.vue'
 import ConnectedTools from './components/ConnectedTools.vue'
@@ -173,16 +195,18 @@ const chat = useChatStore()
 const settings = useSettingsStore()
 const auth = useAuthStore()
 const moteur = useMoteurStore()
+const tableaux = useTableauxStore()
 const settingsMenu = ref(null)
 
 const device = computed(() => settings.data.compute_device || 'gpu')
 const simple = computed(() => settings.data.simple_mode !== false)
 
-// Barre latérale à deux onglets : conversations et documents.
+// Barre latérale : conversations, documents et tableaux blancs.
 // Visible dans les deux modes (simple et avancé).
 const sideTabs = [
   { id: 'conversations', label: '💬 Conversations' },
   { id: 'documents', label: '📁 Documents' },
+  { id: 'tableaux', label: '🎨 Tableaux' },
 ]
 const sideTab = ref('conversations')
 
@@ -198,8 +222,16 @@ onMounted(() => {
 // encore valide au démarrage, et connexion réussie).
 watch(() => auth.connecte, (ouverte) => {
   if (ouverte) demarrer()
-  else moteur.arreter()          // déconnexion ou session expirée
+  else {                         // déconnexion ou session expirée
+    moteur.arreter()
+    tableaux.reinitialiser()
+  }
 })
+
+// Ouvrir une conversation depuis la liste ramène à la conversation : sinon le
+// clic ne produirait aucun effet visible tant qu'un tableau est affiché. Le
+// tableau en cours envoie sa dernière sauvegarde en se fermant (TableauBlanc.vue).
+watch(() => chat.currentId, () => tableaux.fermer())
 
 // Le modèle indispensable dépend du mode de calcul (⚡ GPU / 🧩 CPU) : après un
 // changement enregistré (barre du haut ou Paramètres), celui de l'autre mode
@@ -235,6 +267,7 @@ async function deconnexion() {
   chat.clear()
   chat.clearFileContexts()
   chat.conversations = []
+  tableaux.reinitialiser()
   settings.reset()
 }
 

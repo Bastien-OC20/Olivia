@@ -96,6 +96,14 @@ Elle s'utilise de quatre façons, avec le même code :
   document Word existant.
 - **Formules** d'usage (appel, politesse, ville, signature) réglables sans toucher au code.
 
+**Tableau blanc** (Excalidraw)
+- Onglet **🎨 Tableaux** : schémas, plans, cartes mentales, organigrammes, dessinés à main
+  levée ou avec des formes, dans Oliv'IA même.
+- **Enregistrement automatique**, tableaux nommés, renommés, supprimés ; cloisonnés par
+  organisation et compris dans l'export et l'effacement RGPD.
+- **100 % local** : polices servies par Oliv'IA, fonctions d'IA en ligne d'Excalidraw et
+  contenus web intégrés désactivés.
+
 **Comptes**
 - **Connexion obligatoire**, comptes rattachés à une **organisation** ; conversations,
   réglages, index et modèle Word **cloisonnés** par organisation.
@@ -150,6 +158,7 @@ du fichier de verrouillage ou du dernier `pip install`) :
 | | ics | ≥ 0.7.2 |
 | Interface | Vue, Pinia, Vite | ^3.5.13, ^2.2.6, ^6.0.5 |
 | | marked, DOMPurify | ^18.0.7, ^3.4.12 |
+| | Excalidraw (tableau blanc), React / React DOM | ^0.18.1, ^19.3.0 / ^19.3.0 |
 | Bureau | Electron, electron-builder, electron-updater | ^44.5.1, ^26.15.3, ^6.8.9 |
 
 **Modèles d'IA** (Ollama) — un seul modèle par périphérique, choisi après comparaison sur
@@ -593,7 +602,8 @@ mode avancé pour tout configurer, puis laisse Oliv'IA en mode simple.
 
 ### Conversations
 
-La barre latérale a deux onglets : **💬 Conversations** et **📁 Documents**. Chaque
+La barre latérale a trois onglets : **💬 Conversations**, **📁 Documents** et
+**🎨 Tableaux** (voir [Tableau blanc](#-tableau-blanc-excalidraw)). Chaque
 conversation est enregistrée **à la fin de chaque réponse** (y compris après « ⏸ Stop ») dans
 `profiles/<profile_id>/conversations/<id>.json`, écriture atomique. « ＋ Nouvelle
 conversation » ne crée d'entrée qu'une fois un échange fait.
@@ -636,6 +646,37 @@ Champ de recherche de l'onglet Documents, deux modes :
 Chaque résultat peut être **ajouté à la conversation** (plusieurs à la fois) ; Oliv'IA précise de
 quel document vient chaque information. Le contexte transmis est borné (**8 000 caractères**
 par document, **24 000** au total) et **toute coupe est signalée** (« ⚠️ tronqué »).
+
+### 🎨 Tableau blanc (Excalidraw)
+
+Onglet **🎨 Tableaux** → « ＋ Nouveau tableau blanc ». Le tableau remplace la conversation dans
+la zone principale ; « ← Conversation » y revient. L'éditeur est
+[Excalidraw](https://github.com/excalidraw/excalidraw) (licence MIT), le composant
+`@excalidraw/excalidraw` 0.18.1, intégré à l'interface : pas de site externe, pas de compte.
+
+- **Enregistrement automatique** 1,5 s après la dernière modification, et en revenant à la
+  conversation ; l'état (« Enregistrement… », « ✓ Enregistré », erreur) est affiché en haut.
+- Stockage : `profiles/<profile_id>/tableaux/<id>.json` (titre, dates, scène au format
+  `.excalidraw`), écriture atomique, **25 Mo** au plus par tableau (images collées comprises).
+- Excalidraw est **chargé à l'ouverture du premier tableau** seulement : le démarrage d'Oliv'IA
+  n'est pas alourdi.
+- **Rien ne sort du poste** :
+  - les polices d'Excalidraw sont copiées dans l'interface buildée
+    (`frontend/dist/excalidraw-assets/fonts/`, environ 14 Mo) ;
+  - l'adresse de secours sur le CDN `esm.sh` qu'Excalidraw ajoute à chaque police est
+    remplacée au build par l'adresse locale (`vite.config.js`). Si une version
+    d'Excalidraw change ce code, le build échoue au lieu de réintroduire le CDN ;
+  - fonctions d'IA d'Excalidraw (`aiEnabled: false`) et contenus web intégrés
+    (`validateEmbeddable`) désactivés.
+
+  Vérifié dans Chromium : aucune requête externe, aucune violation de la politique de
+  sécurité (CSP).
+- **Bibliothèque d'Excalidraw** (formes réutilisables) : « Parcourir les bibliothèques »
+  (site `libraries.excalidraw.com`) et « Publier » (envoi à un service en ligne d'Excalidraw)
+  sont masqués (vérifié dans Chromium) ; l'ajout d'éléments et l'import d'un fichier `.excalidrawlib` restent. Oliv'IA
+  n'enregistre pas cette bibliothèque : d'après le code d'Excalidraw 0.18.1, elle reste en
+  mémoire et se vide au rechargement (non vérifié en test). Le texte d'Excalidraw qui invite à
+  installer une bibliothèque « depuis le dépôt public » reste affiché.
 
 ### 🔍 Documents scannés — OCR
 
@@ -784,11 +825,11 @@ Tout reste **local**, sauf la recherche web quand elle est activée. *Paramètre
 Confidentialité* :
 
 - **Export** (`GET /api/privacy/export`) : toutes les données de l'organisation connectée en
-  JSON (réglages, conversations…). Les **secrets** (mot de passe IMAP, clé Brave, jeton Notion)
+  JSON (réglages, conversations, tableaux blancs…). Les **secrets** (mot de passe IMAP, clé Brave, jeton Notion)
   y sont **masqués**, listés dans `secrets_masques` — un fichier téléchargé circule.
 - **Effacement** (`POST /api/privacy/delete`), pour l'organisation connectée seulement :
-  réinitialise les réglages (GPU/CPU re-détecté), supprime conversations et index de recherche
-  par le sens, vide le dossier `_uploads` des dossiers de travail et retire du cache OCR le
+  réinitialise les réglages (GPU/CPU re-détecté), supprime conversations, tableaux blancs et
+  index de recherche par le sens, vide le dossier `_uploads` des dossiers de travail et retire du cache OCR le
   texte de ses documents. Les autres documents ne sont pas touchés. L'effacement de l'index ne
   peut pas être annulé par une construction en cours.
 - **Consentement** : bandeau informatif au premier lancement.
@@ -868,6 +909,7 @@ Toutes les routes exigent une session, sauf `POST /api/auth/login`, `GET /api/au
 | Documents Word | `GET /api/documents/status`, `POST /api/documents/modele`, `POST /api/documents/generate` |
 | Recherche web | `POST /api/search` (`{query, limit}`) |
 | Conversations | `GET /api/conversations`, `GET`/`PUT`/`DELETE /api/conversations/{id}`, `POST /api/conversations` |
+| Tableaux blancs | `GET /api/tableaux`, `POST /api/tableaux` (`{titre, scene}`), `GET`/`PUT`/`DELETE /api/tableaux/{id}` (`PUT` : `{titre}` et/ou `{scene}`) |
 | Connecteurs | `GET /api/connectors/status`, `GET /api/connectors/mail/unread`, `GET /api/connectors/imap/preview`, `GET /api/connectors/calendar/preview` |
 | RGPD | `GET /api/privacy/export`, `POST /api/privacy/delete` |
 | Service | `GET /api/health` (état, version, adresse d'Ollama), `GET /` (redirige vers `/ui/`, ou `/docs` sans interface buildée) |
@@ -883,10 +925,10 @@ pip install pytest
 python -m pytest tests
 ```
 
-118 tests, tous au vert en Python 3.11 au moment de cette mise à jour. Ils couvrent le
+141 tests, tous au vert en Python 3.11 au moment de cette mise à jour. Ils couvrent le
 cloisonnement entre organisations, l'état du moteur d'IA, les comptes et la connexion (temporisation, temps constant,
 remise à niveau du hachage), l'emplacement des données, l'import sans écrasement, la purge de
-l'index, les erreurs du moteur dans le chat, l'export RGPD, la validation des réglages et le
+l'index, les erreurs du moteur dans le chat, les tableaux blancs, l'export RGPD, la validation des réglages et le
 lanceur (`--parent-stdin`).
 
 **Application de bureau** (Node, fonctions pures de `desktop/lib/outils.js`) :
@@ -1050,6 +1092,7 @@ Olivia/
 │   ├── sessions.py        ← sessions par cookie (8 h)
 │   ├── manage_users.py    ← commandes init / create-profile / create-user / list-profiles
 │   ├── conversations.py   ← historique par organisation
+│   ├── tableaux.py        ← tableaux blancs (Excalidraw) par organisation
 │   ├── search.py          ← recherche web, repli entre moteurs, sources officielles
 │   ├── documents.py       ← aperçu et extraction de texte
 │   ├── docsearch.py       ← recherche par mots-clés
@@ -1062,15 +1105,18 @@ Olivia/
 │   ├── requirements.txt
 │   └── .env.example
 └── frontend/
-    ├── package.json, vite.config.js, index.html
+    ├── package.json, index.html
+    ├── vite.config.js     ← build ; polices d'Excalidraw copiées, CDN retiré
     └── src/
         ├── main.js, App.vue, style.css
-        ├── stores/          ← chat.js, settings.js, auth.js, moteur.js
+        ├── stores/          ← chat.js, settings.js, auth.js, moteur.js, tableaux.js
         └── components/
             ├── LoginView.vue         ← connexion (sans inscription)
             ├── ChatPanel.vue         ← conversation, recherche web, création de documents Word
             ├── MessageBubble.vue     ← Markdown assaini
             ├── ConversationList.vue  ← historique
+            ├── TableauList.vue       ← liste des tableaux blancs
+            ├── TableauBlanc.vue      ← éditeur Excalidraw (React monté dans Vue)
             ├── FileExplorer.vue      ← dossiers, import, recherche mots-clés / par le sens
             ├── FolderPickerModal.vue ← parcours des lecteurs
             ├── FilePreview.vue       ← aperçu multi-format
