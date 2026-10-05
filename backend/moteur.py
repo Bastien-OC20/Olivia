@@ -35,22 +35,30 @@ INDISPENSABLE = "indispensable"   # sans lui, pas de conversation
 CONSEILLE = "conseille"           # une fonction secondaire en dépend
 FACULTATIF = "facultatif"         # utile seulement si l'on change de réglage
 
+# Noms des modes tels qu'affichés dans la barre du haut (App.vue).
+LIBELLES_MODES = {
+    "gpu": "mode ⚡ Rapide (GPU)",
+    "cpu": "mode 🧩 Standard (CPU)",
+    "leger": "mode 🪶 Léger (petits postes)",
+}
+
 
 def modeles_attendus(peripherique: str) -> list[dict]:
-    """Modèles utiles à Olivia, selon le périphérique (« gpu » / « cpu ») choisi."""
+    """Modèles utiles à Olivia, selon le mode de calcul (« gpu », « cpu »,
+    « leger ») choisi."""
     actuel = peripherique if peripherique in DEVICE_MODELS else "gpu"
-    autre = "cpu" if actuel == "gpu" else "gpu"
-    libelles = {"gpu": "mode ⚡ Rapide (GPU)", "cpu": "mode 🧩 Standard (CPU)"}
     attendus = [
         {"nom": DEVICE_MODELS[actuel][0], "niveau": INDISPENSABLE,
-         "role": f"conversation — {libelles[actuel]}, réglage actuel"},
+         "role": f"conversation — {LIBELLES_MODES[actuel]}, réglage actuel"},
         {"nom": docindex.EMBED_MODEL, "niveau": CONSEILLE,
          "role": "recherche dans les documents par le sens"},
+    ] + [
         {"nom": DEVICE_MODELS[autre][0], "niveau": FACULTATIF,
-         "role": f"conversation — {libelles[autre]}, si l'on change de mode"},
+         "role": f"conversation — {LIBELLES_MODES[autre]}, si l'on change de mode"}
+        for autre in DEVICE_MODELS if autre != actuel
     ]
-    # Une configuration où les deux périphériques partagent le même modèle ne
-    # doit pas le demander deux fois.
+    # Une configuration où deux modes partagent le même modèle ne doit pas le
+    # demander deux fois.
     vus, uniques = set(), []
     for m in attendus:
         if m["nom"] not in vus:

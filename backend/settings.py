@@ -25,6 +25,8 @@ from . import hardware, profiles
 # Modèles recommandés selon le périphérique de calcul.
 #   gpu : cible RTX 5060 8 Go (voir README) — modèle quantifié Q4_K_M
 #   cpu : petit modèle qui reste fluide sans carte graphique
+#   leger : modèle encore plus petit, pour les postes anciens ou peu dotés en
+#           mémoire (choix manuel, jamais retenu par la détection automatique)
 #
 # UN SEUL modèle par périphérique, décision du 29/07/2026 : Olivia vise des
 # collectivités, associations et PME qui n'ont pas de compétence technique en
@@ -68,9 +70,19 @@ from . import hardware, profiles
 #     (« Je vous addressed »).
 #   Retester si un meilleur candidat apparaît — même protocole obligatoire :
 #   `num_gpu: 0`, `num_predict` plafonné, même prompt de référence.
+#
+# LÉGER : `qwen2.5:1.5b` (Alibaba Cloud, Apache 2.0), ajouté le 05/10/2026 à la
+#   demande, pour les postes où gemma2:2b (1,6 Go) est trop lourd. 986 Mo en
+#   Q4_K_M ; le français fait partie des langues annoncées par Qwen.
+#   NON TESTÉ avec le protocole ci-dessus (Ollama injoignable depuis
+#   l'environnement où il a été ajouté) : à passer au même prompt de référence
+#   avant de le recommander. Écartés sans test : `gemma3:1b` (815 Mo) est
+#   annoncé en anglais seulement pour la taille 1B ; `llama3.2:1b` (1,3 Go par
+#   défaut) n'allège presque pas ; `qwen3:1.7b` est déjà recalé ci-dessus.
 DEVICE_MODELS = {
     "gpu": ["mistral-nemo:12b-instruct-2407-q4_K_M"],
     "cpu": ["gemma2:2b"],
+    "leger": ["qwen2.5:1.5b"],
 }
 
 DEFAULTS = {
@@ -78,7 +90,7 @@ DEFAULTS = {
     "temperature": 0.7,
     "reasoning_style": "balanced",
     "tone": "neutral",
-    "compute_device": "gpu",          # "gpu" | "cpu"
+    "compute_device": "gpu",          # "gpu" | "cpu" | "leger"
     "device_models": DEVICE_MODELS,
     "simple_mode": True,              # UI épurée par défaut (utilisatrice non technique)
     "search_provider": "duckduckgo",
@@ -142,7 +154,7 @@ DEFAULTS = {
 CHOIX = {
     "reasoning_style": {"concise", "balanced", "detailed", "creative", "analytical"},
     "tone": {"neutral", "friendly", "formal", "teacher"},
-    "compute_device": {"gpu", "cpu"},
+    "compute_device": {"gpu", "cpu", "leger"},
     "search_provider": {"duckduckgo", "searxng", "brave"},
 }
 BOOLEENS = {"simple_mode", "search_official_only", "ocr_enabled", "privacy_consent"}
@@ -275,7 +287,7 @@ class Settings:
             # codé en dur ci-dessus, qui a rendu Olivia inutilisable (45 min de
             # réponse) sur un poste sans carte graphique dédiée. Ne s'applique
             # qu'ici : un réglage déjà enregistré, même s'il vaut "gpu" à tort,
-            # a pu être choisi consciemment depuis (bouton ⚡/🧩 de la topbar) et
+            # a pu être choisi consciemment depuis (boutons ⚡/🧩/🪶 de la topbar) et
             # ne doit jamais être corrigé sous le pied de l'utilisatrice.
             merged["compute_device"] = hardware.detect_default_device()
             return merged

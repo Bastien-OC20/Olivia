@@ -106,6 +106,9 @@
                 <option value="cpu">
                   CPU (compatible partout, petits modèles)
                 </option>
+                <option value="leger">
+                  Léger (postes anciens ou peu puissants, plus petit modèle)
+                </option>
               </select>
               <p class="hint">
                 Le choix filtre les modèles recommandés et force le calcul CPU si besoin

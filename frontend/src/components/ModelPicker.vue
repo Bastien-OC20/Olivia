@@ -44,7 +44,7 @@ const chat = useChatStore()
 const settings = useSettingsStore()
 
 const device = computed(() => settings.data.compute_device || 'gpu')
-const deviceLabel = computed(() => (device.value === 'cpu' ? 'CPU' : 'GPU'))
+const deviceLabel = computed(() => ({ cpu: 'CPU', leger: 'le mode Léger' }[device.value] || 'GPU'))
 const recommended = computed(() => settings.data.device_models?.[device.value] || [])
 
 // Modèles installés, ceux adaptés au périphérique remontés en tête

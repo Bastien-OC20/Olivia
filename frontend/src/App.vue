@@ -54,6 +54,14 @@
           >
             🧩 Standard
           </button>
+          <button
+            :class="{ on: device === 'leger' }"
+            :aria-pressed="device === 'leger'"
+            title="Ordinateur ancien ou peu puissant — modèle plus petit, réponses plus simples"
+            @click="setDevice('leger')"
+          >
+            🪶 Léger
+          </button>
         </div>
       </div>
 
@@ -233,7 +241,7 @@ watch(() => auth.connecte, (ouverte) => {
 // tableau en cours envoie sa dernière sauvegarde en se fermant (TableauBlanc.vue).
 watch(() => chat.currentId, () => tableaux.fermer())
 
-// Le modèle indispensable dépend du mode de calcul (⚡ GPU / 🧩 CPU) : après un
+// Le modèle indispensable dépend du mode de calcul (⚡ / 🧩 / 🪶) : après un
 // changement enregistré (barre du haut ou Paramètres), celui de l'autre mode
 // peut manquer. On revérifie une fois la sauvegarde terminée, pas avant : le
 // backend lit le réglage enregistré.
