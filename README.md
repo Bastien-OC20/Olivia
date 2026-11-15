@@ -26,6 +26,34 @@ Elle s'utilise de quatre façons, avec le même code :
 | **Disque portable** (clé USB / disque externe) | rien à installer sur l'ordinateur hôte | [🔌 Version portable](#-version-portable-clé-usb--disque-externe) |
 | **Depuis les sources** (navigateur) | développement | [🚀 Démarrage depuis les sources](#-démarrage-depuis-les-sources-développement) |
 
+## 📸 Aperçu
+
+<p align="center">
+  <img src="visuel/captures/accueil-sombre.png" alt="Accueil d'Oliv'IA en thème sombre : rail d'icônes à gauche, liste des conversations, salutation « Bonjour, Claire », zone de saisie et six cartes d'actions" width="900">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="visuel/captures/conversation-sombre.png" alt="Conversation : ordre du jour mis en forme avec liste, citation et tableau, document joint au-dessus de la saisie"></td>
+    <td width="50%"><img src="visuel/captures/documents-clair.png" alt="Thème clair : recherche « conseils de classe » dans les documents, résultats en cartes à côté de la conversation"></td>
+  </tr>
+  <tr>
+    <td align="center">Une réponse mise en forme, avec son document joint</td>
+    <td align="center">Retrouver une information dans ses documents (thème clair)</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="visuel/captures/parametres-sombre.png" alt="Paramètres : navigation à icônes et choix de l'apparence (Suivre Windows, Sombre, Clair)"></td>
+    <td width="50%"><img src="visuel/captures/connexion-clair.png" alt="Écran de connexion en thème clair"></td>
+  </tr>
+  <tr>
+    <td align="center">Paramètres : apparence, préférences, comptes</td>
+    <td align="center">Connexion : le thème suit celui de Windows</td>
+  </tr>
+</table>
+
+Captures faites sur une instance d'essai, avec des données fictives. L'accueil existe aussi en
+[thème clair](visuel/captures/accueil-clair.png).
+
 ---
 
 ## Sommaire
@@ -1206,6 +1234,7 @@ Olivia/
 ├── ai-webapp.ico          ← icône de l'exécutable Windows
 ├── visuel/logos_olivia/   ← logo source (oliv-ia.png), son .psd et ses exports
 ├── visuel/logo-transparent.png ← logo à coins transparents (en-tête du README)
+├── visuel/captures/       ← captures d'écran de l'aperçu du README (données fictives)
 ├── visuel/generer_icones.py ← régénère toutes les icônes depuis visuel/logos_olivia/oliv-ia.png
 ├── .github/workflows/tests.yml    ← CI : tests sur chaque PR
 ├── .github/workflows/bureau.yml   ← CI : installeurs macOS et Windows
