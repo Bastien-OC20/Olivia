@@ -442,6 +442,21 @@ const creation = reactive({
 const documentCree = ref(null)
 const apercuOuvert = ref(false)
 
+// Le formulaire et la carte « document créé » sont repérés par le NUMÉRO du message :
+// sans remise à zéro, le 2e message de n'importe quelle autre conversation héritait
+// de la carte (ou du formulaire ouvert) de la précédente. Le store remplace le
+// tableau `messages` à chaque changement de conversation (ouverture, nouvelle,
+// effacement, suppression : `changerContexte`), jamais pendant un échange (ajouts
+// seulement) ni quand l'enregistrement attribue l'identifiant : c'est donc le signal
+// juste, sans regarder en profondeur. Un document en cours de création reste créé
+// dans les Documents ; seule sa carte n'est pas affichée ailleurs.
+watch(() => chat.messages, () => {
+  creation.index = null
+  creation.erreur = ''
+  documentCree.value = null
+  apercuOuvert.value = false
+})
+
 const besoinObjet = computed(
   () => creation.type === 'courrier' || creation.type === 'convocation'
 )
@@ -541,7 +556,13 @@ async function redigerCorps(texteOriginal) {
 }
 
 async function creerDocument() {
-  const message = chat.messages[creation.index]
+  // Conversation et message figés au départ : la rédaction prend plusieurs
+  // secondes, et l'utilisatrice peut changer de conversation entre-temps. Le
+  // document est créé quoi qu'il arrive ; sa carte (ou l'erreur) ne s'affiche que
+  // si la même conversation est toujours à l'écran.
+  const conversation = chat.messages
+  const index = creation.index
+  const message = conversation[index]
   if (!message) return
   creation.erreur = ''
   try {
@@ -565,10 +586,12 @@ async function creerDocument() {
     })
     const data = await r.json().catch(() => null)
     if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
-    documentCree.value = { ...data, index: creation.index }
+    if (chat.messages !== conversation) return
+    documentCree.value = { ...data, index }
     creation.index = null
     apercuOuvert.value = false
   } catch (e) {
+    if (chat.messages !== conversation) return
     creation.erreur = `Création impossible : ${e.message}`
   } finally {
     creation.etape = ''
