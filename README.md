@@ -60,7 +60,7 @@ Elle s'utilise de quatre façons, avec le même code :
 ## ✨ Fonctionnalités
 
 **Conversation**
-- Discussion avec le modèle local en **streaming** (mot à mot), bouton **⏸ Stop**.
+- Discussion avec le modèle local en **streaming** (mot à mot), bouton d'arrêt de la réponse.
 - Réponses en **Markdown** (titres, listes, tableaux, code), liens cliquables, HTML assaini
   (DOMPurify).
 - **Historique des conversations** : enregistrement automatique, rouvrir, renommer, supprimer.
@@ -88,7 +88,7 @@ Elle s'utilise de quatre façons, avec le même code :
 - **OCR** (Tesseract, en français) des PDF scannés et des images.
 
 **Production de documents Word**
-- Bouton **📄 Créer un document Word** sous chaque réponse : **circulaire**, **courrier aux
+- Bouton **Créer un document Word** sous chaque réponse : **circulaire**, **courrier aux
   familles**, **convocation**, **compte rendu**.
 - **Rédaction dirigée** : la réponse est d'abord réduite à son corps (sans objet, appel,
   formule de politesse ni signature, que le document pose lui-même).
@@ -619,16 +619,16 @@ définie dans l'environnement reste prioritaire.
 | `OLIVIA_PAUSE_FIN` | — | garde la fenêtre de l'assistant de compte ouverte à la fin (positionnée par l'application de bureau) |
 | `OLIVIA_PYTHON` | — | application de bureau en développement : interpréteur Python à utiliser |
 
-### Paramètres dans l'interface (⚙️)
+### Paramètres dans l'interface
 
 Réglages **propres à chaque organisation** (`profiles/<profile_id>/settings.json`), modifiables
 sans redémarrage. En **mode simple** (défaut), les onglets *Recherche web* et *Connexions*, le
-choix du périphérique et le prompt système sont masqués ; **🔧 Réglages avancés** les affiche,
+choix du périphérique et le prompt système sont masqués ; **Réglages avancés** (en bas de la fenêtre des Paramètres) les affiche,
 **← Revenir au mode simple** les masque (choix mémorisé).
 
 | Onglet | Réglages |
 |---|---|
-| **Préférences** | style de raisonnement, ton, température (0 à 2) ; *avancé* : périphérique GPU/CPU, prompt système |
+| **Préférences** | apparence (Suivre Windows, Sombre ou Clair ; réglage « theme », modifiable par tous les comptes), style de raisonnement, ton, température (0 à 2) ; *avancé* : périphérique GPU/CPU, prompt système |
 | **Documents** | dossiers de travail (un par ligne, `chemin \| libellé`), OCR (activation, état, chemin de Tesseract), recherche par le sens (état, construire / annuler l'index), modèle Word de l'établissement |
 | **Formules** | appel, formule de politesse, ville (« Fait à … »), signature par défaut des documents Word |
 | **Recherche web** *(avancé)* | moteur (SearXNG / Brave / DuckDuckGo), URL SearXNG, clé Brave, sources officielles, test |
@@ -647,8 +647,8 @@ ancienne version est ignorée.
 
 ### GPU / CPU / Léger
 
-Sélecteur **⚡ Rapide (GPU) / 🧩 Standard (CPU) / 🪶 Léger** dans la barre du haut (et dans
-les Paramètres en mode avancé). En CPU, le backend force `num_gpu=0` à chaque requête.
+Choix **Rapide (GPU) / Standard (CPU) / Léger** dans le menu **Moteur** de la barre du haut
+(et dans les Paramètres), en mode avancé. En CPU, le backend force `num_gpu=0` à chaque requête.
 
 Le mode **🪶 Léger** utilise `qwen2.5:1.5b` (Alibaba Cloud, licence Apache 2.0, 986 Mo), pour
 les postes où `gemma2:2b` (1,6 Go) est trop lourd. Le français fait partie des langues
@@ -674,19 +674,38 @@ rechargement après inactivité.
 
 ## 🧭 Utilisation
 
+### L'écran
+
+- **Rail** à gauche : **Conversations**, **Documents**, **Tableaux** (voir
+  [Tableau blanc](#-tableau-blanc-excalidraw)), puis en bas **Paramètres** et le compte
+  (identifiant, rôle, « Se déconnecter »).
+- **Panneau** à côté du rail : la liste de la section choisie (conversations et tableaux
+  regroupés par date). Il se replie (bouton du panneau, ou nouveau clic sur la section active) ;
+  sur un écran de moins de 900 px, il passe par-dessus la conversation.
+- **Barre du haut** : titre de la conversation ou du tableau ouvert, outils connectés, menu
+  « ⋯ » (« Effacer la conversation ») et, en mode avancé seulement, le menu **Moteur**
+  (Rapide, Standard ou Léger, et modèle d'IA).
+- **Accueil** (conversation vide) : salutation, zone de saisie, six cartes d'actions
+  (courriel aux familles, ordre du jour, reformuler, compte rendu, utiliser un document,
+  dessiner un schéma) et les conversations et tableaux récents. Les cartes « Reformuler »,
+  « Compte rendu » et « Dessiner un schéma » préremplissent la saisie ; les autres envoient la
+  demande ou ouvrent les Documents.
+- **Saisie** : Entrée envoie, Maj+Entrée va à la ligne ; le trombone ouvre les Documents pour
+  joindre un fichier ; l'interrupteur **Recherche web** fait consulter le web avant de répondre.
+- **Thème** : Suivre Windows (par défaut), Sombre ou Clair, dans Paramètres → Préférences →
+  Apparence. L'écran de connexion suit toujours Windows.
+
 ### Mode simple
 
-Oliv'IA démarre en **mode simple** : la **conversation**, les **documents**, la **barre des
-outils connectés** et le bouton **🌐 Recherche web**. Le service informatique passe une fois en
-mode avancé pour tout configurer, puis laisse Oliv'IA en mode simple.
+Oliv'IA démarre en **mode simple** : la conversation, les documents, les tableaux, les outils
+connectés et la **Recherche web**. Le service informatique passe une fois en mode avancé pour
+tout configurer, puis laisse Oliv'IA en mode simple.
 
 ### Conversations
 
-La barre latérale a trois onglets : **💬 Conversations**, **📁 Documents** et
-**🎨 Tableaux** (voir [Tableau blanc](#-tableau-blanc-excalidraw)). Chaque
-conversation est enregistrée **à la fin de chaque réponse** (y compris après « ⏸ Stop ») dans
-`profiles/<profile_id>/conversations/<id>.json`, écriture atomique. « ＋ Nouvelle
-conversation » ne crée d'entrée qu'une fois un échange fait.
+Chaque conversation est enregistrée **à la fin de chaque réponse** (y compris après un arrêt de
+la réponse) dans `profiles/<profile_id>/conversations/<id>.json`, écriture atomique.
+« Nouvelle conversation » ne crée d'entrée qu'une fois un échange fait.
 
 Les **documents joints** appartiennent à leur conversation : on les retrouve en y revenant, et
 ils ne suivent pas dans une autre. Seuls leur chemin et leur nom sont enregistrés, jamais leur
@@ -810,7 +829,7 @@ retenté au bout de 15 minutes.
 
 ### 📄 Créer un document Word
 
-Sous chaque réponse terminée, **📄 Créer un document Word** :
+Sous chaque réponse terminée, **Créer un document Word** :
 
 1. choisir le type et compléter les champs proposés :
 
@@ -1155,7 +1174,7 @@ Le script en tire deux variantes (coins rendus transparents) :
 
 | Fichier | Variante | Usage |
 |---|---|---|
-| `frontend/src/assets/logo-mark.png` | marque, 512 px | barre du haut, connexion, accueil |
+| `frontend/src/assets/logo-mark.png` | marque, 512 px | rail, connexion, accueil, avatar des réponses |
 | `frontend/public/favicon.ico` | marque, 16-48 px | onglet du navigateur |
 | `ai-webapp.ico` | marque 16-48 px, logo 64-256 px | exécutable Windows, installeur Inno Setup |
 | `desktop/build/icon.ico` | idem | application de bureau et installeur Windows |

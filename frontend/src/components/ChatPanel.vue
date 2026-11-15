@@ -8,100 +8,8 @@
       @ouvrir-tableau="tableaux.ouvrir($event)"
     >
       <template #saisie>
-        <!-- Documents joints : même bandeau qu'en conversation (voir plus bas). -->
-        <div
-          v-if="chat.fileContextPlan.length"
-          class="docs-joints"
-          aria-live="polite"
-        >
-          <div class="docs-entete">
-            <span>
-              {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
-              dans la conversation
-            </span>
-            <button
-              type="button"
-              class="btn btn-fantome btn-compact"
-              @click="chat.clearFileContexts()"
-            >
-              Tout retirer
-            </button>
-          </div>
-          <ul class="docs-liste">
-            <li
-              v-for="doc in chat.fileContextPlan"
-              :key="doc.path"
-              class="doc-pastille"
-            >
-              <Icone
-                nom="document"
-                :taille="14"
-              />
-              <span
-                class="doc-nom"
-                :title="doc.path"
-              >{{ doc.name }}</span>
-              <span
-                v-if="doc.truncated"
-                class="doc-tronque"
-                :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
-              >
-                <Icone
-                  nom="alerte"
-                  :taille="12"
-                />
-                tronqué
-              </span>
-              <button
-                type="button"
-                class="btn-icone doc-retirer"
-                :aria-label="`Retirer ${doc.name} de la conversation`"
-                @click="chat.removeFileContext(doc.path)"
-              >
-                <Icone
-                  nom="fermer"
-                  :taille="14"
-                />
-              </button>
-            </li>
-          </ul>
-          <p
-            v-if="documentsTronques"
-            class="avert"
-          >
-            <Icone
-              nom="alerte"
-              :taille="14"
-            />
-            <span>
-              Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
-              Retirez-en pour laisser plus de place aux autres.
-            </span>
-          </p>
-          <p
-            v-if="chat.fileContextNotice"
-            class="avert"
-          >
-            <Icone
-              nom="alerte"
-              :taille="14"
-            />
-            <span>{{ chat.fileContextNotice }}</span>
-          </p>
-        </div>
-        <div
-          v-else-if="chat.fileContextNotice"
-          class="docs-joints"
-          role="status"
-        >
-          <p class="avert">
-            <Icone
-              nom="alerte"
-              :taille="14"
-            />
-            <span>{{ chat.fileContextNotice }}</span>
-          </p>
-        </div>
+        <!-- Documents joints : même bandeau qu'en conversation. -->
+        <DocumentsJoints />
 
         <ZoneSaisie
           ref="saisieEl"
@@ -424,101 +332,7 @@
       <div class="composer">
         <div class="composer-inner">
           <!-- Documents joints : rangée de pastilles juste au-dessus de la saisie. -->
-          <div
-            v-if="chat.fileContextPlan.length"
-            class="docs-joints"
-            aria-live="polite"
-          >
-            <div class="docs-entete">
-              <span>
-                {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
-                dans la conversation
-              </span>
-              <button
-                type="button"
-                class="btn btn-fantome btn-compact"
-                @click="chat.clearFileContexts()"
-              >
-                Tout retirer
-              </button>
-            </div>
-            <ul class="docs-liste">
-              <li
-                v-for="doc in chat.fileContextPlan"
-                :key="doc.path"
-                class="doc-pastille"
-              >
-                <Icone
-                  nom="document"
-                  :taille="14"
-                />
-                <span
-                  class="doc-nom"
-                  :title="doc.path"
-                >{{ doc.name }}</span>
-                <span
-                  v-if="doc.truncated"
-                  class="doc-tronque"
-                  :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
-                >
-                  <Icone
-                    nom="alerte"
-                    :taille="12"
-                  />
-                  tronqué
-                </span>
-                <button
-                  type="button"
-                  class="btn-icone doc-retirer"
-                  :aria-label="`Retirer ${doc.name} de la conversation`"
-                  @click="chat.removeFileContext(doc.path)"
-                >
-                  <Icone
-                    nom="fermer"
-                    :taille="14"
-                  />
-                </button>
-              </li>
-            </ul>
-            <p
-              v-if="documentsTronques"
-              class="avert"
-            >
-              <Icone
-                nom="alerte"
-                :taille="14"
-              />
-              <span>
-                Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
-                Retirez-en pour laisser plus de place aux autres.
-              </span>
-            </p>
-            <p
-              v-if="chat.fileContextNotice"
-              class="avert"
-            >
-              <Icone
-                nom="alerte"
-                :taille="14"
-              />
-              <span>{{ chat.fileContextNotice }}</span>
-            </p>
-          </div>
-          <!-- Aucun document rattaché (tous devenus illisibles) : le bandeau est absent,
-               mais l'avis doit rester visible. -->
-          <div
-            v-else-if="chat.fileContextNotice"
-            class="docs-joints"
-            role="status"
-          >
-            <p class="avert">
-              <Icone
-                nom="alerte"
-                :taille="14"
-              />
-              <span>{{ chat.fileContextNotice }}</span>
-            </p>
-          </div>
+          <DocumentsJoints />
 
           <ZoneSaisie
             ref="saisieEl"
@@ -544,6 +358,7 @@ import MessageBubble from './MessageBubble.vue'
 import FilePreview from './FilePreview.vue'
 import AccueilVue from './AccueilVue.vue'
 import ZoneSaisie from './ZoneSaisie.vue'
+import DocumentsJoints from './DocumentsJoints.vue'
 import Icone from './Icone.vue'
 import logoUrl from '../assets/logo-mark.png'
 
@@ -556,8 +371,6 @@ const messagesEl = ref(null)
 const saisieEl = ref(null)
 // Recherche web : choix explicite de l'utilisatrice, conservé d'un message à l'autre.
 const webSearch = ref(false)
-
-const documentsTronques = computed(() => chat.fileContextPlan.some((d) => d.truncated))
 
 /** Carte d'action de l'accueil (voir ACTIONS_ACCUEIL dans accueil.js). */
 async function lancerAction(action) {
@@ -732,9 +545,9 @@ async function creerDocument() {
   if (!message) return
   creation.erreur = ''
   try {
-    creation.etape = '⏳ Rédaction…'
+    creation.etape = 'Rédaction…'
     const corps = await redigerCorps(message.content || '')
-    creation.etape = '⏳ Création…'
+    creation.etape = 'Création…'
     const r = await fetch('/api/documents/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -768,9 +581,6 @@ onMounted(chargerEtatModele)
 <style scoped>
 .chat { display: flex; flex-direction: column; height: 100%; }
 
-/* Bouton compact (actions sous une réponse, « Tout retirer ») */
-.btn-compact { padding: 5px 10px; font-size: var(--t-s); gap: 6px; }
-
 /* Avertissement (texte + icône) : documents, recherche web, modèle de document */
 .avert {
   display: flex;
@@ -782,52 +592,6 @@ onMounted(chargerEtatModele)
   line-height: 1.4;
 }
 .avert .icone { flex-shrink: 0; margin-top: 1px; }
-
-/* ---------- Documents joints : pastilles au-dessus de la saisie ---------- */
-.docs-joints { margin-bottom: var(--e-2); font-size: var(--t-s); }
-.docs-entete {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--e-2);
-  color: var(--discret);
-}
-.docs-liste {
-  list-style: none;
-  margin: var(--e-1) 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.doc-pastille {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 2px 2px 2px 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--bordure);
-  border-radius: var(--r-rond);
-  color: var(--texte);
-}
-.doc-pastille > .icone { flex-shrink: 0; color: var(--accent-texte); }
-.doc-nom {
-  min-width: 0;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.doc-tronque {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-  color: var(--avert);
-  font-size: var(--t-xs);
-}
-.doc-retirer { width: 26px; height: 26px; border-radius: var(--r-rond); flex-shrink: 0; }
 
 /* ---------- Messages ---------- */
 .messages { flex: 1; overflow-y: auto; padding: var(--e-5) var(--e-4) var(--e-4); }

@@ -71,7 +71,9 @@
   --discret: #5a6480;
   --accent: #3b5bdb;
   --accent-survol: #3350c4;
-  --accent-texte: #3b5bdb;
+  /* Plus foncé que --accent : sur --accent-doux posé sur --surface-2 (segment ou
+     onglet actif), #3b5bdb ne donnait que 4,42:1 ; #3350c4 donne 5,31:1. */
+  --accent-texte: #3350c4;
   --accent-doux: rgba(59, 91, 219, .10);
   --sur-accent: #ffffff;
   --avert: #b45309;
@@ -84,22 +86,6 @@
   --ombre-2: 0 8px 24px rgba(20, 26, 46, .08);
   --lueur: 0 0 0 1px rgba(59, 91, 219, .25), 0 10px 30px rgba(59, 91, 219, .12);
   --halo: radial-gradient(1200px 600px at 70% -10%, rgba(59, 91, 219, .08), transparent 60%);
-}
-
-/* Alias des anciens noms : les composants actuels s'en servent encore.
-   À retirer au lot 5 de la refonte, une fois tous les composants passés aux
-   nouveaux jetons. --accent, --ok et --danger gardent leur nom. Déclarés sur
-   :root, ils suivent le thème (var() est résolu sur chaque élément). */
-:root {
-  --bg: var(--fond);
-  --panel: var(--surface);
-  --panel-2: var(--surface-2);
-  --text: var(--texte);
-  --muted: var(--discret);
-  --border: var(--bordure);
-  --user: var(--bulle-utilisatrice);
-  --assistant: var(--surface-2);
-  --warn: var(--avert);
 }
 
 /* ---------- Règles globales ---------- */
@@ -212,6 +198,8 @@ a { transition: color var(--transition), opacity var(--transition); }
   color: var(--sur-accent);
 }
 .btn-danger:hover:not(:disabled) { background: var(--danger-survol); }
+/* Variante compacte d'un bouton .btn (actions sous une réponse, « Tout retirer ») */
+.btn-compact { padding: 5px 10px; font-size: var(--t-s); gap: 6px; }
 .btn-icone {
   display: inline-flex;
   align-items: center;

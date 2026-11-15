@@ -89,7 +89,14 @@
         v-if="uploadMsg"
         class="upload-msg"
         aria-live="polite"
-      >{{ uploadMsg }}</span>
+      >
+        <Icone
+          v-if="uploadMsgOk"
+          nom="coche"
+          :taille="14"
+        />
+        <span>{{ uploadMsgTexte }}</span>
+      </span>
     </div>
 
     <div class="search-box">
@@ -415,6 +422,8 @@ const nomDossierCourant = computed(() => {
 // à l'écran, la coche est dessinée par une icône et le texte reste seul.
 const injectMsgOk = computed(() => injectMsg.value.startsWith('✓'))
 const injectMsgTexte = computed(() => injectMsg.value.replace(/^✓\s*/, ''))
+const uploadMsgOk = computed(() => uploadMsg.value.startsWith('✓'))
+const uploadMsgTexte = computed(() => uploadMsg.value.replace(/^✓\s*/, ''))
 
 function onSelectRoot(e) { navigate(e.target.value) }
 
@@ -597,7 +606,8 @@ async function doSearch() {
 .upload-row:has(#fileup:focus-visible) .upload-btn {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
-.upload-msg { font-size: var(--t-xs); color: var(--discret); }
+.upload-msg { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--discret); }
+.upload-msg .icone { color: var(--ok); flex-shrink: 0; }
 .search-box { margin: var(--e-3) 0; }
 .search-label { display: block; font-size: var(--t-s); font-weight: 600; margin-bottom: var(--e-1); }
 .champ-recherche { display: flex; align-items: center; gap: var(--e-2); padding: 0 var(--e-3); }

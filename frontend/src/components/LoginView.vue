@@ -1,7 +1,7 @@
 <template>
   <div class="ecran">
     <form
-      class="carte"
+      class="carte formulaire"
       @submit.prevent="soumettre"
     >
       <img
@@ -21,37 +21,48 @@
         class="avis"
         role="status"
       >
-        {{ auth.avis }}
+        <Icone
+          nom="alerte"
+          :taille="16"
+        />
+        <span>{{ auth.avis }}</span>
       </p>
 
       <!-- Installation neuve : aucun compte n'existe, le formulaire ne peut pas
            aboutir. On dit comment en créer un plutôt que de laisser échouer. -->
       <div
         v-if="aucunCompte"
-        class="avis premier-compte"
+        class="info premier-compte"
         role="status"
       >
-        <strong>Aucun compte n'a encore été créé sur ce poste.</strong>
-        La personne qui s'occupe de l'informatique doit d'abord en créer un.
-        <!-- Application de bureau : l'assistant s'ouvre directement (desktop/preload.js). -->
-        <template v-if="bureau">
-          <button
-            type="button"
-            class="secondaire"
-            @click="ouvrirAssistant"
-          >
-            Ouvrir l'assistant de création de compte
-          </button>
-          <span class="discret">
-            (aussi dans le menu, et sur l'icône d'Oliv'IA : « Créer un compte… »)
-          </span>
-        </template>
-        <ul v-else>
-          <li>Oliv'IA installée : menu Démarrer, <b>Créer un compte Oliv'IA</b> ;</li>
-          <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
-          <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Oliv'IA.</li>
-        </ul>
-        Revenez ensuite sur cette page pour vous connecter.
+        <Icone
+          nom="utilisateur"
+          :taille="18"
+          class="info-icone"
+        />
+        <div>
+          <strong>Aucun compte n'a encore été créé sur ce poste.</strong>
+          La personne qui s'occupe de l'informatique doit d'abord en créer un.
+          <!-- Application de bureau : l'assistant s'ouvre directement (desktop/preload.js). -->
+          <template v-if="bureau">
+            <button
+              type="button"
+              class="btn btn-secondaire"
+              @click="ouvrirAssistant"
+            >
+              Ouvrir l'assistant de création de compte
+            </button>
+            <span class="discret">
+              (aussi dans le menu, et sur l'icône d'Oliv'IA : « Créer un compte… »)
+            </span>
+          </template>
+          <ul v-else>
+            <li>Oliv'IA installée : menu Démarrer, <b>Créer un compte Oliv'IA</b> ;</li>
+            <li>sur le disque portable, double-cliquer sur <b>Creer-un-compte.bat</b> ;</li>
+            <li>sinon, lancer <code>ai-webapp.exe init</code> dans le dossier d'Oliv'IA.</li>
+          </ul>
+          Revenez ensuite sur cette page pour vous connecter.
+        </div>
       </div>
 
       <label for="champ-identifiant">Identifiant</label>
@@ -80,11 +91,16 @@
         class="erreur"
         role="alert"
       >
-        {{ erreur }}
+        <Icone
+          nom="alerte"
+          :taille="16"
+        />
+        <span>{{ erreur }}</span>
       </p>
 
       <button
         type="submit"
+        class="btn btn-primaire connexion"
         :disabled="enCours"
       >
         {{ enCours ? 'Connexion en cours…' : 'Se connecter' }}
@@ -104,6 +120,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth.js'
+import Icone from './Icone.vue'
 import logoUrl from '../assets/logo-mark.png'
 
 const auth = useAuthStore()
@@ -163,42 +180,49 @@ async function soumettre() {
 .ecran {
   height: 100vh;
   display: flex; align-items: center; justify-content: center;
-  padding: 20px;
-  background: var(--bg);
+  padding: var(--e-5);
+  overflow-y: auto;
 }
-.carte {
-  width: 100%; max-width: 380px;
+/* Fond : celui du body (halo) ; la carte est centrée dessus. */
+.formulaire {
+  width: 100%; max-width: 400px;
+  margin: auto;
   display: flex; flex-direction: column; gap: 6px;
-  padding: 28px 28px 24px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+  padding: var(--e-6) var(--e-6) var(--e-5);
+  border-radius: var(--r-4);
+  box-shadow: var(--lueur);
 }
-.logo { width: 48px; height: 48px; align-self: center; }
-.titre { margin: 10px 0 0; text-align: center; font-size: 24px; }
+.logo { width: 64px; height: 64px; align-self: center; }
+.titre { margin: var(--e-3) 0 0; text-align: center; font-size: var(--t-xxl); }
 .sous-titre {
-  margin: 0 0 18px; text-align: center;
-  font-size: 13px; color: var(--muted);
+  margin: 0 0 var(--e-4); text-align: center;
+  font-size: var(--t-s); color: var(--discret);
 }
-label { margin-top: 12px; font-size: 13px; color: var(--muted); }
-button[type="submit"] { margin-top: 20px; padding: 10px 16px; font-size: 15px; }
-.avis, .erreur {
+label { margin-top: var(--e-3); font-size: var(--t-s); color: var(--discret); }
+.connexion { width: 100%; margin-top: var(--e-5); padding: 10px 16px; font-size: var(--t-l); }
+.avis, .erreur, .info {
+  display: flex; align-items: flex-start; gap: var(--e-2);
   margin: 0 0 4px; padding: 10px 12px;
-  border-radius: 6px; font-size: 13px; line-height: 1.4;
+  border-radius: var(--r-1); font-size: var(--t-s); line-height: 1.4;
+  color: var(--texte);
 }
-.avis { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.avis > .icone, .erreur > .icone, .info-icone { flex-shrink: 0; margin-top: 1px; }
+.avis { background: var(--surface-2); border: 1px solid var(--bordure); }
+.avis > .icone { color: var(--avert); }
+.info { background: var(--accent-doux); border: 1px solid var(--bordure); }
+.info-icone { color: var(--accent-texte); }
 .premier-compte ul { margin: 6px 0; padding-left: 18px; }
-.premier-compte .secondaire { display: block; width: 100%; margin: 10px 0 4px; }
-.premier-compte .discret { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.premier-compte .btn { display: flex; width: 100%; margin: 10px 0 4px; }
+.premier-compte .discret { display: block; margin-bottom: 6px; font-size: var(--t-xs); color: var(--discret); }
 .premier-compte li { margin: 2px 0; }
 .erreur {
   margin-top: 14px;
-  background: rgba(239,68,68,0.12); color: var(--text);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   border: 1px solid var(--danger);
 }
+.erreur > .icone { color: var(--danger); }
 .aide {
-  margin: 16px 0 0; text-align: center;
-  font-size: 12px; line-height: 1.5; color: var(--muted);
+  margin: var(--e-4) 0 0; text-align: center;
+  font-size: var(--t-xs); line-height: 1.5; color: var(--discret);
 }
 </style>

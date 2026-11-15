@@ -4,7 +4,13 @@
       v-if="reasoning"
       class="reasoning"
     >
-      <summary>💭 Raisonnement</summary>
+      <summary>
+        <Icone
+          nom="etincelles"
+          :taille="14"
+        />
+        Raisonnement
+      </summary>
       <p class="reasoning-text">
         {{ reasoning }}
       </p>
@@ -26,6 +32,7 @@
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import Icone from './Icone.vue'
 
 // Les liens s'ouvrent dans un nouvel onglet, sans donner accès à la page d'origine.
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
@@ -128,6 +135,7 @@ onBeforeUnmount(clearTimer)
   padding: 6px var(--e-3);
 }
 .reasoning summary { cursor: pointer; }
+.reasoning summary .icone { vertical-align: -2px; margin-right: 4px; }
 .reasoning-text { margin: var(--e-2) 0 0; white-space: pre-wrap; line-height: 1.5; }
 
 /* Rendu Markdown — styles non « scopés » car le HTML est injecté via v-html.
