@@ -18,6 +18,7 @@ export function libelleRole(role) {
 /** Réglages que le serveur laisse modifier à un membre (voir PUT /api/settings). */
 export const CLES_MEMBRE = [
   'reasoning_style', 'tone', 'compute_device', 'simple_mode', 'temperature', 'privacy_consent',
+  'theme',
 ]
 
 /** Réglages à envoyer à l'enregistrement. Un responsable envoie tout ; un membre

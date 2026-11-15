@@ -80,6 +80,25 @@ def test_mode_leger_accepte(client):
     assert r.status_code == 200 and r.json()["compute_device"] == "leger"
 
 
+def test_theme_suit_le_systeme_par_defaut(client):
+    assert client.get("/api/settings").json()["theme"] == "systeme"
+
+
+def test_theme_clair_accepte_et_relu(client):
+    r = client.put("/api/settings", json={"theme": "clair"})
+    assert r.status_code == 200 and r.json()["theme"] == "clair"
+    assert client.get("/api/settings").json()["theme"] == "clair"
+
+
+@pytest.mark.parametrize("valeur", ["rose", 42])
+def test_theme_invalide_refuse(client, valeur):
+    """Un thème inconnu ou non textuel est refusé comme les autres choix."""
+    r = client.put("/api/settings", json={"theme": valeur})
+    assert r.status_code == 400
+    assert "theme" in r.json()["detail"]
+    assert client.get("/api/settings").json()["theme"] == "systeme"
+
+
 def test_cle_inconnue_ignoree_sans_bloquer_l_enregistrement(client):
     # Clés d'anciennes versions renvoyées par l'interface : ignorées, pas refusées.
     r = client.put("/api/settings", json={

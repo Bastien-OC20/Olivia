@@ -96,6 +96,8 @@ DEFAULTS = {
     "compute_device": "gpu",          # "gpu" | "cpu" | "leger"
     "device_models": DEVICE_MODELS,
     "simple_mode": True,              # UI épurée par défaut (utilisatrice non technique)
+    # Thème de l'interface : "systeme" suit le réglage clair/sombre de Windows.
+    "theme": "systeme",               # "systeme" | "sombre" | "clair"
     "search_provider": "duckduckgo",
     "searxng_url": "http://localhost:8888",
     # Restreint la recherche web aux domaines officiels français (voir
@@ -159,6 +161,7 @@ CHOIX = {
     "tone": {"neutral", "friendly", "formal", "teacher"},
     "compute_device": {"gpu", "cpu", "leger"},
     "search_provider": {"duckduckgo", "searxng", "brave"},
+    "theme": {"systeme", "sombre", "clair"},
 }
 BOOLEENS = {"simple_mode", "search_official_only", "ocr_enabled", "privacy_consent"}
 # Texte libre : longueur maximale (borne une saisie aberrante, ou un collage

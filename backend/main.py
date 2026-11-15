@@ -1507,7 +1507,7 @@ def get_settings(profile_id: str = Depends(get_current_profile)):
 # et leurs identifiants), de ce qu'elle exécute (moteur OCR) et de ce qu'elle
 # dit et signe au nom de l'organisation (prompt système, formules des
 # documents). Le membre garde les réglages de confort : style, ton, moteur de
-# calcul, mode simple, température, consentement. Liste unique : toute clé
+# calcul, mode simple, thème de l'interface, température, consentement. Liste unique : toute clé
 # d'organisation ajoutée aux réglages doit l'être ici.
 CLES_RESERVEES_RESPONSABLE = frozenset({
     "fs_roots", "connectors",

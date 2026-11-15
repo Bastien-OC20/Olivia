@@ -53,6 +53,12 @@ test('un responsable envoie tout sauf l\'état des secrets, sans toucher à l\'o
   assert.ok('etat_secrets' in data)
 })
 
+test('un membre peut enregistrer son thème, pas les dossiers de l\'organisation', () => {
+  const out = reglagesAEnvoyer({ theme: 'clair', fs_roots: [] }, 'membre')
+  assert.equal(out.theme, 'clair')
+  assert.ok(!('fs_roots' in out))
+})
+
 test('le texte d\'export dit ce qui est exporté selon le rôle', () => {
   assert.match(texteExport('responsable'), /toute votre organisation/)
   assert.match(texteExport('membre'), /vos conversations et vos tableaux/)

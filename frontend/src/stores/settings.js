@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { copier, fusionner, restaurer } from '../reglages.js'
+import { appliquerTheme, themeEffectif } from '../theme.js'
 
 // Doit rester aligné sur DEVICE_MODELS de backend/settings.py.
 const DEVICE_MODELS = {
@@ -18,6 +19,9 @@ const DEFAULTS = {
   compute_device: "gpu",
   device_models: DEVICE_MODELS,
   simple_mode: true,
+  // Thème de l'interface : systeme | sombre | clair (aligné sur backend/settings.py).
+  // « systeme » suit Windows ; c'est aussi ce qui s'affiche après la déconnexion.
+  theme: "systeme",
   search_provider: "duckduckgo",
   searxng_url: "http://localhost:8888",
   // Clé Brave Search : secret, renvoyé masqué par le serveur (jamais en clair).
@@ -55,6 +59,22 @@ export const useSettingsStore = defineStore('settings', () => {
   const saving = ref(false)
   // { chiffres: bool, a_ressaisir: [noms] } d'après le serveur ; null si inconnu.
   const etatSecrets = ref(null)
+
+  // Thème : il suit `data` (et non `enregistre`) pour un aperçu immédiat dans les
+  // Paramètres. « Annuler » (hide → restaurer) et la déconnexion (reset) remplacent
+  // `data`, ce qui réapplique le thème enregistré ou « Suivre Windows » sans autre code.
+  // matchMedia peut manquer (contexte sans fenêtre) : on suppose alors le sombre.
+  const mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null
+  function appliquer() {
+    if (typeof document === 'undefined') return
+    appliquerTheme(document.documentElement, themeEffectif(data.value.theme, mq ? mq.matches : true))
+  }
+  watch(() => data.value.theme, appliquer, { immediate: true })
+  // Windows passe du clair au sombre : seul « systeme » doit suivre ; les deux
+  // autres réglages donnent le même résultat, réappliquer est sans effet.
+  mq?.addEventListener?.('change', appliquer)
 
   /** Réglages reçus du serveur : ils deviennent à la fois l'affichage et la référence. */
   function adopter(recus) {

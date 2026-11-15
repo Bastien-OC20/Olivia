@@ -201,6 +201,13 @@ def test_membre_garde_les_reglages_de_confort(env):
     assert r.status_code == 200
 
 
+def test_membre_enregistre_le_theme_de_l_interface(env):
+    """Le thème est un réglage de confort : pas réservé au responsable."""
+    r = env["marc"].put("/api/settings", json={"theme": "sombre"})
+    assert r.status_code == 200, r.text
+    assert r.json()["theme"] == "sombre"
+
+
 # ---------- Ligne de commande ----------
 def _clavier(monkeypatch, lignes, mots_de_passe):
     lignes, mots_de_passe = iter(lignes), iter(mots_de_passe)
