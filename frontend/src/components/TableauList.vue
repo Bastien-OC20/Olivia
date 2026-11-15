@@ -1,10 +1,15 @@
 <template>
   <div class="tableaux">
     <button
-      class="nouveau"
-      @click="tableaux.nouveau()"
+      type="button"
+      class="btn btn-primaire nouveau"
+      @click="nouveau"
     >
-      ＋ Nouveau tableau blanc
+      <Icone
+        nom="plus"
+        :taille="18"
+      />
+      Nouveau tableau blanc
     </button>
 
     <p
@@ -12,97 +17,126 @@
       class="indisponible"
       aria-live="polite"
     >
-      ⚠️ Les tableaux ne sont pas disponibles pour le moment.
+      <Icone
+        nom="alerte"
+        :taille="16"
+      />
+      <span>Les tableaux ne sont pas disponibles pour le moment.</span>
     </p>
 
-    <ul
-      class="liste"
-      aria-label="Tableaux blancs enregistrés"
+    <section
+      v-for="g in groupes"
+      :key="g.id"
+      class="groupe"
     >
-      <li
-        v-for="t in tableaux.liste"
-        :key="t.id"
-        :class="{ actif: t.id === tableaux.courant?.id }"
+      <h3 class="groupe-titre">
+        {{ g.libelle }}
+      </h3>
+      <ul
+        class="liste"
+        :aria-label="`Tableaux blancs enregistrés : ${g.libelle}`"
       >
-        <template v-if="renommageId === t.id">
-          <label
-            :for="`renommer-${t.id}`"
-            class="sr-only"
-          >Nouveau titre du tableau</label>
-          <input
-            :id="`renommer-${t.id}`"
-            ref="champRenommage"
-            v-model="texteRenommage"
-            class="champ"
-            maxlength="80"
-            @keydown.enter.prevent="validerRenommage(t.id)"
-            @keydown.esc.prevent="annulerRenommage"
-            @blur="validerRenommage(t.id)"
-          >
-        </template>
-        <template v-else>
-          <button
-            class="ouvrir"
-            :aria-current="t.id === tableaux.courant?.id ? 'true' : undefined"
-            @click="tableaux.ouvrir(t.id)"
-          >
-            <span class="titre">🎨 {{ t.titre }}</span>
-            <span class="meta">
-              {{ dateRelative(t.modifie_le) }}
-              · {{ t.elements }} élément{{ t.elements > 1 ? 's' : '' }}
+        <li
+          v-for="t in g.elements"
+          :key="t.id"
+          :class="{ actif: t.id === tableaux.courant?.id }"
+        >
+          <template v-if="renommageId === t.id">
+            <label
+              :for="`renommer-${t.id}`"
+              class="sr-only"
+            >Nouveau titre du tableau</label>
+            <input
+              :id="`renommer-${t.id}`"
+              ref="champRenommage"
+              v-model="texteRenommage"
+              class="champ-renommage"
+              maxlength="80"
+              @keydown.enter.prevent="validerRenommage(t.id)"
+              @keydown.esc.prevent="annulerRenommage"
+              @blur="validerRenommage(t.id)"
+            >
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="ouvrir"
+              :aria-current="t.id === tableaux.courant?.id ? 'true' : undefined"
+              @click="ouvrir(t.id)"
+            >
+              <span class="titre">{{ t.titre }}</span>
+              <span class="meta">
+                {{ dateRelative(t.modifie_le) }}
+                · {{ t.elements }} élément{{ t.elements > 1 ? 's' : '' }}
+              </span>
+            </button>
+            <span class="actions">
+              <button
+                type="button"
+                class="btn-icone action"
+                :aria-label="`Renommer le tableau « ${t.titre} »`"
+                @click="commencerRenommage(t)"
+              >
+                <Icone
+                  nom="crayon"
+                  :taille="16"
+                />
+              </button>
+              <button
+                type="button"
+                class="btn-icone action supprimer"
+                :aria-label="`Supprimer le tableau « ${t.titre} »`"
+                @click="supprimer(t)"
+              >
+                <Icone
+                  nom="corbeille"
+                  :taille="16"
+                />
+              </button>
             </span>
-          </button>
-          <span class="actions">
-            <button
-              class="icone"
-              :aria-label="`Renommer le tableau « ${t.titre} »`"
-              @click="commencerRenommage(t)"
-            >
-              ✏️
-            </button>
-            <button
-              class="icone"
-              :aria-label="`Supprimer le tableau « ${t.titre} »`"
-              @click="supprimer(t)"
-            >
-              🗑
-            </button>
-          </span>
-        </template>
-      </li>
-      <li
-        v-if="tableaux.liste.length === 0 && !tableaux.indisponible"
-        class="vide"
-      >
-        Aucun tableau pour l'instant. Un tableau blanc sert à dessiner un schéma, un plan,
-        une carte mentale ou un organigramme ; il est enregistré automatiquement.
-      </li>
-    </ul>
+          </template>
+        </li>
+      </ul>
+    </section>
+
+    <p
+      v-if="tableaux.liste.length === 0 && !tableaux.indisponible"
+      class="vide"
+    >
+      Aucun tableau pour l'instant. Un tableau blanc sert à dessiner un schéma, un plan,
+      une carte mentale ou un organigramme ; il est enregistré automatiquement.
+    </p>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useTableauxStore } from '../stores/tableaux.js'
+import { dateRelative, grouperParDate } from '../dates.js'
+import Icone from './Icone.vue'
+
+// « ouverture » : un tableau vient d'être ouvert ou créé depuis la liste ; sur
+// un écran étroit, App.vue referme alors le panneau.
+const emit = defineEmits(['ouverture'])
 
 const tableaux = useTableauxStore()
 const renommageId = ref(null)
 const texteRenommage = ref('')
 const champRenommage = ref(null)
 
+// Regroupés par jour (Aujourd'hui, Hier…), dans l'ordre fourni par le serveur.
+const groupes = computed(() => grouperParDate(tableaux.liste, 'modifie_le'))
+
 onMounted(() => tableaux.charger())
 
-const rtf = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' })
-const UNITES = [['year', 31536000], ['month', 2592000], ['week', 604800],
-  ['day', 86400], ['hour', 3600], ['minute', 60]]
+function nouveau() {
+  tableaux.nouveau()
+  emit('ouverture')
+}
 
-function dateRelative(ts) {
-  if (!ts) return ''
-  const secondes = (Number(ts) * 1000 - Date.now()) / 1000
-  for (const [unite, taille] of UNITES) {
-    if (Math.abs(secondes) >= taille) return rtf.format(Math.round(secondes / taille), unite)
-  }
-  return "à l'instant"
+function ouvrir(id) {
+  tableaux.ouvrir(id)
+  emit('ouverture')
 }
 
 async function commencerRenommage(t) {
@@ -134,32 +168,55 @@ async function supprimer(t) {
 </script>
 
 <style scoped>
-.tableaux { padding: 12px; }
-.nouveau { width: 100%; font-size: 13px; }
+.tableaux { padding: var(--e-2) var(--e-3) var(--e-4); }
+.nouveau { width: 100%; }
+
 .indisponible {
-  font-size: 12px; line-height: 1.5; color: var(--warn);
-  background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 6px; padding: 8px 10px; margin: 10px 0 0;
+  display: flex; align-items: flex-start; gap: var(--e-2);
+  font-size: var(--t-xs); line-height: 1.5; color: var(--texte);
+  background: color-mix(in srgb, var(--avert) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avert) 35%, transparent);
+  border-radius: var(--r-1); padding: 8px 10px; margin: var(--e-3) 0 0;
 }
-.liste { list-style: none; padding: 0; margin: 10px 0 0; }
+.indisponible .icone { color: var(--avert); flex-shrink: 0; margin-top: 1px; }
+
+.groupe { margin-top: var(--e-4); }
+.groupe-titre {
+  margin: 0 0 var(--e-1); padding: 0 10px;
+  font-size: var(--t-xs); font-weight: 600; color: var(--discret);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* minmax(0, 1fr) : sans cela, une ligne de grille s'élargit à la longueur du
+   titre (non coupé) et le panneau défile horizontalement. */
+.liste {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px;
+}
 .liste li {
-  display: flex; align-items: center; gap: 4px;
-  border-radius: 6px; padding: 2px 4px 2px 0;
+  display: flex; align-items: center; gap: 2px;
+  border-radius: var(--r-1); padding-right: 4px;
+  transition: background-color var(--transition);
 }
-.liste li:hover { background: var(--panel-2); }
-.liste li.actif { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
+.liste li:hover { background: var(--surface-2); }
+.liste li.actif { background: var(--accent-doux); }
 .ouvrir {
   flex: 1; min-width: 0; text-align: left;
-  background: transparent; color: var(--text);
-  padding: 8px 10px; font-size: 13px; border-radius: 6px;
+  background: transparent; color: var(--texte);
+  padding: 8px 10px; font-size: var(--t-s); border-radius: var(--r-1);
 }
+.ouvrir:hover { background: transparent; }
 .titre { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.meta { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
-.actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s ease; }
+.actif .titre { font-weight: 600; }
+.meta { display: block; font-size: 11px; color: var(--discret); margin-top: 2px; }
+
+/* Actions visibles au survol et au focus clavier. */
+.actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--transition); }
 .liste li:hover .actions,
 .liste li:focus-within .actions { opacity: 1; }
-.icone { background: transparent; padding: 4px 6px; font-size: 13px; line-height: 1; }
-.champ { font-size: 13px; padding: 6px 8px; }
-.vide { color: var(--muted); font-size: 12px; padding: 10px 4px; line-height: 1.5; }
-.vide:hover { background: transparent; }
+.action { width: 28px; height: 28px; }
+.supprimer:hover { color: var(--danger); }
+
+.champ-renommage { font-size: var(--t-s); padding: 6px 8px; margin: 2px 0; }
+.vide { color: var(--discret); font-size: var(--t-xs); padding: 10px 4px; margin: var(--e-2) 0 0; line-height: 1.5; }
 </style>

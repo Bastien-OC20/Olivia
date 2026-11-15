@@ -258,6 +258,48 @@ a { transition: color var(--transition), opacity var(--transition); }
   outline: none;
 }
 
+/* ---------- Menus ----------
+   Carte flottante ouverte par un bouton (compte, « Plus d'actions », moteur) :
+   voir components/MenuDeroulant.vue. Le conteneur du déclencheur est en
+   position relative ; la carte se place par rapport à lui. */
+
+.menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-2);
+  box-shadow: var(--ombre-2);
+  color: var(--texte);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--texte);
+  border-radius: var(--r-1);
+  font-size: var(--t-m);
+  text-align: left;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--surface-2);
+  color: var(--texte);
+}
+.menu-item:focus-visible { outline-offset: -2px; }
+/* Désactivé par aria-disabled (et non `disabled`) : l'élément reste atteignable
+   au clavier, comme le recommande le motif « menu » de l'ARIA. */
+.menu-item[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.menu-item[aria-disabled="true"]:hover { background: transparent; }
+
 /* ---------- Accessibilité (RGAA / WCAG AA) ---------- */
 
 /* Focus clavier visible et cohérent sur tous les éléments interactifs */

@@ -1,89 +1,125 @@
 <template>
   <div class="conversations">
     <button
-      class="new-conv"
+      type="button"
+      class="btn btn-primaire nouvelle"
       @click="nouvelle"
     >
-      ＋ Nouvelle conversation
+      <Icone
+        nom="plus"
+        :taille="18"
+      />
+      Nouvelle conversation
     </button>
 
     <p
       v-if="chat.historyUnavailable"
-      class="unavailable"
+      class="indisponible"
       aria-live="polite"
     >
-      ⚠️ L'historique n'est pas disponible pour le moment. Vos échanges en cours
-      restent affichés mais ne seront pas enregistrés.
+      <Icone
+        nom="alerte"
+        :taille="16"
+      />
+      <span>
+        L'historique n'est pas disponible pour le moment. Vos échanges en cours
+        restent affichés mais ne seront pas enregistrés.
+      </span>
     </p>
 
-    <ul
-      class="conv-list"
-      aria-label="Conversations enregistrées"
+    <section
+      v-for="g in groupes"
+      :key="g.id"
+      class="groupe"
     >
-      <li
-        v-for="c in chat.conversations"
-        :key="c.id"
-        :class="{ active: c.id === chat.currentId }"
+      <h3 class="groupe-titre">
+        {{ g.libelle }}
+      </h3>
+      <ul
+        class="liste"
+        :aria-label="`Conversations enregistrées : ${g.libelle}`"
       >
-        <template v-if="renamingId === c.id">
-          <label
-            :for="`rename-${c.id}`"
-            class="sr-only"
-          >Nouveau titre de la conversation</label>
-          <input
-            :id="`rename-${c.id}`"
-            ref="renameInput"
-            v-model="renameText"
-            class="rename-input"
-            @keydown.enter.prevent="confirmRename(c.id)"
-            @keydown.esc.prevent="cancelRename"
-            @blur="confirmRename(c.id)"
-          >
-        </template>
-        <template v-else>
-          <button
-            class="conv-open"
-            :aria-current="c.id === chat.currentId ? 'true' : undefined"
-            @click="ouvrir(c.id)"
-          >
-            <span class="conv-title">{{ c.title || 'Sans titre' }}</span>
-            <span class="conv-meta">
-              {{ relativeDate(c.updated_at) }}
-              <template v-if="c.message_count">· {{ c.message_count }} message{{ c.message_count > 1 ? 's' : '' }}</template>
+        <li
+          v-for="c in g.elements"
+          :key="c.id"
+          :class="{ actif: c.id === chat.currentId }"
+        >
+          <template v-if="renamingId === c.id">
+            <label
+              :for="`rename-${c.id}`"
+              class="sr-only"
+            >Nouveau titre de la conversation</label>
+            <input
+              :id="`rename-${c.id}`"
+              ref="renameInput"
+              v-model="renameText"
+              class="champ-renommage"
+              @keydown.enter.prevent="confirmRename(c.id)"
+              @keydown.esc.prevent="cancelRename"
+              @blur="confirmRename(c.id)"
+            >
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="ouvrir"
+              :aria-current="c.id === chat.currentId ? 'true' : undefined"
+              @click="ouvrir(c.id)"
+            >
+              <span class="titre">{{ c.title || 'Sans titre' }}</span>
+              <span class="meta">
+                {{ dateRelative(c.updated_at) }}
+                <template v-if="c.message_count">· {{ c.message_count }} message{{ c.message_count > 1 ? 's' : '' }}</template>
+              </span>
+            </button>
+            <span class="actions">
+              <button
+                type="button"
+                class="btn-icone action"
+                :aria-label="`Renommer la conversation « ${c.title || 'Sans titre'} »`"
+                @click="startRename(c)"
+              >
+                <Icone
+                  nom="crayon"
+                  :taille="16"
+                />
+              </button>
+              <button
+                type="button"
+                class="btn-icone action supprimer"
+                :aria-label="`Supprimer la conversation « ${c.title || 'Sans titre'} »`"
+                @click="remove(c)"
+              >
+                <Icone
+                  nom="corbeille"
+                  :taille="16"
+                />
+              </button>
             </span>
-          </button>
-          <span class="conv-actions">
-            <button
-              class="icon"
-              :aria-label="`Renommer la conversation « ${c.title || 'Sans titre'} »`"
-              @click="startRename(c)"
-            >
-              ✏️
-            </button>
-            <button
-              class="icon"
-              :aria-label="`Supprimer la conversation « ${c.title || 'Sans titre'} »`"
-              @click="remove(c)"
-            >
-              🗑
-            </button>
-          </span>
-        </template>
-      </li>
-      <li
-        v-if="chat.conversations.length === 0 && !chat.historyUnavailable"
-        class="empty"
-      >
-        Aucune conversation enregistrée pour l'instant.
-      </li>
-    </ul>
+          </template>
+        </li>
+      </ul>
+    </section>
+
+    <p
+      v-if="chat.conversations.length === 0 && !chat.historyUnavailable"
+      class="vide"
+    >
+      Aucune conversation enregistrée pour l'instant.
+    </p>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import { useTableauxStore } from '../stores/tableaux.js'
+import { dateRelative, grouperParDate } from '../dates.js'
+import Icone from './Icone.vue'
+
+// « ouverture » : une conversation vient d'être ouverte ou créée depuis la
+// liste ; sur un écran étroit, App.vue referme alors le panneau.
+const emit = defineEmits(['ouverture'])
 
 const chat = useChatStore()
 const tableaux = useTableauxStore()
@@ -91,15 +127,8 @@ const renamingId = ref(null)
 const renameText = ref('')
 const renameInput = ref(null)
 
-const rtf = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' })
-const UNITS = [
-  ['year', 31536000],
-  ['month', 2592000],
-  ['week', 604800],
-  ['day', 86400],
-  ['hour', 3600],
-  ['minute', 60],
-]
+// Regroupées par jour (Aujourd'hui, Hier…), dans l'ordre fourni par le serveur.
+const groupes = computed(() => grouperParDate(chat.conversations, 'updated_at'))
 
 // Un clic ici doit toujours montrer la conversation. Le watcher d'App.vue sur
 // `currentId` ne suffit pas : il ne bouge pas quand on ré-ouvre la conversation
@@ -108,22 +137,13 @@ const UNITS = [
 function nouvelle() {
   chat.newConversation()
   tableaux.fermer()
+  emit('ouverture')
 }
 
 function ouvrir(id) {
   chat.openConversation(id)
   tableaux.fermer()
-}
-
-/** Date relative en français : « il y a 5 minutes », « hier »… */
-function relativeDate(ts) {
-  if (!ts) return ''
-  const diff = Number(ts) * 1000 - Date.now()
-  const seconds = diff / 1000
-  for (const [unit, size] of UNITS) {
-    if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit)
-  }
-  return "à l'instant"
+  emit('ouverture')
 }
 
 async function startRename(c) {
@@ -158,35 +178,57 @@ async function remove(c) {
 </script>
 
 <style scoped>
-.conversations { padding: 12px; }
-.new-conv { width: 100%; font-size: 13px; }
-.unavailable {
-  font-size: 12px; line-height: 1.5; color: var(--warn);
-  background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 6px; padding: 8px 10px; margin: 10px 0 0;
+.conversations { padding: var(--e-2) var(--e-3) var(--e-4); }
+.nouvelle { width: 100%; }
+
+.indisponible {
+  display: flex; align-items: flex-start; gap: var(--e-2);
+  font-size: var(--t-xs); line-height: 1.5; color: var(--texte);
+  background: color-mix(in srgb, var(--avert) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avert) 35%, transparent);
+  border-radius: var(--r-1); padding: 8px 10px; margin: var(--e-3) 0 0;
 }
-.conv-list { list-style: none; padding: 0; margin: 10px 0 0; }
-.conv-list li {
-  display: flex; align-items: center; gap: 4px;
-  border-radius: 6px; padding: 2px 4px 2px 0;
+.indisponible .icone { color: var(--avert); flex-shrink: 0; margin-top: 1px; }
+
+.groupe { margin-top: var(--e-4); }
+.groupe-titre {
+  margin: 0 0 var(--e-1); padding: 0 10px;
+  font-size: var(--t-xs); font-weight: 600; color: var(--discret);
+  text-transform: uppercase; letter-spacing: 0.04em;
 }
-.conv-list li:hover { background: var(--panel-2); }
-.conv-list li.active { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
-.conv-open {
+
+/* minmax(0, 1fr) : sans cela, une ligne de grille s'élargit à la longueur du
+   titre (non coupé) et le panneau défile horizontalement. */
+.liste {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px;
+}
+.liste li {
+  display: flex; align-items: center; gap: 2px;
+  border-radius: var(--r-1); padding-right: 4px;
+  transition: background-color var(--transition);
+}
+.liste li:hover { background: var(--surface-2); }
+.liste li.actif { background: var(--accent-doux); }
+.ouvrir {
   flex: 1; min-width: 0; text-align: left;
-  background: transparent; color: var(--text);
-  padding: 8px 10px; font-size: 13px; border-radius: 6px;
+  background: transparent; color: var(--texte);
+  padding: 8px 10px; font-size: var(--t-s); border-radius: var(--r-1);
 }
-.conv-open:hover { opacity: 1; }
-.conv-title {
+.ouvrir:hover { background: transparent; }
+.titre {
   display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.conv-meta { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
-.conv-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s ease; }
-.conv-list li:hover .conv-actions,
-.conv-list li:focus-within .conv-actions { opacity: 1; }
-.icon { background: transparent; padding: 4px 6px; font-size: 13px; line-height: 1; }
-.rename-input { font-size: 13px; padding: 6px 8px; }
-.empty { color: var(--muted); font-size: 12px; padding: 10px 4px; line-height: 1.5; }
-.empty:hover { background: transparent; }
+.actif .titre { font-weight: 600; }
+.meta { display: block; font-size: 11px; color: var(--discret); margin-top: 2px; }
+
+/* Actions visibles au survol et au focus clavier. */
+.actions { display: flex; gap: 2px; opacity: 0; transition: opacity var(--transition); }
+.liste li:hover .actions,
+.liste li:focus-within .actions { opacity: 1; }
+.action { width: 28px; height: 28px; }
+.supprimer:hover { color: var(--danger); }
+
+.champ-renommage { font-size: var(--t-s); padding: 6px 8px; margin: 2px 0; }
+.vide { color: var(--discret); font-size: var(--t-xs); padding: 10px 4px; margin: var(--e-2) 0 0; line-height: 1.5; }
 </style>

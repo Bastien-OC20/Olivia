@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="moteur.visible"
-    class="moteur"
+    class="moteur carte"
     :class="{ info: bloquant === false }"
     role="region"
     aria-labelledby="moteur-titre"
@@ -11,7 +11,12 @@
         id="moteur-titre"
         class="titre"
       >
-        {{ titre }}
+        <Icone
+          :nom="bloquant === false ? 'etincelles' : 'alerte'"
+          :taille="20"
+          class="titre-icone"
+        />
+        <span>{{ titre }}</span>
       </h2>
 
       <!-- Moteur injoignable : le redémarrer, l'installer, ou le démarrer. -->
@@ -73,10 +78,15 @@
               <button
                 v-if="!enCoursPour(m)"
                 type="button"
+                class="btn btn-primaire"
                 :disabled="demandes.has(m.nom)"
                 @click="telecharger(m.nom)"
               >
-                {{ m.telechargement?.etat === 'erreur' ? '🔄 Réessayer' : '⬇ Télécharger' }}
+                <Icone
+                  :nom="m.telechargement?.etat === 'erreur' ? 'actualiser' : 'telecharger'"
+                  :taille="16"
+                />
+                {{ m.telechargement?.etat === 'erreur' ? 'Réessayer' : 'Télécharger' }}
               </button>
             </div>
             <template v-if="enCoursPour(m)">
@@ -98,10 +108,14 @@
         <button
           v-if="aLancer.length > 1"
           type="button"
-          class="ghost"
+          class="btn btn-secondaire"
           @click="aLancer.forEach((m) => telecharger(m.nom))"
         >
-          ⬇ Tout télécharger
+          <Icone
+            nom="telecharger"
+            :taille="16"
+          />
+          Tout télécharger
         </button>
         <p class="note">
           Plusieurs Go : comptez de quelques minutes à une heure selon la connexion. Ce message
@@ -126,10 +140,14 @@
               >
               <button
                 type="button"
-                class="ghost"
+                class="btn btn-secondaire"
                 @click="copier(m.nom)"
               >
-                {{ copie === m.nom ? '✅ Copié' : '📋 Copier' }}
+                <Icone
+                  :nom="copie === m.nom ? 'coche' : 'copier'"
+                  :taille="16"
+                />
+                {{ copie === m.nom ? 'Copié' : 'Copier' }}
               </button>
             </li>
           </ul>
@@ -150,14 +168,19 @@
     <div class="btns">
       <button
         type="button"
+        class="btn btn-primaire"
         :disabled="moteur.enCours"
         @click="moteur.verifier()"
       >
-        {{ moteur.enCours ? '⏳ Vérification…' : '🔄 Vérifier à nouveau' }}
+        <Icone
+          nom="actualiser"
+          :taille="16"
+        />
+        {{ moteur.enCours ? 'Vérification…' : 'Vérifier à nouveau' }}
       </button>
       <button
         type="button"
-        class="ghost"
+        class="btn btn-secondaire"
         @click="moteur.masquer()"
       >
         Masquer
@@ -169,6 +192,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useMoteurStore } from '../stores/moteur.js'
+import Icone from './Icone.vue'
 
 const moteur = useMoteurStore()
 const etat = computed(() => moteur.etat || {})
@@ -199,9 +223,10 @@ const manquants = computed(() => (etat.value.modeles || [])
 const bloquant = computed(() => !etat.value.pret)
 
 const titre = computed(() => {
-  if (!etat.value.joignable) return "⚠️ Le moteur d'IA ne répond pas"
-  if (bloquant.value) return '⚠️ Oliv\'IA n\'est pas encore prête à converser'
-  return 'ℹ️ Recherche par le sens pas encore disponible'
+  // L'icône (alerte ou information) est dessinée devant le titre, dans le gabarit.
+  if (!etat.value.joignable) return "Le moteur d'IA ne répond pas"
+  if (bloquant.value) return 'Oliv\'IA n\'est pas encore prête à converser'
+  return 'Recherche par le sens pas encore disponible'
 })
 
 // Téléchargement par Oliv'IA (POST /api/moteur/telecharger, backend/moteur.py).
@@ -253,38 +278,39 @@ async function copier(nom) {
 
 <style scoped>
 /* Dans le flux, comme la bannière RGPD : un panneau en position fixe masquerait
-   des contrôles sans que l'utilisatrice comprenne pourquoi ils ne répondent plus. */
+   des contrôles sans que l'utilisatrice comprenne pourquoi ils ne répondent plus.
+   Carte posée sous la barre du haut, au-dessus de la conversation. */
 .moteur {
-  display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
-  padding: 14px 20px; background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  border-left: 4px solid var(--warn);
-  font-size: 13px; line-height: 1.5;
+  display: flex; gap: var(--e-4); align-items: flex-start; flex-wrap: wrap;
+  margin: var(--e-3) var(--e-4) 0;
+  padding: var(--e-4) var(--e-5);
+  border-radius: var(--r-3);
+  font-size: var(--t-s); line-height: 1.5;
+  flex-shrink: 0;
 }
-.moteur.info { border-left-color: var(--accent); }
 .corps { flex: 1; min-width: 280px; }
-.titre { margin: 0 0 6px; font-size: 15px; }
+.titre {
+  display: flex; align-items: center; gap: var(--e-2);
+  margin: 0 0 6px; font-size: 15px;
+}
+.titre-icone { color: var(--avert); flex-shrink: 0; }
+.moteur.info .titre-icone { color: var(--accent-texte); }
 .corps p, .corps ol { margin: 4px 0; }
 .corps ol { padding-left: 20px; }
-.corps a { color: var(--accent); text-decoration: underline; }
-.note { color: var(--muted); }
+.corps a { color: var(--accent-texte); text-decoration: underline; }
+.note { color: var(--discret); }
 .commandes { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 6px; }
 .commandes li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .commande {
-  font-family: monospace; font-size: 13px; width: 340px; max-width: 100%;
-  background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  font-family: monospace; font-size: var(--t-s); width: 340px; max-width: 100%;
+  background: var(--surface-2); color: var(--texte);
+  border: 1px solid var(--bordure); border-radius: var(--r-1); padding: 5px 8px;
 }
-.role { color: var(--muted); font-size: 12px; }
+.role { color: var(--discret); font-size: var(--t-xs); }
 .modeles { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; max-width: 560px; }
 .modeles .ligne { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .modeles progress { width: 100%; height: 10px; accent-color: var(--accent); }
 .erreur { color: var(--danger); margin: 2px 0; }
 details summary { cursor: pointer; }
-.btns { display: flex; gap: 10px; }
-.ghost { background: var(--panel-2); color: var(--text); }
-.sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-}
+.btns { display: flex; gap: 10px; flex-wrap: wrap; }
 </style>

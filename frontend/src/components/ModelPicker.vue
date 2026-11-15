@@ -74,6 +74,7 @@ watch(device, () => {
 </script>
 
 <style scoped>
-.mp { display: inline-flex; }
-select { min-width: 240px; width: auto; }
+/* Affiché dans le menu du moteur (MenuMoteur.vue) : toute la largeur du menu. */
+.mp { display: flex; width: 100%; }
+select { width: 100%; min-width: 0; }
 </style>

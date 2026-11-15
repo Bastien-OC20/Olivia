@@ -110,69 +110,112 @@ onBeforeUnmount(clearTimer)
 </script>
 
 <style scoped>
-.bubble-body { line-height: 1.6; word-wrap: break-word; overflow-wrap: anywhere; }
+.bubble-body {
+  font-size: var(--t-m);
+  line-height: 1.6;
+  color: var(--texte);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
 
 .reasoning {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--muted);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
+  margin: 0 0 var(--e-3);
+  font-size: var(--t-xs);
+  color: var(--discret);
+  background: var(--surface-2);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-2);
+  padding: 6px var(--e-3);
 }
 .reasoning summary { cursor: pointer; }
-.reasoning-text { margin: 8px 0 0; white-space: pre-wrap; line-height: 1.5; }
+.reasoning-text { margin: var(--e-2) 0 0; white-space: pre-wrap; line-height: 1.5; }
 
-/* Rendu Markdown — styles non « scopés » car le HTML est injecté via v-html. */
+/* Rendu Markdown — styles non « scopés » car le HTML est injecté via v-html.
+   Uniquement des jetons : lisible dans les deux thèmes, sombre et clair. */
 .markdown :deep(*:first-child) { margin-top: 0; }
 .markdown :deep(*:last-child) { margin-bottom: 0; }
-.markdown :deep(p) { margin: 0 0 10px; }
+.markdown :deep(p) { margin: 0 0 var(--e-3); line-height: 1.6; }
+.markdown :deep(strong) { font-weight: 600; color: var(--texte); }
+
 .markdown :deep(h1),
 .markdown :deep(h2),
 .markdown :deep(h3),
-.markdown :deep(h4) { margin: 18px 0 8px; line-height: 1.3; }
-.markdown :deep(h1) { font-size: 20px; }
+.markdown :deep(h4),
+.markdown :deep(h5),
+.markdown :deep(h6) {
+  margin: 20px 0 var(--e-2);
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--texte);
+}
+/* Tailles mesurées : une réponse n'est pas une page, les titres restent sobres. */
+.markdown :deep(h1) { font-size: var(--t-xl); }
 .markdown :deep(h2) { font-size: 18px; }
-.markdown :deep(h3) { font-size: 16px; }
-.markdown :deep(h4) { font-size: 14px; }
+.markdown :deep(h3) { font-size: var(--t-l); }
+.markdown :deep(h4),
+.markdown :deep(h5),
+.markdown :deep(h6) { font-size: var(--t-m); }
+
 .markdown :deep(ul),
-.markdown :deep(ol) { margin: 0 0 10px; padding-left: 24px; }
-.markdown :deep(li) { margin: 3px 0; }
-.markdown :deep(a) { color: var(--accent); }
+.markdown :deep(ol) { margin: 0 0 var(--e-3); padding-left: var(--e-5); }
+.markdown :deep(li) { margin: var(--e-1) 0; }
+.markdown :deep(li > ul),
+.markdown :deep(li > ol) { margin: var(--e-1) 0 0; }
+.markdown :deep(li::marker) { color: var(--discret); }
+
+.markdown :deep(a) { color: var(--accent-texte); text-underline-offset: 2px; }
 .markdown :deep(a:hover) { text-decoration: underline; }
+
+.markdown :deep(blockquote) {
+  margin: 0 0 var(--e-3);
+  padding: 2px 0 2px var(--e-3);
+  border-left: 3px solid var(--accent-texte);
+  color: var(--discret);
+}
+
 .markdown :deep(code) {
-  background: rgba(255, 255, 255, 0.08);
-  padding: 1px 5px;
-  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--texte);
+  padding: 1px 6px;
+  border-radius: var(--r-1);
   font-family: Consolas, Monaco, monospace;
-  font-size: 0.92em;
+  font-size: 0.9em;
 }
 .markdown :deep(pre) {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-2);
+  padding: var(--e-3) var(--e-4);
   overflow-x: auto;
-  margin: 0 0 10px;
+  margin: 0 0 var(--e-3);
+  line-height: 1.5;
 }
-.markdown :deep(pre code) { background: transparent; padding: 0; }
-.markdown :deep(blockquote) {
-  margin: 0 0 10px;
-  padding: 2px 0 2px 12px;
-  border-left: 3px solid var(--border);
-  color: var(--muted);
+.markdown :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  white-space: pre;
+  overflow-wrap: normal;
 }
+
+/* Tableau large : il défile horizontalement plutôt que de déborder. */
 .markdown :deep(table) {
   border-collapse: collapse;
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 var(--e-3);
+  font-size: var(--t-s);
   display: block;
   overflow-x: auto;
   max-width: 100%;
 }
 .markdown :deep(th),
-.markdown :deep(td) { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
-.markdown :deep(th) { background: var(--panel-2); }
-.markdown :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.markdown :deep(td) {
+  border: 1px solid var(--bordure);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.markdown :deep(th) { background: var(--surface-2); font-weight: 600; }
+
+.markdown :deep(hr) { border: none; border-top: 1px solid var(--bordure); margin: var(--e-4) 0; }
 </style>

@@ -13,121 +13,142 @@
       class="skip-link"
     >Aller au contenu principal</a>
 
-    <header class="topbar">
-      <h1 class="brand">
+    <!-- Rail : les trois sections, les Paramètres et le compte. Chaque onglet
+         porte un libellé visible : des utilisatrices non techniques doivent
+         lire, pas deviner une icône. -->
+    <nav
+      class="rail"
+      aria-label="Navigation principale"
+    >
+      <h1 class="rail-logo">
         <img
           :src="logoUrl"
-          alt=""
-          class="brand-logo"
+          alt="Oliv'IA"
+          width="36"
+          height="36"
         >
-        <span class="brand-name">Oliv'IA</span>
-        <span class="brand-sub">votre assistante</span>
       </h1>
 
       <div
-        v-if="!simple"
-        class="device"
-        role="group"
-        aria-label="Puissance de calcul"
+        class="rail-onglets"
+        role="tablist"
+        aria-orientation="vertical"
+        aria-label="Sections du panneau"
       >
-        <span
-          id="device-lbl"
-          class="device-label"
-        >Puissance</span>
-        <div
-          class="seg"
-          aria-labelledby="device-lbl"
+        <button
+          v-for="t in sideTabs"
+          :id="`tab-${t.id}`"
+          :key="t.id"
+          role="tab"
+          type="button"
+          class="rail-bouton"
+          :class="{ actif: sideTab === t.id }"
+          :aria-selected="sideTab === t.id"
+          :aria-controls="`panel-${t.id}`"
+          :tabindex="sideTab === t.id ? 0 : -1"
+          @click="choisirOnglet(t.id)"
+          @keydown="onTabKeydown"
         >
-          <button
-            :class="{ on: device === 'gpu' }"
-            :aria-pressed="device === 'gpu'"
-            title="Utilise la carte graphique — réponses plus rapides"
-            @click="setDevice('gpu')"
+          <Icone
+            :nom="t.icone"
+            :taille="22"
+          />
+          <span class="rail-libelle">{{ t.label }}</span>
+        </button>
+      </div>
+
+      <div class="rail-bas">
+        <button
+          type="button"
+          class="rail-bouton"
+          @click="settings.show()"
+        >
+          <Icone
+            nom="engrenage"
+            :taille="22"
+          />
+          <span class="rail-libelle">Paramètres</span>
+        </button>
+
+        <MenuDeroulant
+          :etiquette="`Mon compte : ${auth.identite?.username || ''}`"
+          etiquette-fenetre="Mon compte"
+          :titre="`Connectée comme ${auth.identite?.username || ''}`"
+          position="droite-haut"
+          classe-declencheur="compte-pastille"
+        >
+          <template #declencheur>
+            <span aria-hidden="true">{{ initiale }}</span>
+          </template>
+          <template #entete>
+            <div class="compte-entete">
+              <span class="compte-nom">{{ auth.identite?.username }}</span>
+              <span class="compte-role">{{ libelleRole(auth.role) }}</span>
+            </div>
+          </template>
+          <template #default="{ fermer }">
+            <button
+              type="button"
+              role="menuitem"
+              class="menu-item"
+              tabindex="-1"
+              @click="fermer(false); deconnexion()"
+            >
+              <Icone
+                nom="sortie"
+                :taille="18"
+              />
+              Se déconnecter
+            </button>
+          </template>
+        </MenuDeroulant>
+      </div>
+    </nav>
+
+    <!-- Voile sous le panneau quand il recouvre la zone principale (écran
+         étroit) : un clic à côté le referme. -->
+    <div
+      v-if="etroit && panneauOuvert"
+      class="voile"
+      aria-hidden="true"
+      @click="panneauOuvert = false"
+    />
+
+    <!-- Panneau : contenu de la section choisie dans le rail. Replié, il est
+         masqué (v-show) mais reste monté : rien n'est perdu. -->
+    <aside
+      v-show="panneauOuvert"
+      id="panneau"
+      class="panneau"
+      aria-labelledby="panneau-titre"
+    >
+      <div class="panneau-entete">
+        <div class="marque">
+          <span class="marque-nom">Oliv'IA</span>
+          <span class="marque-sous-titre">votre assistante</span>
+        </div>
+        <div class="panneau-ligne">
+          <h2
+            id="panneau-titre"
+            class="panneau-titre"
           >
-            ⚡ Rapide
-          </button>
+            {{ ongletCourant.label }}
+          </h2>
           <button
-            :class="{ on: device === 'cpu' }"
-            :aria-pressed="device === 'cpu'"
-            title="Sans carte graphique — compatible avec tout ordinateur"
-            @click="setDevice('cpu')"
+            ref="boutonReplier"
+            type="button"
+            class="btn-icone"
+            aria-label="Replier le panneau"
+            aria-controls="panneau"
+            aria-expanded="true"
+            @click="replier"
           >
-            🧩 Standard
-          </button>
-          <button
-            :class="{ on: device === 'leger' }"
-            :aria-pressed="device === 'leger'"
-            title="Ordinateur ancien ou peu puissant — modèle plus petit, réponses plus simples"
-            @click="setDevice('leger')"
-          >
-            🪶 Léger
+            <Icone nom="panneau" />
           </button>
         </div>
       </div>
 
-      <ModelPicker v-if="!simple" />
-      <button
-        class="ghost"
-        aria-label="Ouvrir les paramètres"
-        @click="settings.show()"
-      >
-        ⚙️ Paramètres
-      </button>
-      <button
-        class="ghost"
-        :disabled="chat.messages.length === 0"
-        aria-label="Effacer la conversation"
-        @click="chat.clear()"
-      >
-        Effacer
-      </button>
-      <button
-        class="ghost"
-        :title="`Connectée comme ${auth.identite?.username || ''}`"
-        aria-label="Se déconnecter"
-        @click="deconnexion"
-      >
-        Se déconnecter
-      </button>
-    </header>
-
-    <ConnectedTools
-      @open-settings="settings.show()"
-      @open-mail="settings.show()"
-    />
-
-    <MoteurAssistant />
-
-    <main
-      id="contenu"
-      class="main"
-    >
-      <aside
-        class="sidebar"
-        aria-label="Conversations et documents"
-      >
-        <div
-          class="side-tabs"
-          role="tablist"
-          aria-label="Sections de la barre latérale"
-        >
-          <button
-            v-for="t in sideTabs"
-            :id="`tab-${t.id}`"
-            :key="t.id"
-            role="tab"
-            type="button"
-            :class="{ on: sideTab === t.id }"
-            :aria-selected="sideTab === t.id"
-            :aria-controls="`panel-${t.id}`"
-            :tabindex="sideTab === t.id ? 0 : -1"
-            @click="sideTab = t.id"
-            @keydown="onTabKeydown"
-          >
-            {{ t.label }}
-          </button>
-        </div>
-
+      <div class="panneau-corps">
         <div
           v-show="sideTab === 'conversations'"
           id="panel-conversations"
@@ -135,7 +156,7 @@
           aria-labelledby="tab-conversations"
           tabindex="0"
         >
-          <ConversationList />
+          <ConversationList @ouverture="fermerSiEtroit" />
         </div>
         <div
           v-show="sideTab === 'documents'"
@@ -153,9 +174,74 @@
           aria-labelledby="tab-tableaux"
           tabindex="0"
         >
-          <TableauList v-if="auth.connecte" />
+          <TableauList
+            v-if="auth.connecte"
+            @ouverture="fermerSiEtroit"
+          />
         </div>
-      </aside>
+      </div>
+    </aside>
+
+    <main
+      id="contenu"
+      class="principal"
+    >
+      <header class="barre-haut">
+        <button
+          v-if="!panneauOuvert"
+          ref="boutonDeplier"
+          type="button"
+          class="btn-icone"
+          aria-label="Afficher le panneau"
+          aria-controls="panneau"
+          aria-expanded="false"
+          @click="deplier"
+        >
+          <Icone nom="panneau" />
+        </button>
+        <h2
+          class="titre-vue"
+          :title="titreVue"
+        >
+          {{ titreVue }}
+        </h2>
+
+        <div class="barre-haut-actions">
+          <ConnectedTools
+            :simple="simple"
+            @open-settings="settings.show()"
+            @open-mail="settings.show()"
+          />
+          <MenuMoteur v-if="!simple" />
+          <MenuDeroulant
+            v-if="!tableaux.courant"
+            etiquette="Plus d'actions"
+          >
+            <template #declencheur>
+              <Icone nom="points" />
+            </template>
+            <template #default="{ fermer }">
+              <button
+                type="button"
+                role="menuitem"
+                class="menu-item"
+                tabindex="-1"
+                :aria-disabled="chat.messages.length === 0 ? 'true' : undefined"
+                @click="effacer(fermer)"
+              >
+                <Icone
+                  nom="corbeille"
+                  :taille="18"
+                />
+                Effacer la conversation
+              </button>
+            </template>
+          </MenuDeroulant>
+        </div>
+      </header>
+
+      <MoteurAssistant />
+
       <!-- Un tableau ouvert remplace la conversation ; celle-ci reste montée
            (v-show) pour ne rien perdre d'une réponse en cours. -->
       <section
@@ -163,7 +249,7 @@
         class="content"
         aria-label="Conversation"
       >
-        <ChatPanel />
+        <ChatPanel @ouvrir-documents="ouvrirDocuments" />
       </section>
       <section
         v-if="tableaux.courant"
@@ -172,21 +258,21 @@
       >
         <TableauBlanc :key="tableaux.courant.id" />
       </section>
+
+      <ConsentBanner @open-privacy="openPrivacy" />
     </main>
 
     <SettingsMenu ref="settingsMenu" />
-    <ConsentBanner @open-privacy="openPrivacy" />
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick } from 'vue'
 import { useChatStore } from './stores/chat.js'
 import { useSettingsStore } from './stores/settings.js'
 import { useAuthStore } from './stores/auth.js'
 import { useMoteurStore } from './stores/moteur.js'
 import LoginView from './components/LoginView.vue'
-import ModelPicker from './components/ModelPicker.vue'
 import FileExplorer from './components/FileExplorer.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import TableauList from './components/TableauList.vue'
@@ -197,6 +283,11 @@ import SettingsMenu from './components/SettingsMenu.vue'
 import ConnectedTools from './components/ConnectedTools.vue'
 import ConsentBanner from './components/ConsentBanner.vue'
 import MoteurAssistant from './components/MoteurAssistant.vue'
+import MenuDeroulant from './components/MenuDeroulant.vue'
+import MenuMoteur from './components/MenuMoteur.vue'
+import Icone from './components/Icone.vue'
+import { libelleRole } from './roles.js'
+import { indexApresTouche } from './clavier.js'
 import logoUrl from './assets/logo-mark.png'
 
 const chat = useChatStore()
@@ -209,19 +300,86 @@ const settingsMenu = ref(null)
 const device = computed(() => settings.data.compute_device || 'gpu')
 const simple = computed(() => settings.data.simple_mode !== false)
 
-// Barre latérale : conversations, documents et tableaux blancs.
+// Rail : conversations, documents et tableaux blancs.
 // Visible dans les deux modes (simple et avancé).
 const sideTabs = [
-  { id: 'conversations', label: '💬 Conversations' },
-  { id: 'documents', label: '📁 Documents' },
-  { id: 'tableaux', label: '🎨 Tableaux' },
+  { id: 'conversations', label: 'Conversations', icone: 'bulle' },
+  { id: 'documents', label: 'Documents', icone: 'dossier' },
+  { id: 'tableaux', label: 'Tableaux', icone: 'tableau' },
 ]
 const sideTab = ref('conversations')
+const ongletCourant = computed(() => sideTabs.find(t => t.id === sideTab.value) || sideTabs[0])
+
+// Écran étroit (moins de 900 px) : le panneau passe par-dessus la zone
+// principale et démarre replié. Simple état en mémoire : rien n'est stocké.
+const requeteEtroit = window.matchMedia('(max-width: 900px)')
+const etroit = ref(requeteEtroit.matches)
+const panneauOuvert = ref(!etroit.value)
+const boutonReplier = ref(null)
+const boutonDeplier = ref(null)
+
+function surChangementLargeur(e) {
+  etroit.value = e.matches
+  if (e.matches) panneauOuvert.value = false
+}
+
+/** Replie le panneau ; le focus passe au bouton qui le rouvre (sinon il se
+ *  perdrait dans un panneau masqué). */
+async function replier() {
+  panneauOuvert.value = false
+  await nextTick()
+  boutonDeplier.value?.focus()
+}
+
+async function deplier() {
+  panneauOuvert.value = true
+  await nextTick()
+  boutonReplier.value?.focus()
+}
+
+// Sur écran étroit, ouvrir une conversation ou un tableau depuis le panneau
+// dégage la vue : le panneau recouvrirait ce qu'on vient d'ouvrir.
+function fermerSiEtroit() {
+  if (etroit.value) panneauOuvert.value = false
+}
+
+// Un clic sur l'onglet déjà actif replie ou déplie le panneau ; un autre
+// onglet l'ouvre toujours (sinon le choix n'aurait aucun effet visible).
+function choisirOnglet(id) {
+  if (sideTab.value === id) {
+    panneauOuvert.value = !panneauOuvert.value
+    return
+  }
+  sideTab.value = id
+  panneauOuvert.value = true
+}
+
+// « Joindre un document » (saisie) et la carte « Utiliser un document » de
+// l'accueil : on montre l'onglet Documents, où l'on choisit le fichier.
+function ouvrirDocuments() {
+  sideTab.value = 'documents'
+  panneauOuvert.value = true
+}
+
+// Titre de la zone principale : le tableau ouvert, sinon la conversation.
+const titreVue = computed(() => {
+  if (tableaux.courant) return tableaux.courant.titre || 'Sans titre'
+  const conversation = chat.conversations.find(c => c.id === chat.currentId)
+  if (conversation) return conversation.title || 'Sans titre'
+  return 'Nouvelle conversation'
+})
+
+// Initiale du compte, dans la pastille du rail (Array.from : un caractère
+// accentué ou hors du plan de base n'est pas coupé en deux).
+const initiale = computed(() => (Array.from(auth.identite?.username || '')[0] || '?').toUpperCase())
 
 onMounted(() => {
   auth.surveillerExpiration()
   auth.verifier()
+  requeteEtroit.addEventListener('change', surChangementLargeur)
 })
+
+onBeforeUnmount(() => requeteEtroit.removeEventListener('change', surChangementLargeur))
 
 // Le chargement suit l'état de la session plutôt qu'un évènement émis par
 // l'écran de connexion : quand `connexion()` bascule `connecte` à vrai, Vue
@@ -303,25 +461,25 @@ async function deconnexion() {
   purger()
 }
 
-// Navigation clavier attendue pour un role="tablist" (flèches, Début, Fin).
-function onTabKeydown(e) {
-  const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
-  if (!keys.includes(e.key)) return
-  e.preventDefault()
-  const i = sideTabs.findIndex(t => t.id === sideTab.value)
-  let next
-  if (e.key === 'ArrowLeft') next = (i - 1 + sideTabs.length) % sideTabs.length
-  else if (e.key === 'ArrowRight') next = (i + 1) % sideTabs.length
-  else if (e.key === 'Home') next = 0
-  else next = sideTabs.length - 1
-  sideTab.value = sideTabs[next].id
-  document.getElementById(`tab-${sideTabs[next].id}`)?.focus()
+// « Effacer la conversation » est désactivé par aria-disabled (il reste
+// atteignable au clavier dans le menu) : le clic est donc ignoré ici.
+function effacer(fermer) {
+  if (chat.messages.length === 0) return
+  fermer()
+  chat.clear()
 }
 
-async function setDevice(d) {
-  if (settings.data.compute_device === d) return
-  settings.data.compute_device = d
-  await settings.save({ compute_device: d })
+// Navigation clavier attendue pour un role="tablist" vertical (flèches Haut et
+// Bas, ainsi que Gauche et Droite, Début, Fin). Changer d'onglet au clavier
+// rouvre le panneau, comme un clic.
+function onTabKeydown(e) {
+  const i = sideTabs.findIndex(t => t.id === sideTab.value)
+  const next = indexApresTouche(e.key, i, sideTabs.length, { horizontal: true })
+  if (next === null) return
+  e.preventDefault()
+  sideTab.value = sideTabs[next].id
+  panneauOuvert.value = true
+  document.getElementById(`tab-${sideTabs[next].id}`)?.focus()
 }
 
 function openPrivacy() {
@@ -331,43 +489,181 @@ function openPrivacy() {
 </script>
 
 <style scoped>
-.layout { display: flex; flex-direction: column; height: 100vh; }
-.topbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 20px; background: var(--panel);
-  border-bottom: 1px solid var(--border);
+.layout {
+  --largeur-rail: 88px;
+  --largeur-panneau: 280px;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--largeur-rail) auto minmax(0, 1fr);
+  grid-template-areas: "rail panneau principal";
+  height: 100vh;
 }
-.brand { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; }
-.brand-logo { width: 30px; height: 30px; }   /* tuile bleue aux coins déjà arrondis */
-.brand-sub { align-self: flex-end; padding-bottom: 3px; }
-.brand-name { font-size: 20px; font-weight: 700; letter-spacing: 0.2px; }
-.brand-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
-.topbar .ghost { background: var(--panel-2); color: var(--text); }
 
-.device { display: flex; align-items: center; gap: 8px; }
-.device-label { font-size: 12px; color: var(--muted); }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.seg button {
-  background: var(--panel-2); color: var(--muted); border: none;
-  padding: 6px 12px; font-size: 13px; border-radius: 0;
+/* ---------- Rail ---------- */
+.rail {
+  grid-area: rail;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-2);
+  padding: var(--e-3) var(--e-1);
+  background: var(--surface);
+  border-right: 1px solid var(--bordure);
+  min-height: 0;
 }
-.seg button.on { background: var(--accent); color: #fff; }
+.rail-logo { margin: 0 0 var(--e-3); line-height: 0; }
+.rail-logo img { width: 36px; height: 36px; display: block; }   /* tuile aux coins déjà arrondis */
+.rail-onglets { display: flex; flex-direction: column; gap: var(--e-1); width: 100%; }
+.rail-bouton {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 2px;
+  background: transparent;
+  color: var(--discret);
+  border-radius: var(--r-2);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+.rail-bouton:hover { background: var(--surface-2); color: var(--texte); }
+.rail-bouton.actif { background: var(--accent-doux); color: var(--accent-texte); }
+/* Petite barre à gauche de l'onglet actif, contre le bord du rail. */
+.rail-bouton.actif::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--e-1));
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-texte);
+}
+.rail-libelle { white-space: nowrap; }
+.rail-bas {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-3);
+  width: 100%;
+}
+/* Pastille du compte : rendue par MenuDeroulant, d'où :deep(). */
+.rail-bas :deep(.compte-pastille) {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--r-rond);
+  background: var(--accent-doux);
+  color: var(--accent-texte);
+  border: 1px solid var(--bordure-forte);
+  font-size: var(--t-m);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-bas :deep(.compte-pastille:hover),
+.rail-bas :deep(.compte-pastille[aria-expanded="true"]) {
+  background: var(--surface-3);
+}
+.compte-entete {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--bordure);
+}
+.compte-nom { font-weight: 600; font-size: var(--t-m); overflow-wrap: anywhere; }
+.compte-role { font-size: var(--t-xs); color: var(--discret); }
 
-.main { display: flex; flex: 1; overflow: hidden; }
-.sidebar {
-  width: 320px; border-right: 1px solid var(--border);
-  overflow-y: auto; display: flex; flex-direction: column;
+/* ---------- Panneau ---------- */
+.panneau {
+  grid-area: panneau;
+  width: var(--largeur-panneau);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface) 55%, var(--fond));
+  border-right: 1px solid var(--bordure);
 }
-.side-tabs {
-  display: flex; gap: 4px; padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; background: var(--bg); z-index: 1;
+.panneau-entete { padding: var(--e-4) var(--e-3) var(--e-2) var(--e-4); flex-shrink: 0; }
+.marque { display: flex; align-items: baseline; gap: 6px; margin-bottom: var(--e-2); }
+.marque-nom { font-size: var(--t-s); font-weight: 700; letter-spacing: 0.2px; }
+.marque-sous-titre { font-size: var(--t-xs); color: var(--discret); }
+.panneau-ligne { display: flex; align-items: center; justify-content: space-between; gap: var(--e-2); }
+.panneau-titre { margin: 0; font-size: var(--t-xl); font-weight: 600; }
+.panneau-corps { flex: 1; min-height: 0; overflow-y: auto; }
+.panneau-corps [role="tabpanel"] { outline-offset: -2px; }
+
+/* ---------- Zone principale ---------- */
+.principal {
+  grid-area: principal;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
-.side-tabs button {
-  flex: 1; background: var(--panel-2); color: var(--muted);
-  padding: 7px 8px; font-size: 13px;
+.barre-haut {
+  position: relative;
+  z-index: 10;               /* les menus déroulants passent au-dessus du contenu */
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  height: 56px;
+  padding: 0 var(--e-3) 0 var(--e-4);
+  border-bottom: 1px solid var(--bordure);
 }
-.side-tabs button.on { background: var(--accent); color: #fff; }
-.sidebar [role="tabpanel"] { outline-offset: -2px; }
-.content { flex: 1; overflow: hidden; }
+.titre-vue {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--t-l);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.barre-haut-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  min-width: 0;
+  flex-shrink: 1;
+}
+.content { flex: 1; min-height: 0; overflow: hidden; }
+
+/* ---------- Écran étroit : le panneau recouvre la zone principale ---------- */
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: var(--largeur-rail) minmax(0, 1fr);
+    grid-template-areas: "rail principal";
+  }
+  .panneau {
+    grid-area: auto;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--largeur-rail);
+    z-index: 25;
+    max-width: calc(100vw - var(--largeur-rail));
+    box-shadow: var(--ombre-2);
+  }
+  .voile {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--largeur-rail);
+    right: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--fond) 45%, transparent);
+  }
+}
 </style>

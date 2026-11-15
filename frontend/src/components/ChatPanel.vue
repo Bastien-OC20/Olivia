@@ -1,362 +1,537 @@
 <template>
   <div class="chat">
-    <div
-      v-if="chat.fileContextPlan.length"
-      class="file-banner"
-      aria-live="polite"
+    <!-- Conversation vide : écran d'accueil, avec la saisie au centre. -->
+    <AccueilVue
+      v-if="chat.messages.length === 0"
+      @action="lancerAction"
+      @ouvrir-conversation="ouvrirConversation"
+      @ouvrir-tableau="tableaux.ouvrir($event)"
     >
-      <div class="file-banner-head">
-        <span>
-          📄 {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
-          dans la conversation
-        </span>
-        <button
-          class="x"
-          @click="chat.clearFileContexts()"
-        >
-          Tout retirer
-        </button>
-      </div>
-      <ul class="file-list">
-        <li
-          v-for="doc in chat.fileContextPlan"
-          :key="doc.path"
-        >
-          <span
-            class="file-name"
-            :title="doc.path"
-          >{{ doc.name }}</span>
-          <span
-            v-if="doc.truncated"
-            class="file-cut"
-            :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
-          >
-            ⚠️ tronqué
-          </span>
-          <button
-            class="x"
-            :aria-label="`Retirer ${doc.name} de la conversation`"
-            @click="chat.removeFileContext(doc.path)"
-          >
-            ✕
-          </button>
-        </li>
-      </ul>
-      <p
-        v-if="documentsTronques"
-        class="file-warn"
-      >
-        Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
-        Retirez-en pour laisser plus de place aux autres.
-      </p>
-      <p
-        v-if="chat.fileContextNotice"
-        class="file-warn"
-      >
-        {{ chat.fileContextNotice }}
-      </p>
-    </div>
-    <!-- Aucun document rattaché (tous devenus illisibles) : le bandeau est absent,
-         mais l'avis doit rester visible. -->
-    <div
-      v-else-if="chat.fileContextNotice"
-      class="file-banner"
-      role="status"
-    >
-      <p class="file-warn">
-        {{ chat.fileContextNotice }}
-      </p>
-    </div>
-
-    <div
-      ref="messagesEl"
-      class="messages"
-    >
-      <div class="stream">
+      <template #saisie>
+        <!-- Documents joints : même bandeau qu'en conversation (voir plus bas). -->
         <div
-          v-for="(m, i) in chat.messages"
-          :key="i"
-          :class="['msg', m.role]"
-        >
-          <strong>{{ m.role === 'user' ? 'Vous' : "Oliv'IA" }}</strong>
-          <div
-            v-if="m.role === 'user'"
-            class="bubble plain"
-          >
-            {{ m.content }}
-          </div>
-          <div
-            v-else
-            class="bubble"
-          >
-            <MessageBubble
-              :content="m.content"
-              :streaming="chat.isStreaming && i === chat.messages.length - 1"
-            />
-          </div>
-          <p
-            v-if="m.searchNote"
-            class="search-note"
-          >
-            ⚠️ {{ m.searchNote }}
-          </p>
-          <!-- Erreur du moteur d'IA sur ce tour : affichée à part, jamais mêlée
-               au texte de la réponse (qui est renvoyé au modèle). -->
-          <p
-            v-if="m.erreur"
-            class="erreur-modele"
-            role="alert"
-          >
-            ⛔ {{ m.erreur }}
-          </p>
-          <details
-            v-if="m.sources && m.sources.length"
-            class="sources"
-          >
-            <summary>🌐 {{ m.sources.length }} source{{ m.sources.length > 1 ? 's' : '' }} web</summary>
-            <ol>
-              <li
-                v-for="(s, j) in m.sources"
-                :key="j"
-              >
-                <a
-                  :href="s.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >{{ s.title || s.url }}</a>
-              </li>
-            </ol>
-          </details>
-
-          <!-- Tableau blanc créé par la commande /tableau. -->
-          <button
-            v-if="m.tableau"
-            class="doc-open"
-            @click="tableaux.ouvrir(m.tableau.id)"
-          >
-            🎨 Ouvrir le tableau
-          </button>
-
-          <!-- Transformer une réponse d'Olivia en document Word. C'est le geste
-               attendu par un secrétariat : la réponse existe, il ne reste qu'à
-               la mettre en page. Toujours visible, y compris en mode simple. -->
-          <button
-            v-if="peutCreerDocument(m, i)"
-            class="doc-open"
-            @click="ouvrirCreation(i)"
-          >
-            📄 Créer un document Word
-          </button>
-
-          <div
-            v-if="creation.index === i"
-            class="doc-form"
-          >
-            <fieldset class="doc-types">
-              <legend>Type de document</legend>
-              <button
-                v-for="t in typesDocument"
-                :key="t.id"
-                type="button"
-                class="doc-type"
-                :class="{ on: creation.type === t.id }"
-                :aria-pressed="creation.type === t.id"
-                @click="creation.type = t.id"
-              >
-                {{ t.libelle }}
-              </button>
-            </fieldset>
-
-            <label :for="`doc-titre-${i}`">Titre</label>
-            <input
-              :id="`doc-titre-${i}`"
-              v-model="creation.titre"
-              placeholder="Titre du document"
-            >
-
-            <template v-if="besoinObjet">
-              <label :for="`doc-objet-${i}`">Objet</label>
-              <input
-                :id="`doc-objet-${i}`"
-                v-model="creation.objet"
-                placeholder="Ex. : conseil de classe du 12 octobre"
-              >
-              <label :for="`doc-dest-${i}`">Destinataire</label>
-              <textarea
-                :id="`doc-dest-${i}`"
-                v-model="creation.destinataire"
-                rows="2"
-                placeholder="Aux responsables légaux&#10;des élèves de seconde"
-              />
-              <label :for="`doc-signature-${i}`">Signature</label>
-              <input
-                :id="`doc-signature-${i}`"
-                v-model="creation.signature"
-                placeholder="Ex. : La Proviseure"
-              >
-            </template>
-
-            <template v-if="creation.type === 'compte_rendu'">
-              <label :for="`doc-part-${i}`">Participants</label>
-              <textarea
-                :id="`doc-part-${i}`"
-                v-model="creation.participants"
-                rows="2"
-                placeholder="Un participant par ligne"
-              />
-            </template>
-
-            <p
-              v-if="modeleAbsent"
-              class="doc-warn"
-            >
-              ⚠️ {{ modeleEtat.message }}
-            </p>
-
-            <div class="doc-actions">
-              <button
-                :disabled="!!creation.etape"
-                @click="creerDocument"
-              >
-                {{ creation.etape || '✅ Créer le document' }}
-              </button>
-              <button
-                class="ghost"
-                @click="creation.index = null"
-              >
-                Annuler
-              </button>
-            </div>
-            <p
-              v-if="creation.erreur"
-              class="doc-warn"
-              aria-live="polite"
-            >
-              ⚠️ {{ creation.erreur }}
-            </p>
-          </div>
-
-          <div
-            v-if="documentCree && documentCree.index === i"
-            class="doc-done"
-            aria-live="polite"
-          >
-            <p>
-              ✅ <strong>{{ documentCree.name }}</strong> créé dans vos documents.
-            </p>
-            <p
-              v-if="documentCree.avertissement"
-              class="doc-warn"
-            >
-              ⚠️ {{ documentCree.avertissement }}
-            </p>
-            <div class="doc-actions">
-              <button @click="apercuOuvert = !apercuOuvert">
-                {{ apercuOuvert ? 'Masquer l’aperçu' : '👁 Aperçu' }}
-              </button>
-              <a
-                class="doc-dl"
-                :href="`/api/fs/download?path=${encodeURIComponent(documentCree.path)}`"
-                download
-              >⬇ Télécharger</a>
-            </div>
-            <FilePreview
-              v-if="apercuOuvert"
-              :path="documentCree.path"
-              @close="apercuOuvert = false"
-            />
-          </div>
-        </div>
-        <div
-          v-if="chat.messages.length === 0"
-          class="welcome"
-        >
-          <img
-            :src="logoUrl"
-            alt=""
-            class="welcome-logo"
-          >
-          <h2>Bonjour, je suis Oliv'IA</h2>
-          <p class="welcome-lead">
-            Votre assistante pour le secrétariat de direction. Posez votre demande,
-            ou choisissez un exemple pour commencer :
-          </p>
-          <div class="examples">
-            <button
-              v-for="(ex, i) in examples"
-              :key="i"
-              class="example"
-              @click="useExample(ex)"
-            >
-              {{ ex }}
-            </button>
-          </div>
-          <p class="tip">
-            <small>💡 Astuce : ouvrez l'onglet 📁 Documents à gauche pour que j'utilise un fichier dans ma réponse.</small>
-          </p>
-          <p class="tip tip-suite">
-            <small>🎨 Astuce : tapez /tableau suivi d'un sujet (par exemple « /tableau étapes de l'inscription d'un élève ») et je dessine un schéma dans un tableau blanc.</small>
-          </p>
-        </div>
-        <div
-          v-if="chat.isSearching"
-          class="searching"
+          v-if="chat.fileContextPlan.length"
+          class="docs-joints"
           aria-live="polite"
         >
-          🌐 Recherche sur le web…
+          <div class="docs-entete">
+            <span>
+              {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
+              dans la conversation
+            </span>
+            <button
+              type="button"
+              class="btn btn-fantome btn-compact"
+              @click="chat.clearFileContexts()"
+            >
+              Tout retirer
+            </button>
+          </div>
+          <ul class="docs-liste">
+            <li
+              v-for="doc in chat.fileContextPlan"
+              :key="doc.path"
+              class="doc-pastille"
+            >
+              <Icone
+                nom="document"
+                :taille="14"
+              />
+              <span
+                class="doc-nom"
+                :title="doc.path"
+              >{{ doc.name }}</span>
+              <span
+                v-if="doc.truncated"
+                class="doc-tronque"
+                :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
+              >
+                <Icone
+                  nom="alerte"
+                  :taille="12"
+                />
+                tronqué
+              </span>
+              <button
+                type="button"
+                class="btn-icone doc-retirer"
+                :aria-label="`Retirer ${doc.name} de la conversation`"
+                @click="chat.removeFileContext(doc.path)"
+              >
+                <Icone
+                  nom="fermer"
+                  :taille="14"
+                />
+              </button>
+            </li>
+          </ul>
+          <p
+            v-if="documentsTronques"
+            class="avert"
+          >
+            <Icone
+              nom="alerte"
+              :taille="14"
+            />
+            <span>
+              Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
+              Retirez-en pour laisser plus de place aux autres.
+            </span>
+          </p>
+          <p
+            v-if="chat.fileContextNotice"
+            class="avert"
+          >
+            <Icone
+              nom="alerte"
+              :taille="14"
+            />
+            <span>{{ chat.fileContextNotice }}</span>
+          </p>
         </div>
         <div
-          v-if="chat.isStreaming && !chat.isSearching
-            && (chat.messages[chat.messages.length-1]?.content || '') === ''"
-          class="typing"
+          v-else-if="chat.fileContextNotice"
+          class="docs-joints"
+          role="status"
         >
-          <span /><span /><span />
+          <p class="avert">
+            <Icone
+              nom="alerte"
+              :taille="14"
+            />
+            <span>{{ chat.fileContextNotice }}</span>
+          </p>
         </div>
-      </div>
-    </div>
 
-    <div class="composer">
-      <div class="composer-inner">
-        <textarea
+        <ZoneSaisie
+          ref="saisieEl"
           v-model="input"
-          placeholder="Écrivez votre demande à Oliv'IA…"
-          :disabled="chat.isStreaming"
-          rows="3"
-          @keydown.enter.exact.prevent="send"
+          v-model:recherche="webSearch"
+          accueil
+          :en-cours="chat.isStreaming"
+          @envoyer="send"
+          @stop="chat.stop()"
+          @joindre="emit('ouvrir-documents')"
         />
-        <div class="actions">
-          <button
-            class="toggle"
-            :class="{ on: webSearch }"
-            :aria-pressed="webSearch"
-            :disabled="chat.isStreaming"
-            title="Chercher sur le web avant de répondre, et citer les sources"
-            @click="webSearch = !webSearch"
+      </template>
+    </AccueilVue>
+
+    <template v-else>
+      <div
+        ref="messagesEl"
+        class="messages"
+      >
+        <div class="stream">
+          <div
+            v-for="(m, i) in chat.messages"
+            :key="i"
+            :class="['msg', m.role]"
           >
-            🌐 Recherche web
-          </button>
-          <button
-            v-if="chat.isStreaming"
-            @click="chat.stop()"
+            <strong
+              v-if="m.role === 'user'"
+              class="sr-only"
+            >Vous</strong>
+            <div
+              v-else
+              class="auteur"
+            >
+              <img
+                :src="logoUrl"
+                alt=""
+                class="auteur-logo"
+                width="26"
+                height="26"
+              >
+              <strong>Oliv'IA</strong>
+            </div>
+            <div
+              v-if="m.role === 'user'"
+              class="bulle"
+            >
+              {{ m.content }}
+            </div>
+            <div
+              v-else
+              class="reponse"
+            >
+              <MessageBubble
+                :content="m.content"
+                :streaming="chat.isStreaming && i === chat.messages.length - 1"
+              />
+            </div>
+            <p
+              v-if="m.searchNote"
+              class="avert"
+            >
+              <Icone
+                nom="alerte"
+                :taille="14"
+              />
+              <span>{{ m.searchNote }}</span>
+            </p>
+            <!-- Erreur du moteur d'IA sur ce tour : affichée à part, jamais mêlée
+                 au texte de la réponse (qui est renvoyé au modèle). -->
+            <p
+              v-if="m.erreur"
+              class="erreur-modele"
+              role="alert"
+            >
+              <Icone
+                nom="alerte"
+                :taille="16"
+              />
+              <span>{{ m.erreur }}</span>
+            </p>
+            <details
+              v-if="m.sources && m.sources.length"
+              class="sources"
+            >
+              <summary>
+                <Icone
+                  nom="globe"
+                  :taille="14"
+                />
+                {{ m.sources.length }} source{{ m.sources.length > 1 ? 's' : '' }} web
+              </summary>
+              <ol>
+                <li
+                  v-for="(s, j) in m.sources"
+                  :key="j"
+                >
+                  <a
+                    :href="s.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{ s.title || s.url }}</a>
+                </li>
+              </ol>
+            </details>
+
+            <div
+              v-if="m.tableau || peutCreerDocument(m, i)"
+              class="reponse-actions"
+            >
+              <!-- Tableau blanc créé par la commande /tableau. -->
+              <button
+                v-if="m.tableau"
+                type="button"
+                class="btn btn-fantome btn-compact"
+                @click="tableaux.ouvrir(m.tableau.id)"
+              >
+                <Icone
+                  nom="tableau"
+                  :taille="16"
+                />
+                Ouvrir le tableau
+              </button>
+
+              <!-- Transformer une réponse d'Olivia en document Word. C'est le geste
+                   attendu par un secrétariat : la réponse existe, il ne reste qu'à
+                   la mettre en page. Toujours visible, y compris en mode simple. -->
+              <button
+                v-if="peutCreerDocument(m, i)"
+                type="button"
+                class="btn btn-fantome btn-compact"
+                @click="ouvrirCreation(i)"
+              >
+                <Icone
+                  nom="document"
+                  :taille="16"
+                />
+                Créer un document Word
+              </button>
+            </div>
+
+            <div
+              v-if="creation.index === i"
+              class="carte doc-form"
+            >
+              <fieldset class="doc-types">
+                <legend>Type de document</legend>
+                <button
+                  v-for="t in typesDocument"
+                  :key="t.id"
+                  type="button"
+                  class="doc-type"
+                  :class="{ actif: creation.type === t.id }"
+                  :aria-pressed="creation.type === t.id"
+                  @click="creation.type = t.id"
+                >
+                  {{ t.libelle }}
+                </button>
+              </fieldset>
+
+              <label :for="`doc-titre-${i}`">Titre</label>
+              <input
+                :id="`doc-titre-${i}`"
+                v-model="creation.titre"
+                placeholder="Titre du document"
+              >
+
+              <template v-if="besoinObjet">
+                <label :for="`doc-objet-${i}`">Objet</label>
+                <input
+                  :id="`doc-objet-${i}`"
+                  v-model="creation.objet"
+                  placeholder="Ex. : conseil de classe du 12 octobre"
+                >
+                <label :for="`doc-dest-${i}`">Destinataire</label>
+                <textarea
+                  :id="`doc-dest-${i}`"
+                  v-model="creation.destinataire"
+                  rows="2"
+                  placeholder="Aux responsables légaux&#10;des élèves de seconde"
+                />
+                <label :for="`doc-signature-${i}`">Signature</label>
+                <input
+                  :id="`doc-signature-${i}`"
+                  v-model="creation.signature"
+                  placeholder="Ex. : La Proviseure"
+                >
+              </template>
+
+              <template v-if="creation.type === 'compte_rendu'">
+                <label :for="`doc-part-${i}`">Participants</label>
+                <textarea
+                  :id="`doc-part-${i}`"
+                  v-model="creation.participants"
+                  rows="2"
+                  placeholder="Un participant par ligne"
+                />
+              </template>
+
+              <p
+                v-if="modeleAbsent"
+                class="avert"
+              >
+                <Icone
+                  nom="alerte"
+                  :taille="14"
+                />
+                <span>{{ modeleEtat.message }}</span>
+              </p>
+
+              <div class="doc-actions">
+                <button
+                  type="button"
+                  class="btn btn-primaire"
+                  :disabled="!!creation.etape"
+                  @click="creerDocument"
+                >
+                  <Icone
+                    v-if="!creation.etape"
+                    nom="coche"
+                    :taille="16"
+                  />
+                  {{ creation.etape || 'Créer le document' }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondaire"
+                  @click="creation.index = null"
+                >
+                  Annuler
+                </button>
+              </div>
+              <p
+                v-if="creation.erreur"
+                class="avert"
+                aria-live="polite"
+              >
+                <Icone
+                  nom="alerte"
+                  :taille="14"
+                />
+                <span>{{ creation.erreur }}</span>
+              </p>
+            </div>
+
+            <div
+              v-if="documentCree && documentCree.index === i"
+              class="carte doc-done"
+              aria-live="polite"
+            >
+              <p class="doc-done-titre">
+                <Icone
+                  nom="coche"
+                  :taille="18"
+                  class="ok"
+                />
+                <span><strong>{{ documentCree.name }}</strong> créé dans vos documents.</span>
+              </p>
+              <p
+                v-if="documentCree.avertissement"
+                class="avert"
+              >
+                <Icone
+                  nom="alerte"
+                  :taille="14"
+                />
+                <span>{{ documentCree.avertissement }}</span>
+              </p>
+              <div class="doc-actions">
+                <button
+                  type="button"
+                  class="btn btn-secondaire"
+                  @click="apercuOuvert = !apercuOuvert"
+                >
+                  <Icone
+                    nom="oeil"
+                    :taille="16"
+                  />
+                  {{ apercuOuvert ? 'Masquer l’aperçu' : 'Aperçu' }}
+                </button>
+                <a
+                  class="btn btn-secondaire"
+                  :href="`/api/fs/download?path=${encodeURIComponent(documentCree.path)}`"
+                  download
+                >
+                  <Icone
+                    nom="telecharger"
+                    :taille="16"
+                  />
+                  Télécharger
+                </a>
+              </div>
+              <FilePreview
+                v-if="apercuOuvert"
+                :path="documentCree.path"
+                @close="apercuOuvert = false"
+              />
+            </div>
+          </div>
+          <div
+            v-if="chat.isSearching"
+            class="searching"
+            aria-live="polite"
           >
-            ⏸ Stop
-          </button>
-          <button
-            v-else
-            :disabled="!input.trim()"
-            @click="send"
+            <Icone
+              nom="globe"
+              :taille="16"
+            />
+            Recherche sur le web…
+          </div>
+          <div
+            v-if="chat.isStreaming && !chat.isSearching
+              && (chat.messages[chat.messages.length-1]?.content || '') === ''"
+            class="typing"
           >
-            ▶ Envoyer
-          </button>
+            <span /><span /><span />
+          </div>
         </div>
-        <p
-          v-if="webSearch"
-          class="web-hint"
-        >
-          Oliv'IA consultera le web avant de répondre, et indiquera ses sources.
-        </p>
       </div>
-    </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <!-- Documents joints : rangée de pastilles juste au-dessus de la saisie. -->
+          <div
+            v-if="chat.fileContextPlan.length"
+            class="docs-joints"
+            aria-live="polite"
+          >
+            <div class="docs-entete">
+              <span>
+                {{ chat.fileContextPlan.length }} document{{ chat.fileContextPlan.length > 1 ? 's' : '' }}
+                dans la conversation
+              </span>
+              <button
+                type="button"
+                class="btn btn-fantome btn-compact"
+                @click="chat.clearFileContexts()"
+              >
+                Tout retirer
+              </button>
+            </div>
+            <ul class="docs-liste">
+              <li
+                v-for="doc in chat.fileContextPlan"
+                :key="doc.path"
+                class="doc-pastille"
+              >
+                <Icone
+                  nom="document"
+                  :taille="14"
+                />
+                <span
+                  class="doc-nom"
+                  :title="doc.path"
+                >{{ doc.name }}</span>
+                <span
+                  v-if="doc.truncated"
+                  class="doc-tronque"
+                  :title="`Seuls les ${doc.keptChars} premiers caractères sur ${doc.chars} sont transmis à Oliv'IA.`"
+                >
+                  <Icone
+                    nom="alerte"
+                    :taille="12"
+                  />
+                  tronqué
+                </span>
+                <button
+                  type="button"
+                  class="btn-icone doc-retirer"
+                  :aria-label="`Retirer ${doc.name} de la conversation`"
+                  @click="chat.removeFileContext(doc.path)"
+                >
+                  <Icone
+                    nom="fermer"
+                    :taille="14"
+                  />
+                </button>
+              </li>
+            </ul>
+            <p
+              v-if="documentsTronques"
+              class="avert"
+            >
+              <Icone
+                nom="alerte"
+                :taille="14"
+              />
+              <span>
+                Certains documents sont trop longs : seul leur début est transmis à Oliv'IA.
+                Retirez-en pour laisser plus de place aux autres.
+              </span>
+            </p>
+            <p
+              v-if="chat.fileContextNotice"
+              class="avert"
+            >
+              <Icone
+                nom="alerte"
+                :taille="14"
+              />
+              <span>{{ chat.fileContextNotice }}</span>
+            </p>
+          </div>
+          <!-- Aucun document rattaché (tous devenus illisibles) : le bandeau est absent,
+               mais l'avis doit rester visible. -->
+          <div
+            v-else-if="chat.fileContextNotice"
+            class="docs-joints"
+            role="status"
+          >
+            <p class="avert">
+              <Icone
+                nom="alerte"
+                :taille="14"
+              />
+              <span>{{ chat.fileContextNotice }}</span>
+            </p>
+          </div>
+
+          <ZoneSaisie
+            ref="saisieEl"
+            v-model="input"
+            v-model:recherche="webSearch"
+            :en-cours="chat.isStreaming"
+            @envoyer="send"
+            @stop="chat.stop()"
+            @joindre="emit('ouvrir-documents')"
+          />
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -367,27 +542,42 @@ import { useTableauxStore } from '../stores/tableaux.js'
 import { sujetCommandeTableau } from '../tableauIA.js'
 import MessageBubble from './MessageBubble.vue'
 import FilePreview from './FilePreview.vue'
+import AccueilVue from './AccueilVue.vue'
+import ZoneSaisie from './ZoneSaisie.vue'
+import Icone from './Icone.vue'
 import logoUrl from '../assets/logo-mark.png'
+
+const emit = defineEmits(['ouvrir-documents'])
 
 const chat = useChatStore()
 const tableaux = useTableauxStore()
 const input = ref('')
 const messagesEl = ref(null)
+const saisieEl = ref(null)
 // Recherche web : choix explicite de l'utilisatrice, conservé d'un message à l'autre.
 const webSearch = ref(false)
 
 const documentsTronques = computed(() => chat.fileContextPlan.some((d) => d.truncated))
 
-// Exemples concrets pour une assistante de direction en lycée
-const examples = [
-  'Rédige un courriel aux parents pour annoncer le prochain conseil de classe.',
-  'Prépare un ordre du jour pour une réunion d\'équipe pédagogique.',
-  'Reformule ce texte de façon plus professionnelle et concise.',
-  'Fais un compte-rendu synthétique à partir de mes notes.',
-]
+/** Carte d'action de l'accueil (voir ACTIONS_ACCUEIL dans accueil.js). */
+async function lancerAction(action) {
+  if (action.type === 'envoyer') {
+    chat.send(action.texte, webSearch.value)
+  } else if (action.type === 'preremplir') {
+    // Reformuler ou résumer sans texte n'a pas de sens : la demande est posée
+    // dans la saisie, l'utilisatrice la complète.
+    input.value = action.texte
+    await nextTick()
+    saisieEl.value?.focus()
+  } else if (action.type === 'documents') {
+    emit('ouvrir-documents')
+  }
+}
 
-function useExample(text) {
-  chat.send(text, webSearch.value)
+// Même geste que dans la liste des conversations : ouvrir ramène à la conversation.
+function ouvrirConversation(id) {
+  chat.openConversation(id)
+  tableaux.fermer()
 }
 
 const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -577,109 +767,180 @@ onMounted(chargerEtatModele)
 
 <style scoped>
 .chat { display: flex; flex-direction: column; height: 100%; }
-.file-banner { padding: 8px 16px; background: var(--panel-2); font-size: 13px; }
-.file-banner-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.file-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex;
-             flex-wrap: wrap; gap: 6px; }
-.file-list li {
-  display: flex; align-items: center; gap: 6px; background: var(--panel);
-  border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 12px;
-  max-width: 100%;
+
+/* Bouton compact (actions sous une réponse, « Tout retirer ») */
+.btn-compact { padding: 5px 10px; font-size: var(--t-s); gap: 6px; }
+
+/* Avertissement (texte + icône) : documents, recherche web, modèle de document */
+.avert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: var(--e-2) 0 0;
+  font-size: var(--t-xs);
+  color: var(--avert);
+  line-height: 1.4;
 }
-.file-name { color: var(--accent); max-width: 240px; overflow: hidden;
-             text-overflow: ellipsis; white-space: nowrap; }
-.file-cut { color: var(--warn); font-size: 11px; }
-.file-warn { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
-.x { background: transparent; padding: 2px 8px; font-size: 12px; }
-.messages { flex: 1; overflow-y: auto; padding: 16px; }
+.avert .icone { flex-shrink: 0; margin-top: 1px; }
+
+/* ---------- Documents joints : pastilles au-dessus de la saisie ---------- */
+.docs-joints { margin-bottom: var(--e-2); font-size: var(--t-s); }
+.docs-entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-2);
+  color: var(--discret);
+}
+.docs-liste {
+  list-style: none;
+  margin: var(--e-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.doc-pastille {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 2px 2px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-rond);
+  color: var(--texte);
+}
+.doc-pastille > .icone { flex-shrink: 0; color: var(--accent-texte); }
+.doc-nom {
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-tronque {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  color: var(--avert);
+  font-size: var(--t-xs);
+}
+.doc-retirer { width: 26px; height: 26px; border-radius: var(--r-rond); flex-shrink: 0; }
+
+/* ---------- Messages ---------- */
+.messages { flex: 1; overflow-y: auto; padding: var(--e-5) var(--e-4) var(--e-4); }
 /* Colonne de lecture centrée (confort de lecture, style Claude Desktop) */
 .stream { max-width: 760px; margin: 0 auto; }
-.msg { margin-bottom: 20px; animation: msg-in 0.22s ease; }
+.msg { margin-bottom: var(--e-5); animation: msg-in 0.22s ease; }
 @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.msg strong { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
-.bubble { padding: 10px 14px; border-radius: 8px;
-          word-wrap: break-word; line-height: 1.5; }
+
 /* Message tapé par l'utilisatrice : texte brut, bulle alignée à droite */
-.bubble.plain { white-space: pre-wrap; }
 .msg.user { display: flex; flex-direction: column; align-items: flex-end; }
-.msg.user .bubble { background: var(--user); max-width: 80%; }
-/* Réponse d'Olivia : pleine largeur, sans bulle (comme Claude Desktop) */
-.msg.assistant .bubble { background: transparent; padding: 2px 0; }
-.search-note { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
-.erreur-modele {
-  margin: 6px 0 0; padding: 8px 10px; font-size: 13px; line-height: 1.4;
-  color: var(--text); background: rgba(239,68,68,0.12);
-  border: 1px solid var(--danger); border-radius: 6px;
+.bulle {
+  max-width: 80%;
+  padding: 10px 14px;
+  background: var(--bulle-utilisatrice);
+  color: var(--texte);
+  border-radius: var(--r-3) var(--r-3) var(--r-1) var(--r-3);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
-.sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
-.sources summary { cursor: pointer; padding: 2px 0; }
+
+/* Réponse d'Olivia : pleine largeur, sans bulle (comme Claude Desktop) */
+.auteur { display: flex; align-items: center; gap: var(--e-2); margin-bottom: 6px; }
+.auteur-logo { width: 26px; height: 26px; display: block; flex-shrink: 0; }
+.auteur strong { font-size: var(--t-s); font-weight: 600; color: var(--texte); }
+.reponse { padding: 2px 0; word-wrap: break-word; }
+
+.erreur-modele {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-2);
+  margin: var(--e-2) 0 0;
+  padding: 10px 12px;
+  font-size: var(--t-s);
+  line-height: 1.4;
+  color: var(--texte);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-2);
+}
+.erreur-modele .icone { flex-shrink: 0; color: var(--danger); margin-top: 1px; }
+
+.sources { margin-top: var(--e-2); font-size: var(--t-xs); color: var(--discret); }
+.sources summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 2px 0;
+}
 .sources ol { margin: 6px 0 0; padding-left: 22px; }
 .sources li { margin-bottom: 4px; line-height: 1.4; }
-.sources a { color: var(--accent); }
-.searching { font-size: 13px; color: var(--muted); padding: 4px 0; }
+.sources a { color: var(--accent-texte); }
 
-/* Production de documents Word */
-.doc-open {
-  margin-top: 6px; background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--border); font-size: 13px; padding: 5px 12px;
+.reponse-actions { display: flex; flex-wrap: wrap; gap: var(--e-1); margin-top: 6px; margin-left: -10px; }
+
+.searching {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-s);
+  color: var(--discret);
+  padding: 4px 0;
 }
-.doc-open:hover { border-color: var(--accent); }
-.doc-form {
-  margin-top: 8px; padding: 12px; background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
-}
-.doc-form label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
-.doc-form input, .doc-form textarea {
-  width: 100%; font-family: inherit; font-size: 13px;
-}
-.doc-types { border: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.doc-types legend { padding: 0 0 6px; color: var(--muted); font-size: 12px; }
-.doc-type {
-  background: var(--panel); color: var(--text); border: 1px solid var(--border);
-  font-size: 13px; padding: 5px 10px;
-}
-.doc-type.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-.doc-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.doc-actions .ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
-.doc-warn { margin: 8px 0 0; font-size: 12px; color: var(--warn); line-height: 1.4; }
-.doc-done {
-  margin-top: 8px; padding: 12px; background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: 8px; font-size: 13px;
-}
-.doc-done p { margin: 0; line-height: 1.5; }
-.doc-dl {
-  display: inline-flex; align-items: center; gap: 4px; background: var(--accent);
-  color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 13px; text-decoration: none;
-}
-.welcome { text-align: center; color: var(--muted); padding: 32px 20px; max-width: 620px; margin: 0 auto; }
-.welcome-logo { width: 84px; height: 84px; }
-.welcome h2 { color: var(--text); font-size: 20px; margin: 8px 0 4px; }
-.welcome-lead { line-height: 1.6; margin: 0 0 20px; }
-.examples { display: grid; gap: 10px; text-align: left; }
-.example {
-  background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 14px; font-size: 13px; line-height: 1.4; cursor: pointer; width: 100%;
-}
-.example:hover { border-color: var(--accent); }
-.tip { margin-top: 20px; }
-.tip.tip-suite { margin-top: 6px; }
 .typing span { display: inline-block; width: 8px; height: 8px;
-               background: var(--muted); border-radius: 50%;
+               background: var(--discret); border-radius: 50%;
                margin-right: 4px; animation: blink 1.4s infinite; }
 .typing span:nth-child(2) { animation-delay: 0.2s; }
 .typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
-.composer { padding: 12px 16px; background: var(--panel); border-top: 1px solid var(--border); }
-.composer-inner { max-width: 760px; margin: 0 auto; }
-.composer textarea { width: 100%; resize: vertical; font-family: inherit; }
-.composer .actions { display: flex; justify-content: space-between; align-items: center;
-                     gap: 8px; margin-top: 8px; }
-.composer .toggle {
-  background: var(--panel-2); color: var(--muted);
-  border: 1px solid var(--border); font-size: 13px;
+
+/* ---------- Production de documents Word ---------- */
+.doc-form,
+.doc-done { margin-top: var(--e-2); padding: var(--e-4); font-size: var(--t-s); }
+.doc-form label {
+  display: block;
+  margin: var(--e-3) 0 var(--e-1);
+  color: var(--discret);
+  font-size: var(--t-xs);
+  font-weight: 500;
 }
-.composer .toggle:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
-.composer .toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-.web-hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.doc-form input, .doc-form textarea { width: 100%; font-family: inherit; font-size: var(--t-s); }
+.doc-types { border: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-types legend { padding: 0 0 6px; color: var(--discret); font-size: var(--t-xs); font-weight: 500; }
+/* Types de document : pastilles bascule */
+.doc-type {
+  padding: 5px 12px;
+  background: var(--surface-2);
+  color: var(--texte);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-rond);
+  font-size: var(--t-s);
+}
+.doc-type:hover:not(:disabled) { background: var(--surface-3); border-color: var(--bordure-forte); }
+.doc-type.actif,
+.doc-type.actif:hover:not(:disabled) {
+  background: var(--accent-doux);
+  color: var(--accent-texte);
+  border-color: var(--accent-texte);
+}
+.doc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  margin-top: var(--e-3);
+  flex-wrap: wrap;
+}
+.doc-done p { margin: 0; line-height: 1.5; }
+.doc-done-titre { display: flex; align-items: flex-start; gap: var(--e-2); }
+.doc-done-titre .ok { flex-shrink: 0; color: var(--ok); margin-top: 1px; }
+
+/* ---------- Saisie en bas de la conversation ---------- */
+.composer { flex-shrink: 0; padding: var(--e-2) var(--e-4) var(--e-3); }
+.composer-inner { max-width: 760px; margin: 0 auto; }
 </style>

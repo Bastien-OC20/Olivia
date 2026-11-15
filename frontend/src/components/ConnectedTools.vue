@@ -5,16 +5,22 @@
         v-for="c in enabledConnectors"
         :key="c.id"
         type="button"
-        class="chip"
+        class="pastille outil"
         :title="chipTitle(c)"
         :aria-label="chipAriaLabel(c)"
         @click="onChipClick(c)"
       >
+        <Icone
+          v-if="ICONES_CONNECTEURS[c.id]"
+          :nom="ICONES_CONNECTEURS[c.id]"
+          :taille="14"
+        />
         <span
+          v-else
           class="emoji"
           aria-hidden="true"
         >{{ c.icon }}</span>
-        <span class="label">{{ c.label }}</span>
+        <span class="libelle">{{ c.label }}</span>
         <span
           class="dot"
           :style="{ background: dotColor(c.status) }"
@@ -24,25 +30,24 @@
           v-if="c.id === 'imap' && mail.enabled && mail.count > 0"
           class="badge"
           aria-hidden="true"
-        >
-          🔔{{ mail.count > 99 ? '99+' : mail.count }}
-        </span>
+        >{{ mail.count > 99 ? '99+' : mail.count }}</span>
       </button>
     </template>
 
-    <div
-      v-else
-      class="empty"
+    <!-- Aucun outil connecté : rien en mode simple (rien à faire pour
+         l'utilisatrice) ; en mode avancé, un accès discret aux Paramètres. -->
+    <button
+      v-else-if="!simple"
+      type="button"
+      class="pastille outil connecter"
+      @click="emit('open-settings')"
     >
-      <span>Aucun outil connecté</span>
-      <button
-        type="button"
-        class="configure-btn"
-        @click="emit('open-settings')"
-      >
-        <span aria-hidden="true">⚙️</span> Configurer
-      </button>
-    </div>
+      <Icone
+        nom="plus"
+        :taille="14"
+      />
+      <span class="libelle">Connecter un outil</span>
+    </button>
 
     <!-- Zone accessible : annonce les e-mails non lus aux lecteurs d'écran -->
     <div
@@ -51,23 +56,28 @@
     >
       {{ mailSrText }}
     </div>
-
-    <button
-      type="button"
-      class="settings-btn"
-      aria-label="Ouvrir les paramètres des connecteurs"
-      title="Paramètres"
-      @click="emit('open-settings')"
-    >
-      <span aria-hidden="true">⚙️</span>
-    </button>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import Icone from './Icone.vue'
+
+defineProps({
+  // Mode simple : rien n'est proposé tant qu'aucun outil n'est connecté.
+  simple: { type: Boolean, default: true },
+})
 
 const emit = defineEmits(['open-settings', 'open-mail'])
+
+// Icône au trait des connecteurs connus ; les autres gardent l'emoji fourni
+// par le serveur (c.icon).
+const ICONES_CONNECTEURS = {
+  imap: 'mail',
+  calendar_ics: 'calendrier',
+  obsidian: 'livre',
+  notion: 'document',
+}
 
 const connectors = ref([])
 const mail = ref({ enabled: false, count: 0, label: '', error: null })
@@ -105,15 +115,12 @@ function statusText(status) {
 function dotColor(status) {
   switch (status) {
     case 'connected':
-      return '#22c55e'
-    case 'idle':
-      return 'var(--muted)'
+      return 'var(--ok)'
     case 'misconfigured':
-      return 'var(--warn)'
     case 'scaffold':
-      return 'var(--warn)'
+      return 'var(--avert)'
     default:
-      return 'var(--muted)'
+      return 'var(--discret)'
   }
 }
 
@@ -175,44 +182,37 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Dans la barre du haut : pastilles compactes. Le remplissage vertical laisse
+   la place au badge, qui déborde de sa pastille (la zone défile sinon). */
 .tools-bar {
   display: flex;
-  gap: 8px;
+  gap: var(--e-2);
   align-items: center;
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  min-width: 0;
+  padding: 8px 10px 8px 2px;
   overflow-x: auto;
 }
 
-.chip {
+.outil {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
   flex-shrink: 0;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 13px;
-  color: var(--text);
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: var(--t-xs);
   white-space: nowrap;
+  color: var(--texte);
   cursor: pointer;
 }
-
-.chip:hover {
-  border-color: var(--accent);
+.outil:hover {
+  background: var(--surface-3);
+  border-color: var(--bordure-forte);
 }
+.outil .icone { color: var(--discret); flex-shrink: 0; }
+.connecter { color: var(--discret); border-style: dashed; }
+.connecter:hover { color: var(--texte); }
 
-.chip .emoji {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.chip .label {
-  line-height: 1;
-}
+.emoji { font-size: var(--t-s); line-height: 1; }
+.libelle { line-height: 1.2; }
 
 .dot {
   width: 8px;
@@ -221,17 +221,21 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+/* Nombre d'e-mails non lus. --fond sur --avert : lisible dans les deux thèmes
+   (texte sombre sur ambre clair, texte clair sur ambre foncé). */
 .badge {
   position: absolute;
   top: -7px;
   right: -8px;
-  background: var(--warn);
-  color: #1a1300;
+  min-width: 18px;
+  background: var(--avert);
+  color: var(--fond);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1;
+  text-align: center;
   padding: 3px 5px;
-  border-radius: 10px;
+  border-radius: var(--r-rond);
   white-space: nowrap;
   animation: badge-pulse 2s ease-in-out infinite;
 }
@@ -247,55 +251,9 @@ onUnmounted(() => {
   50% { transform: scale(1.12); }
 }
 
-.empty {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--muted);
-  flex-shrink: 0;
-}
-
-.configure-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.configure-btn:hover {
-  border-color: var(--accent);
-}
-
-.settings-btn {
-  margin-left: auto;
-  flex-shrink: 0;
-  background: transparent;
-  border: none;
-  font-size: 16px;
-  padding: 4px 6px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.settings-btn:hover {
-  color: var(--text);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+/* Écran étroit : seules les icônes restent (le nom accessible est porté par
+   aria-label sur chaque pastille). */
+@media (max-width: 1100px) {
+  .outil:not(.connecter) .libelle { display: none; }
 }
 </style>
