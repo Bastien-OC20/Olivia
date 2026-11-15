@@ -223,6 +223,13 @@ export const ICONES = {
     'M8 9.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0',
     'M21 15l-5-5L5 21',
   ],
+  // Tableur (xlsx, csv) : distinct de « tableau », réservé aux tableaux blancs.
+  grille: [
+    'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z',
+    'M3 9h18',
+    'M3 15h18',
+    'M9 3v18',
+  ],
 }
 
 export const NOMS_ICONES = Object.keys(ICONES)

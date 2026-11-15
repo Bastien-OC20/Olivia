@@ -1,60 +1,83 @@
 <template>
   <div class="explorer">
-    <div class="explorer-header">
-      <h3>📁 Documents</h3>
+    <div class="fil">
       <button
-        class="ghost"
-        aria-label="Revenir à la racine"
+        v-if="currentPath"
+        type="button"
+        class="btn-icone"
+        aria-label="Revenir à la racine des documents"
+        title="Revenir à la racine des documents"
         @click="loadRoot"
       >
-        ↑ Racine
+        <Icone
+          nom="chevron-gauche"
+          :taille="18"
+        />
       </button>
-    </div>
-    <div
-      v-if="rootLabel"
-      class="root-path"
-      :title="rootPath"
-    >
-      {{ rootLabel }}
+      <span
+        class="fil-nom"
+        :title="currentPath || rootPath || undefined"
+      >
+        <Icone
+          nom="dossier"
+          :taille="16"
+        />
+        <span class="fil-texte">{{ nomDossierCourant }}</span>
+      </span>
     </div>
 
-    <div class="root-row">
-      <label
-        for="fs-root-select"
-        class="sr-only"
-      >Choisir un dossier</label>
-      <select
-        v-if="settings.data.fs_roots.length > 1"
-        id="fs-root-select"
-        :value="rootPrefix"
-        @change="onSelectRoot"
-      >
-        <option value="">
-          📁 Tous les dossiers
-        </option>
-        <option
-          v-for="(entry, i) in settings.data.fs_roots"
-          :key="entry.path + i"
-          :value="'r' + i"
+    <div
+      v-if="settings.data.fs_roots.length > 1 || auth.estResponsable"
+      class="root-row"
+    >
+      <template v-if="settings.data.fs_roots.length > 1">
+        <label
+          for="fs-root-select"
+          class="sr-only"
+        >Choisir un dossier</label>
+        <select
+          id="fs-root-select"
+          :value="rootPrefix"
+          @change="onSelectRoot"
         >
-          {{ entry.label || basename(entry.path) }}
-        </option>
-      </select>
+          <option value="">
+            Tous les dossiers
+          </option>
+          <option
+            v-for="(entry, i) in settings.data.fs_roots"
+            :key="entry.path + i"
+            :value="'r' + i"
+          >
+            {{ entry.label || basename(entry.path) }}
+          </option>
+        </select>
+      </template>
       <button
         v-if="auth.estResponsable"
         ref="browseBtn"
-        class="ghost"
+        type="button"
+        class="btn btn-secondaire"
         @click="browserOpen = true"
       >
-        📂 Parcourir…
+        <Icone
+          nom="dossier"
+          :taille="16"
+        />
+        Parcourir…
       </button>
     </div>
 
     <div class="upload-row">
       <label
         for="fileup"
-        class="upload-btn"
-      >⬆ Importer un fichier</label>
+        class="btn btn-secondaire upload-btn"
+      >
+        <Icone
+          nom="plus"
+          :taille="16"
+        />
+        Importer un fichier
+      </label>
       <input
         id="fileup"
         ref="fileInput"
@@ -74,14 +97,20 @@
         for="fs-search"
         class="search-label"
       >Retrouver une information dans mes documents</label>
-      <input
-        id="fs-search"
-        v-model="search"
-        class="search"
-        placeholder="Ex. : convocation conseil de classe"
-        aria-describedby="fs-search-help"
-        @keydown.enter.prevent="doSearch"
-      >
+      <div class="champ champ-recherche">
+        <Icone
+          nom="loupe"
+          :taille="16"
+        />
+        <input
+          id="fs-search"
+          v-model="search"
+          class="search"
+          placeholder="Ex. : convocation conseil de classe"
+          aria-describedby="fs-search-help"
+          @keydown.enter.prevent="doSearch"
+        >
+      </div>
       <p
         id="fs-search-help"
         class="search-help"
@@ -100,7 +129,11 @@
             :aria-pressed="searchMode === 'keyword'"
             @click="searchMode = 'keyword'"
           >
-            🔤 Mots-clés
+            <Icone
+              nom="loupe"
+              :taille="14"
+            />
+            Mots-clés
           </button>
           <button
             type="button"
@@ -108,26 +141,59 @@
             :aria-pressed="searchMode === 'semantic'"
             @click="searchMode = 'semantic'"
           >
-            🧠 Par le sens
+            <Icone
+              nom="etincelles"
+              :taille="14"
+            />
+            Par le sens
           </button>
         </div>
       </div>
       <div class="search-actions">
         <button
+          type="button"
+          class="btn btn-primaire"
           :disabled="!search.trim() || searching"
           @click="doSearch"
         >
-          {{ searching ? '⏳ Recherche…' : '🔍 Chercher' }}
+          <template v-if="searching">
+            Recherche…
+          </template>
+          <template v-else>
+            <Icone
+              nom="loupe"
+              :taille="16"
+            />
+            Chercher
+          </template>
         </button>
         <button
           v-if="searchData"
-          class="ghost"
+          type="button"
+          class="btn btn-fantome"
           @click="clearSearch"
         >
           Effacer
         </button>
       </div>
     </div>
+
+    <!-- Confirmation / erreur d'un ajout à la conversation, d'où qu'il parte
+         (résultat de recherche ou aperçu d'un fichier de l'arborescence). Collée
+         en haut du corps du panneau, qui défile sous son en-tête : l'arborescence
+         peut être longue et l'aperçu loin sous l'écran. -->
+    <p
+      v-if="injectMsg"
+      class="inject-msg"
+      aria-live="polite"
+    >
+      <Icone
+        v-if="injectMsgOk"
+        nom="coche"
+        :taille="14"
+      />
+      <span>{{ injectMsgTexte }}</span>
+    </p>
 
     <div
       v-if="searchData"
@@ -148,14 +214,23 @@
         v-if="searchData.notice"
         class="search-notice"
       >
-        ⚠️ {{ searchData.notice }}
+        <Icone
+          nom="alerte"
+          :taille="14"
+        />
+        <span>{{ searchData.notice }}</span>
       </p>
       <button
         v-if="searchData.results.length > 1"
-        class="inject-all"
+        type="button"
+        class="btn btn-secondaire inject-all"
         @click="injectAll"
       >
-        ➕ Tout utiliser dans la conversation ({{ searchData.results.length }})
+        <Icone
+          nom="plus"
+          :taille="16"
+        />
+        Tout utiliser dans la conversation ({{ searchData.results.length }})
       </button>
 
       <article
@@ -165,15 +240,20 @@
       >
         <h4 class="doc-title">
           <button
+            type="button"
             class="doc-open"
             :title="`Ouvrir l'aperçu de ${r.name}`"
             @click="openFile(r.path)"
           >
-            {{ icon(r.ext) }} {{ r.name }}
+            <Icone
+              :nom="nomIconeFichier(r.ext)"
+              :taille="16"
+            />
+            <span class="doc-nom">{{ r.name }}</span>
           </button>
         </h4>
         <p class="doc-path">
-          {{ r.path }}
+          {{ cheminLisible(r.path) }}
         </p>
         <!-- Le texte vient d'une reconnaissance automatique : jamais fiable à
              100 %. L'utilisatrice doit le savoir AVANT de recopier une date ou
@@ -183,10 +263,16 @@
           class="doc-ocr"
           :title="r.ocr_notice || undefined"
         >
-          🔍 Texte reconnu automatiquement (document scanné) — à vérifier sur l'original.
-          <template v-if="r.ocr_notice">
-            <br>{{ r.ocr_notice }}
-          </template>
+          <Icone
+            nom="alerte"
+            :taille="14"
+          />
+          <span>
+            Texte reconnu automatiquement (document scanné) — à vérifier sur l'original.
+            <template v-if="r.ocr_notice">
+              <br>{{ r.ocr_notice }}
+            </template>
+          </span>
         </p>
         <p
           v-for="(s, i) in r.snippets"
@@ -202,25 +288,18 @@
           Trouvé d'après le nom du fichier.
         </p>
         <button
-          class="doc-inject"
+          type="button"
+          class="btn btn-secondaire doc-inject"
           @click="injectPath(r.path, r.name)"
         >
-          ➕ Utiliser dans la conversation
+          <Icone
+            nom="plus"
+            :taille="16"
+          />
+          Utiliser dans la conversation
         </button>
       </article>
     </div>
-
-    <!-- Confirmation / erreur d'un ajout à la conversation, d'où qu'il parte
-         (résultat de recherche ou aperçu d'un fichier de l'arborescence). Collée
-         en haut de la barre latérale : l'arborescence peut être longue et
-         l'aperçu loin sous l'écran. -->
-    <p
-      v-if="injectMsg"
-      class="inject-msg"
-      aria-live="polite"
-    >
-      {{ injectMsg }}
-    </p>
 
     <ul class="tree">
       <li
@@ -229,10 +308,15 @@
         :class="{ folder: item.is_dir, file: !item.is_dir }"
         tabindex="0"
         role="button"
+        :title="item.name"
         @click="item.is_dir ? navigate(item.path) : openFile(item.path)"
         @keydown.enter="item.is_dir ? navigate(item.path) : openFile(item.path)"
       >
-        {{ item.is_dir ? '📂' : icon(item.ext) }} {{ item.name }}
+        <Icone
+          :nom="nomIconeFichier(item.ext, item.is_dir)"
+          :taille="18"
+        />
+        <span class="nom">{{ item.name }}</span>
       </li>
       <li
         v-if="items.length === 0"
@@ -263,6 +347,8 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import FilePreview from './FilePreview.vue'
 import FolderPickerModal from './FolderPickerModal.vue'
+import Icone from './Icone.vue'
+import { nomIconeFichier, cheminLisible } from '../typesFichier.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { useAuthStore } from '../stores/auth.js'
 import { useChatStore } from '../stores/chat.js'
@@ -317,6 +403,19 @@ const searchHelpText = computed(() => (searchMode.value === 'semantic'
     + 'documents Word, Excel, PDF et texte. Ni les majuscules ni les accents n\'ont '
     + 'd\'importance.'))
 
+// Nom du dossier affiché dans le fil d'Ariane ; « rN » est un préfixe interne,
+// jamais montré tel quel.
+const nomDossierCourant = computed(() => {
+  const p = currentPath.value
+  if (!p || /^r\d+$/.test(p)) return rootLabel.value || 'Documents'
+  return basename(p)
+})
+
+// Les messages de réussite commencent par « ✓ » (annoncé aux lecteurs d'écran) ;
+// à l'écran, la coche est dessinée par une icône et le texte reste seul.
+const injectMsgOk = computed(() => injectMsg.value.startsWith('✓'))
+const injectMsgTexte = computed(() => injectMsg.value.replace(/^✓\s*/, ''))
+
 function onSelectRoot(e) { navigate(e.target.value) }
 
 // Accessibilité : le focus revient au bouton « Parcourir » à la fermeture de la modale.
@@ -334,14 +433,6 @@ watch(() => JSON.stringify(settings.data.fs_roots), () => { loadRoot() })
 
 // Charge la racine au montage (sinon la liste reste vide tant que rien ne déclenche le watch).
 onMounted(loadRoot)
-
-function icon(ext) {
-  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'].includes(ext)) return '🖼️'
-  if (ext === '.pdf') return '📕'
-  if (['.xlsx', '.xlsm', '.csv'].includes(ext)) return '📊'
-  if (ext === '.docx') return '📘'
-  return '📄'
-}
 
 async function navigate(path) {
   currentPath.value = path
@@ -490,64 +581,97 @@ async function doSearch() {
 </script>
 
 <style scoped>
-.explorer { padding: 12px; }
-.explorer-header { display: flex; justify-content: space-between; align-items: center; }
-.explorer-header h3 { margin: 0; font-size: 14px; }
-.root-path {
-  font-size: 11px; color: var(--muted); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; margin: 2px 0 6px;
+.explorer { padding: var(--e-2) var(--e-3) var(--e-4); }
+.fil { display: flex; align-items: center; gap: var(--e-1); min-height: 36px; }
+.fil-nom {
+  display: flex; align-items: center; gap: var(--e-2); min-width: 0;
+  font-size: var(--t-s); font-weight: 600; color: var(--texte); padding: 0 var(--e-1);
 }
-.root-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.root-row select { flex: 1; }
-.ghost { background: var(--panel-2); color: var(--text); }
-.upload-row { margin: 10px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.upload-btn {
-  display: inline-block; background: var(--panel-2); color: var(--text);
-  border: 1px dashed var(--border); padding: 8px 14px; border-radius: 6px;
-  cursor: pointer; font-size: 13px;
+.fil-nom .icone { flex-shrink: 0; color: var(--accent-texte); }
+.fil-texte { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.root-row { display: flex; align-items: center; gap: var(--e-2); margin: var(--e-2) 0; flex-wrap: wrap; }
+.root-row select { flex: 1; min-width: 0; }
+.upload-row { margin: var(--e-2) 0; display: flex; align-items: center; gap: var(--e-2); flex-wrap: wrap; }
+.upload-btn { cursor: pointer; font-size: var(--t-s); }
+/* Le champ « fichier » est masqué : le focus clavier se voit sur son libellé. */
+.upload-row:has(#fileup:focus-visible) .upload-btn {
+  outline: 2px solid var(--accent); outline-offset: 2px;
 }
-.upload-btn:hover { border-color: var(--accent); }
-.upload-msg { font-size: 12px; color: var(--muted); }
-.search-box { margin: 10px 0; }
-.search-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
-.search { width: 100%; }
-.search-help { font-size: 11px; color: var(--muted); line-height: 1.4; margin: 4px 0 6px; }
-.search-mode { margin: 0 0 8px; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.upload-msg { font-size: var(--t-xs); color: var(--discret); }
+.search-box { margin: var(--e-3) 0; }
+.search-label { display: block; font-size: var(--t-s); font-weight: 600; margin-bottom: var(--e-1); }
+.champ-recherche { display: flex; align-items: center; gap: var(--e-2); padding: 0 var(--e-3); }
+.champ-recherche .icone { color: var(--discret); flex-shrink: 0; }
+/* Le contour de focus est porté par le conteneur (.champ:focus-within). */
+.champ-recherche .search {
+  flex: 1; min-width: 0; background: transparent; border: none; box-shadow: none;
+  padding: 8px 0; border-radius: 0;
+}
+.search-help { font-size: 11px; color: var(--discret); line-height: 1.4; margin: var(--e-1) 0 var(--e-2); }
+.search-mode { margin: 0 0 var(--e-2); }
+.seg {
+  display: flex; gap: 2px; padding: 3px; background: var(--surface-2);
+  border: 1px solid var(--bordure); border-radius: var(--r-rond);
+}
 .seg button {
-  background: var(--panel-2); color: var(--muted); border: none;
-  padding: 6px 12px; font-size: 12px; border-radius: 0;
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: transparent; color: var(--discret);
+  padding: 5px 10px; font-size: var(--t-xs); border-radius: var(--r-rond);
 }
-.seg button.on { background: var(--accent); color: #fff; }
-.search-actions { display: flex; gap: 8px; }
-.search-results { margin: 8px 0; max-height: 420px; overflow-y: auto; }
-.search-summary { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
-.search-notice { font-size: 12px; color: var(--warn); line-height: 1.4; margin: 0 0 6px; }
-.inject-all { width: 100%; font-size: 13px; margin-bottom: 6px; }
+.seg button:where(:not(:disabled)):hover { background: var(--surface-3); color: var(--texte); }
+.seg button.on,
+.seg button.on:where(:not(:disabled)):hover {
+  background: var(--accent-doux); color: var(--accent-texte); font-weight: 600;
+}
+.search-actions { display: flex; gap: var(--e-2); }
+.search-results { margin: var(--e-2) 0; max-height: 420px; overflow-y: auto; }
+.search-summary { font-size: var(--t-xs); color: var(--discret); margin: 0 0 6px; }
+.search-notice {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: var(--t-xs); color: var(--avert); line-height: 1.4; margin: 0 0 6px;
+}
+.search-notice .icone, .doc-ocr .icone { flex-shrink: 0; margin-top: 1px; }
+.inject-all { width: 100%; font-size: var(--t-s); margin-bottom: 6px; }
+/* Collé en haut du corps du panneau (qui défile sous son en-tête), sur fond opaque. */
 .inject-msg {
-  position: sticky; top: 52px; z-index: 1;   /* sous la barre d'onglets de la barre latérale */
-  font-size: 12px; color: var(--accent); line-height: 1.4; margin: 8px 0 6px;
-  padding: 6px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: var(--t-xs); color: var(--texte); line-height: 1.4; margin: var(--e-2) 0 6px;
+  padding: 6px var(--e-2); background: var(--surface);
+  border: 1px solid var(--bordure); border-radius: var(--r-1);
 }
+.inject-msg .icone { color: var(--ok); flex-shrink: 0; margin-top: 1px; }
 .doc-hit {
-  padding: 8px; margin-bottom: 6px; border: 1px solid var(--border);
-  border-radius: 6px; background: var(--panel);
+  padding: var(--e-2); margin-bottom: 6px; border: 1px solid var(--bordure);
+  border-radius: var(--r-2); background: var(--surface);
 }
-.doc-title { margin: 0; font-size: 13px; }
+.doc-title { margin: 0; font-size: var(--t-s); }
 .doc-open {
-  background: transparent; color: var(--accent); padding: 0;
-  font-size: 13px; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; max-width: 100%;
+  background: transparent; color: var(--accent-texte); padding: 0;
+  font-size: var(--t-s); text-align: left; cursor: pointer;
 }
-.doc-open:hover { text-decoration: underline; }
-.doc-path { font-size: 11px; color: var(--muted); margin: 2px 0 6px;
-            overflow-wrap: anywhere; }
-.doc-snippet { font-size: 12px; color: var(--text); line-height: 1.45; margin: 0 0 4px; }
-.doc-snippet.empty-snippet { color: var(--muted); font-style: italic; }
-.doc-ocr { font-size: 11px; color: var(--warn); line-height: 1.4; margin: 0 0 6px; }
-.doc-inject { font-size: 12px; margin-top: 4px; }
-.tree { list-style: none; padding: 0; margin: 8px 0; }
-.tree li { padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-.tree li:hover { background: var(--panel-2); }
-.tree li.empty { color: var(--muted); cursor: default; }
+.doc-open:where(:not(:disabled)):hover { background: transparent; text-decoration: underline; }
+.doc-open .icone { flex-shrink: 0; }
+.doc-nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-path { font-size: 11px; color: var(--discret); margin: 2px 0 6px; overflow-wrap: anywhere; }
+.doc-snippet { font-size: var(--t-xs); color: var(--texte); line-height: 1.45; margin: 0 0 4px; }
+.doc-snippet.empty-snippet { color: var(--discret); font-style: italic; }
+.doc-ocr {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11px; color: var(--avert); line-height: 1.4; margin: 0 0 6px;
+}
+.doc-inject { font-size: var(--t-xs); margin-top: var(--e-1); padding: 6px 12px; }
+.tree { list-style: none; padding: 0; margin: var(--e-2) 0; }
+.tree li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: var(--r-1); cursor: pointer; font-size: var(--t-s);
+  color: var(--texte); transition: background-color var(--transition);
+}
+.tree li .icone { flex-shrink: 0; color: var(--discret); }
+.tree li.folder .icone { color: var(--accent-texte); }
+.tree li .nom { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree li:hover { background: var(--surface-2); }
+.tree li.empty { color: var(--discret); cursor: default; }
 .tree li.empty:hover { background: transparent; }
 </style>

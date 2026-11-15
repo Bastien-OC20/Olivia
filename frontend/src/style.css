@@ -48,7 +48,9 @@
   --sur-accent: #ffffff;
   --avert: #f5b544;
   --ok: #4ade80;
-  --danger: #f87171;
+  --danger: #f87171;          /* texte et bordures ; trop clair sous du texte blanc */
+  --danger-fond: #dc2626;     /* fond des boutons de suppression (blanc dessus : 4,83:1) */
+  --danger-survol: #b91c1c;
   --bulle-utilisatrice: #22305e;
   --ombre-1: 0 1px 2px rgba(0, 0, 0, .35);
   --ombre-2: 0 8px 24px rgba(0, 0, 0, .35);
@@ -75,6 +77,8 @@
   --avert: #b45309;
   --ok: #15803d;
   --danger: #c62828;
+  --danger-fond: #c62828;     /* blanc dessus : 5,62:1 */
+  --danger-survol: #a51f1f;
   --bulle-utilisatrice: #e3e9f7;
   --ombre-1: 0 1px 2px rgba(20, 26, 46, .06);
   --ombre-2: 0 8px 24px rgba(20, 26, 46, .08);
@@ -202,6 +206,12 @@ a { transition: color var(--transition), opacity var(--transition); }
   background: var(--surface-2);
   color: var(--texte);
 }
+/* Action destructrice (effacement RGPD, suppression d'un compte) */
+.btn-danger {
+  background: var(--danger-fond);
+  color: var(--sur-accent);
+}
+.btn-danger:hover:not(:disabled) { background: var(--danger-survol); }
 .btn-icone {
   display: inline-flex;
   align-items: center;

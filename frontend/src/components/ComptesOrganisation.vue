@@ -3,7 +3,13 @@
     class="comptes"
     aria-label="Comptes de l'organisation"
   >
-    <h3>👥 Comptes de l'organisation</h3>
+    <h3>
+      <Icone
+        nom="utilisateurs"
+        :taille="18"
+      />
+      Comptes de l'organisation
+    </h3>
     <p class="hint">
       Pour <strong>créer</strong> un compte, utilisez l'assistant « Créer un compte »
       (menu de l'application, ou raccourci du menu Démarrer). Ici, vous pouvez
@@ -16,14 +22,22 @@
       :class="messageErreur ? 'erreur' : 'succes'"
       :role="messageErreur ? 'alert' : 'status'"
     >
-      {{ message }}
+      <Icone
+        :nom="messageErreur ? 'alerte' : 'coche'"
+        :taille="16"
+      />
+      <span>{{ message }}</span>
     </p>
     <p
       v-if="chargement"
       class="hint"
       aria-live="polite"
     >
-      ⏳ Chargement des comptes…
+      <Icone
+        nom="actualiser"
+        :taille="14"
+      />
+      Chargement des comptes…
     </p>
 
     <ul
@@ -37,14 +51,17 @@
       >
         <div class="ident">
           <strong>{{ c.username }}</strong>
-          <span class="badge">{{ libelleRole(c.role) }}</span>
+          <span
+            class="pastille"
+            :class="{ responsable: c.role === 'responsable' }"
+          >{{ libelleRole(c.role) }}</span>
           <span
             v-if="c.moi"
-            class="badge moi"
+            class="pastille moi"
           >vous</span>
           <span
             v-if="c.bloque"
-            class="badge bloque"
+            class="pastille bloque"
           >bloqué</span>
           <span
             v-if="dateCreation(c.created_at)"
@@ -59,17 +76,21 @@
           <button
             v-if="actionsCompte(c).reinitialiser"
             type="button"
-            class="ghost"
+            class="btn btn-secondaire"
             :disabled="occupe"
             :aria-label="`Réinitialiser le mot de passe de ${c.username}`"
             @click="ouvrir(c, 'reinit')"
           >
+            <Icone
+              nom="cadenas"
+              :taille="14"
+            />
             Réinitialiser le mot de passe
           </button>
           <button
             v-if="actionsCompte(c).debloquer"
             type="button"
-            class="ghost"
+            class="btn btn-secondaire"
             :disabled="occupe"
             :aria-label="`Débloquer ${c.username}`"
             @click="debloquer(c)"
@@ -79,7 +100,7 @@
           <button
             v-if="actionsCompte(c).changerRole"
             type="button"
-            class="ghost"
+            class="btn btn-secondaire"
             :disabled="occupe"
             :aria-label="`${libelleChangerRole(actionsCompte(c).changerRole)} : ${c.username}`"
             @click="changerRole(c, actionsCompte(c).changerRole)"
@@ -89,11 +110,15 @@
           <button
             v-if="actionsCompte(c).supprimer"
             type="button"
-            class="danger"
+            class="btn btn-danger"
             :disabled="occupe"
             :aria-label="`Supprimer le compte de ${c.username}`"
             @click="ouvrir(c, 'suppr')"
           >
+            <Icone
+              nom="corbeille"
+              :taille="14"
+            />
             Supprimer
           </button>
         </div>
@@ -122,13 +147,14 @@
           <div class="actions">
             <button
               type="submit"
+              class="btn btn-primaire"
               :disabled="occupe"
             >
               Enregistrer
             </button>
             <button
               type="button"
-              class="ghost"
+              class="btn btn-secondaire"
               @click="fermer"
             >
               Annuler
@@ -143,13 +169,17 @@
           :aria-label="`Confirmer la suppression de ${c.username}`"
         >
           <p class="warn">
-            {{ questionSuppression(c) }}
+            <Icone
+              nom="alerte"
+              :taille="16"
+            />
+            <span>{{ questionSuppression(c) }}</span>
           </p>
           <div class="actions">
             <button
               ref="champ"
               type="button"
-              class="danger"
+              class="btn btn-danger"
               :disabled="occupe"
               @click="supprimer(c)"
             >
@@ -157,7 +187,7 @@
             </button>
             <button
               type="button"
-              class="ghost"
+              class="btn btn-secondaire"
               @click="fermer"
             >
               Annuler
@@ -173,6 +203,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { useAuthStore } from '../stores/auth.js'
 import { libelleRole } from '../roles.js'
+import Icone from './Icone.vue'
 import {
   REGLE_MOT_DE_PASSE, actionsCompte, libelleChangerRole, questionSuppression,
   dateCreation, erreurReinitialisation, messageErreurServeur, remplacerCompte,
@@ -287,27 +318,57 @@ onMounted(charger)
 </script>
 
 <style scoped>
-.liste { list-style: none; margin: 12px 0 0; padding: 0; }
-.ligne { padding: 10px 0; border-bottom: 1px solid var(--border); }
-.ident { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px;
-         background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-.badge.moi { border-color: var(--accent); }
-.badge.bloque { color: var(--warn); border-color: var(--warn); }
-.date { font-size: 12px; color: var(--muted); }
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.actions .ghost { background: var(--panel-2); color: var(--text); }
-.danger { background: var(--danger); }
-.confirmation label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-.confirmation input { width: 100%; margin-bottom: 8px; }
-.hint, .warn { font-size: 12px; padding: 10px; border-radius: 4px; line-height: 1.5; }
-.hint { color: var(--muted); background: var(--panel-2); }
-.warn { color: var(--warn); background: rgba(245,158,11,0.08);
-        border: 1px solid rgba(245,158,11,0.3); margin: 0 0 8px; }
-.msg { font-size: 13px; padding: 10px; border-radius: 4px; margin: 12px 0; }
-.erreur { color: var(--danger); background: rgba(239,68,68,0.08);
-          border: 1px solid rgba(239,68,68,0.3); }
-.succes { color: var(--text); background: rgba(34,197,94,0.1);
-          border: 1px solid rgba(34,197,94,0.35); }
-h3 { font-size: 14px; margin: 0 0 8px; }
+/* Carte légère, comme les groupes de réglages de la fenêtre des Paramètres. */
+.comptes {
+  background: var(--surface);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-3);
+  padding: var(--e-4) var(--e-5);
+}
+.liste { list-style: none; margin: var(--e-3) 0 0; padding: 0; }
+.ligne { padding: var(--e-3) 0; border-bottom: 1px solid var(--bordure); }
+.ligne:last-child { border-bottom: none; }
+.ident { display: flex; flex-wrap: wrap; gap: var(--e-2); align-items: center; margin-bottom: var(--e-2); }
+.pastille.responsable { background: var(--accent-doux); color: var(--accent-texte); border-color: transparent; }
+.pastille.moi { border-color: var(--accent); }
+.pastille.bloque {
+  color: var(--texte);
+  background: color-mix(in srgb, var(--avert) 15%, transparent);
+  border-color: var(--avert);
+}
+.date { font-size: var(--t-xs); color: var(--discret); }
+.actions { display: flex; flex-wrap: wrap; gap: var(--e-2); }
+.confirmation label {
+  display: block; font-size: var(--t-s); font-weight: 500; color: var(--texte); margin-bottom: 4px;
+}
+.confirmation input { width: 100%; margin-bottom: var(--e-2); }
+.hint { font-size: var(--t-xs); color: var(--discret); line-height: 1.5; margin: 6px 0 var(--e-3); }
+.warn, .msg {
+  display: flex; gap: var(--e-2); align-items: flex-start;
+  font-size: var(--t-s); line-height: 1.5; color: var(--texte);
+  padding: var(--e-3); border-radius: var(--r-2);
+}
+.warn .icone, .msg .icone { flex-shrink: 0; margin-top: 2px; }
+.warn {
+  margin: 0 0 var(--e-2);
+  background: color-mix(in srgb, var(--avert) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avert) 45%, transparent);
+}
+.warn .icone { color: var(--avert); }
+.msg { margin: var(--e-3) 0; }
+.erreur {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.erreur .icone { color: var(--danger); }
+.succes {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.succes .icone { color: var(--ok); }
+h3 {
+  display: flex; align-items: center; gap: var(--e-2);
+  font-size: var(--t-m); font-weight: 600; margin: 0 0 var(--e-2);
+}
+h3 .icone { color: var(--accent-texte); }
 </style>

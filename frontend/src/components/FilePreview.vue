@@ -5,32 +5,48 @@
         class="preview-title"
         :title="displayName"
       >
-        <span aria-hidden="true">📄</span> {{ displayName }}
+        <Icone
+          nom="document"
+          :taille="18"
+        />
+        <span class="preview-nom">{{ displayName }}</span>
       </h3>
       <div class="preview-actions">
         <a
           v-if="path"
-          class="btn-download"
+          class="btn btn-secondaire"
           :href="downloadUrl"
           download
         >
-          <span aria-hidden="true">⬇</span> Télécharger
+          <Icone
+            nom="telecharger"
+            :taille="16"
+          />
+          Télécharger
         </a>
         <button
           v-if="canInject"
-          class="btn-inject"
+          class="btn btn-primaire"
           type="button"
           @click="onInject"
         >
-          <span aria-hidden="true">➕</span> Utiliser dans la conversation
+          <Icone
+            nom="plus"
+            :taille="16"
+          />
+          Utiliser dans la conversation
         </button>
         <button
-          class="btn-close"
+          class="btn-icone"
           type="button"
           aria-label="Fermer l'aperçu"
+          title="Fermer l'aperçu"
           @click="$emit('close')"
         >
-          <span aria-hidden="true">✕</span>
+          <Icone
+            nom="fermer"
+            :taille="18"
+          />
         </button>
       </div>
     </div>
@@ -169,17 +185,21 @@
         v-else-if="data && data.kind === 'unsupported'"
         class="state-unsupported"
       >
-        <span
-          aria-hidden="true"
-          class="icon"
-        >🗎</span>
+        <Icone
+          nom="document"
+          :taille="32"
+        />
         <p>Aperçu non disponible pour ce type de fichier.</p>
         <a
-          class="btn-download"
+          class="btn btn-secondaire"
           :href="downloadUrl"
           download
         >
-          <span aria-hidden="true">⬇</span> Télécharger
+          <Icone
+            nom="telecharger"
+            :taille="16"
+          />
+          Télécharger
         </a>
       </div>
     </div>
@@ -188,6 +208,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import Icone from './Icone.vue'
 
 const props = defineProps({
   path: { type: String, default: '' }
@@ -247,87 +268,73 @@ watch(() => props.path, (p) => { fetchPreview(p) }, { immediate: true })
 .preview-panel {
   display: flex;
   flex-direction: column;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-2);
+  box-shadow: var(--ombre-1);
+  padding: var(--e-3);
+  color: var(--texte);
 }
 
+/* Le bouton de fermeture est ancré en haut à droite : dans le panneau étroit,
+   les actions passent à la ligne et il se retrouvait seul sur une ligne. */
 .preview-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--e-3);
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: var(--e-3);
+  padding-right: 40px;
+}
+.preview-actions .btn-icone {
+  position: absolute;
+  top: -6px;
+  right: 0;
 }
 
 .preview-title {
-  margin: 0;
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  min-width: 0;
   max-width: 100%;
+  margin: 0;
+  font-size: var(--t-m);
 }
+.preview-title .icone { flex-shrink: 0; color: var(--accent-texte); }
+.preview-nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .preview-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--e-2);
   flex-wrap: wrap;
 }
-
-.btn-download,
-.btn-inject {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--accent);
-  color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  text-decoration: none;
-  cursor: pointer;
-}
-.btn-download:hover,
-.btn-inject:hover { opacity: 0.9; }
-
-.btn-close {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.btn-close:hover { opacity: 0.9; }
+.preview-actions .btn { font-size: var(--t-s); padding: 6px 12px; }
 
 .preview-status .status-loading {
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--discret);
+  font-size: var(--t-s);
   padding: 4px 0 8px 0;
 }
 
 .preview-body { min-width: 0; }
 
 .note {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--discret);
+  font-size: var(--t-xs);
   margin: 8px 0 0 0;
 }
 
 .state-error {
-  background: var(--panel-2);
-  border: 1px solid var(--warn);
-  color: var(--warn);
-  border-radius: 6px;
+  background: color-mix(in srgb, var(--avert) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avert) 40%, transparent);
+  color: var(--texte);
+  border-radius: var(--r-1);
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: var(--t-s);
 }
 
 .state-unsupported {
@@ -336,61 +343,60 @@ watch(() => props.path, (p) => { fetchPreview(p) }, { immediate: true })
   align-items: center;
   gap: 10px;
   padding: 24px 12px;
-  color: var(--muted);
+  color: var(--discret);
   text-align: center;
 }
-.state-unsupported .icon { font-size: 28px; }
 
 /* text */
 .text-preview {
   margin: 0;
   max-height: 360px;
   overflow: auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-1);
   padding: 10px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--t-xs);
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text);
+  color: var(--texte);
 }
 
 /* table */
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-1);
 }
 .table-preview {
   border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
+  font-size: var(--t-s);
 }
 .table-preview caption {
   text-align: left;
   padding: 8px 10px;
-  color: var(--muted);
-  font-size: 12px;
-  background: var(--panel-2);
+  color: var(--discret);
+  font-size: var(--t-xs);
+  background: var(--surface-2);
   caption-side: top;
 }
 .table-preview th,
 .table-preview td {
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--bordure);
   text-align: left;
   white-space: nowrap;
 }
 .table-preview thead th {
-  background: var(--panel-2);
+  background: var(--surface-2);
   position: sticky;
   top: 0;
 }
 .table-preview tbody tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-2);
 }
 
 /* doc */
@@ -410,23 +416,23 @@ watch(() => props.path, (p) => { fetchPreview(p) }, { immediate: true })
   display: flex;
   justify-content: center;
   align-items: center;
-  background: var(--panel-2);
-  border-radius: 6px;
-  padding: 8px;
+  background: var(--surface-2);
+  border-radius: var(--r-1);
+  padding: var(--e-2);
 }
 .image-preview img {
   max-width: 100%;
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--e-1);
 }
 
 /* pdf */
 .pdf-preview iframe {
   width: 100%;
   height: 500px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
 }
 
 @media (prefers-reduced-motion: reduce) {

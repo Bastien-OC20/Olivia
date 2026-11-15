@@ -8,22 +8,30 @@
     >
       <div
         ref="modalEl"
-        class="modal"
+        class="modal carte"
         role="dialog"
         aria-modal="true"
         aria-labelledby="folder-picker-title"
       >
         <header>
           <h2 id="folder-picker-title">
-            📁 Dossiers accessibles
+            <Icone
+              nom="dossier"
+              :taille="20"
+            />
+            Dossiers accessibles
           </h2>
           <button
             ref="closeBtn"
-            class="x"
+            type="button"
+            class="btn-icone"
             aria-label="Fermer la fenêtre de choix de dossier"
             @click="close"
           >
-            ✕
+            <Icone
+              nom="fermer"
+              :taille="18"
+            />
           </button>
         </header>
 
@@ -41,7 +49,8 @@
                   :title="entry.path"
                 >{{ entry.label || basename(entry.path) }}</span>
                 <button
-                  class="ghost small"
+                  type="button"
+                  class="btn btn-secondaire petit"
                   @click="removeRoot(i)"
                 >
                   Retirer
@@ -60,11 +69,16 @@
             <h3>Ajouter un dossier</h3>
             <div class="breadcrumb">
               <button
-                class="ghost small"
+                type="button"
+                class="btn btn-secondaire petit"
                 :disabled="stack.length === 0"
                 @click="goUp"
               >
-                ⬆ Remonter
+                <Icone
+                  nom="chevron-gauche"
+                  :taille="14"
+                />
+                Remonter
               </button>
               <span
                 class="current-path"
@@ -76,14 +90,22 @@
               class="warn"
               aria-live="polite"
             >
-              {{ error }}
+              <Icone
+                nom="alerte"
+                :taille="16"
+              />
+              <span>{{ error }}</span>
             </p>
             <p
               v-if="addedMsg"
               class="hint"
               aria-live="polite"
             >
-              {{ addedMsg }}
+              <Icone
+                nom="coche"
+                :taille="16"
+              />
+              <span>{{ addedMsgTexte }}</span>
             </p>
             <ul class="folder-list">
               <li
@@ -94,7 +116,11 @@
                 @click="enter(f.path)"
                 @keydown.enter="enter(f.path)"
               >
-                📂 {{ f.name }}
+                <Icone
+                  nom="dossier"
+                  :taille="16"
+                />
+                <span class="nom">{{ f.name }}</span>
               </li>
               <li
                 v-if="!loading && folders.length === 0"
@@ -111,10 +137,16 @@
             </ul>
             <div class="pick-row">
               <button
+                type="button"
+                class="btn btn-primaire"
                 :disabled="!currentPath || adding"
                 @click="choose"
               >
-                ✓ Choisir ce dossier
+                <Icone
+                  nom="coche"
+                  :taille="16"
+                />
+                Choisir ce dossier
               </button>
             </div>
           </section>
@@ -122,7 +154,8 @@
 
         <footer>
           <button
-            class="ghost"
+            type="button"
+            class="btn btn-secondaire"
             @click="close"
           >
             Fermer
@@ -134,7 +167,8 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import Icone from './Icone.vue'
 import { useSettingsStore } from '../stores/settings.js'
 
 const props = defineProps({ isOpen: { type: Boolean, default: false } })
@@ -148,6 +182,8 @@ const loading = ref(false)
 const error = ref('')
 const addedMsg = ref('')
 const adding = ref(false)
+// Le message commence par « ✓ » pour les lecteurs d'écran ; à l'écran, une icône le remplace.
+const addedMsgTexte = computed(() => addedMsg.value.replace(/^✓\s*/, ''))
 const modalEl = ref(null)
 const closeBtn = ref(null)
 
@@ -253,44 +289,62 @@ function close() { emit('close') }
 
 <style scoped>
 .overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  position: fixed; inset: 0; background: color-mix(in srgb, var(--fond) 70%, transparent);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
 .modal {
-  background: var(--panel); width: 520px; max-width: 90vw;
-  max-height: 85vh; border-radius: 10px;
+  width: 520px; max-width: 90vw;
+  max-height: 85vh; border-radius: var(--r-4); box-shadow: var(--ombre-2);
   display: flex; flex-direction: column; overflow: hidden;
-  border: 1px solid var(--border);
 }
 header { display: flex; justify-content: space-between; align-items: center;
-         padding: 14px 20px; border-bottom: 1px solid var(--border); }
-header h2 { margin: 0; font-size: 16px; }
-.x { background: transparent; font-size: 18px; }
-.body { padding: 16px 20px; overflow-y: auto; flex: 1; }
-h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
-section + section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
-.root-list, .folder-list { list-style: none; padding: 0; margin: 0 0 8px; }
+         padding: var(--e-3) var(--e-5); border-bottom: 1px solid var(--bordure); }
+header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--t-l); }
+header h2 .icone { color: var(--accent-texte); }
+.body { padding: var(--e-4) var(--e-5); overflow-y: auto; flex: 1; }
+h3 { font-size: var(--t-s); margin: 0 0 var(--e-2); color: var(--discret); }
+section + section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--bordure); }
+.root-list, .folder-list { list-style: none; padding: 0; margin: 0 0 var(--e-2); }
 .root-item {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 6px 8px; border-radius: 4px; font-size: 13px;
+  display: flex; justify-content: space-between; align-items: center; gap: var(--e-2);
+  padding: 6px var(--e-2); border-radius: var(--r-1); font-size: var(--t-s);
 }
-.root-item:hover { background: var(--panel-2); }
-.root-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.empty { color: var(--muted); font-size: 13px; padding: 6px 8px; }
-.breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.root-item:hover { background: var(--surface-2); }
+.root-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { color: var(--discret); font-size: var(--t-s); padding: 6px var(--e-2); }
+.breadcrumb { display: flex; align-items: center; gap: var(--e-2); margin-bottom: var(--e-2); }
 .current-path {
-  font-size: 12px; color: var(--muted); overflow: hidden;
+  font-size: var(--t-xs); color: var(--discret); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.folder-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
-.folder-list li { padding: 6px 10px; cursor: pointer; font-size: 13px; }
-.folder-list li:hover { background: var(--panel-2); }
+.folder-list {
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--bordure); border-radius: var(--r-1);
+}
+.folder-list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; cursor: pointer; font-size: var(--t-s);
+}
+.folder-list li .icone { flex-shrink: 0; color: var(--accent-texte); }
+.folder-list li .nom { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-list li:hover { background: var(--surface-2); }
+.folder-list li.empty { cursor: default; }
+.folder-list li.empty:hover { background: transparent; }
 .pick-row { margin-top: 10px; }
-.ghost { background: var(--panel-2); color: var(--text); }
-.ghost.small { padding: 4px 10px; font-size: 12px; }
-.hint, .warn { font-size: 12px; padding: 8px 10px; border-radius: 4px; line-height: 1.5; margin-bottom: 8px; }
-.hint { color: var(--muted); background: var(--panel-2); }
-.warn { color: var(--warn); background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3); }
-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
-footer .ghost { background: var(--panel-2); color: var(--text); }
+.petit { padding: 4px 10px; font-size: var(--t-xs); flex-shrink: 0; }
+.hint, .warn {
+  display: flex; align-items: flex-start; gap: var(--e-2);
+  font-size: var(--t-xs); padding: var(--e-2) 10px; border-radius: var(--r-1);
+  line-height: 1.5; margin-bottom: var(--e-2); color: var(--texte);
+}
+.hint .icone, .warn .icone { flex-shrink: 0; margin-top: 1px; }
+.hint { background: var(--surface-2); }
+.hint .icone { color: var(--ok); }
+.warn {
+  background: color-mix(in srgb, var(--avert) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--avert) 35%, transparent);
+}
+.warn .icone { color: var(--avert); }
+footer { padding: var(--e-3) var(--e-5); border-top: 1px solid var(--bordure);
+         display: flex; justify-content: flex-end; }
 </style>

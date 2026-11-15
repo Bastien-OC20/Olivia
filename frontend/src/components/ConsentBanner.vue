@@ -50,7 +50,7 @@ import Icone from './Icone.vue'
 
 const settings = useSettingsStore()
 const emit = defineEmits(['open-privacy'])
-const visible = computed(() => settings.data.privacy_consent === false)
+const visible = computed(() => settings.charge && settings.data.privacy_consent === false)
 
 async function accept() {
   settings.data.privacy_consent = true

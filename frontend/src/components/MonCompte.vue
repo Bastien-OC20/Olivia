@@ -4,7 +4,13 @@
     aria-label="Changer mon mot de passe"
     @submit.prevent="changer"
   >
-    <h3>🔑 Mon mot de passe</h3>
+    <h3>
+      <Icone
+        nom="cadenas"
+        :taille="18"
+      />
+      Mon mot de passe
+    </h3>
     <p class="hint">
       Connectée comme <strong>{{ auth.identite?.username }}</strong>
       ({{ libelleRole(auth.role).toLowerCase() }}).
@@ -48,9 +54,14 @@
 
     <button
       type="submit"
+      class="btn btn-primaire"
       :disabled="enCours"
     >
-      {{ enCours ? '⏳ Modification…' : 'Changer mon mot de passe' }}
+      <Icone
+        :nom="enCours ? 'actualiser' : 'coche'"
+        :taille="16"
+      />
+      {{ enCours ? 'Modification…' : 'Changer mon mot de passe' }}
     </button>
 
     <p
@@ -58,14 +69,22 @@
       class="msg erreur"
       role="alert"
     >
-      {{ erreur }}
+      <Icone
+        nom="alerte"
+        :taille="16"
+      />
+      <span>{{ erreur }}</span>
     </p>
     <p
       v-if="succes"
       class="msg succes"
       role="status"
     >
-      {{ succes }}
+      <Icone
+        nom="coche"
+        :taille="16"
+      />
+      <span>{{ succes }}</span>
     </p>
   </form>
 </template>
@@ -74,6 +93,7 @@
 import { ref } from 'vue'
 import { useAuthStore } from '../stores/auth.js'
 import { libelleRole } from '../roles.js'
+import Icone from './Icone.vue'
 import {
   REGLE_MOT_DE_PASSE, erreurFormulaireMotDePasse, messageMotDePasseChange,
   messageErreurServeur,
@@ -128,15 +148,40 @@ async function changer() {
 </script>
 
 <style scoped>
-.field { margin-bottom: 14px; }
-.field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+/* Carte légère, comme les groupes de réglages de la fenêtre des Paramètres. */
+.mon-compte {
+  background: var(--surface);
+  border: 1px solid var(--bordure);
+  border-radius: var(--r-3);
+  padding: var(--e-4) var(--e-5);
+}
+.field { margin-bottom: var(--e-4); }
+.field label {
+  display: block; font-size: var(--t-s); font-weight: 500; color: var(--texte);
+  margin-bottom: 4px;
+}
 .field input { width: 100%; }
-.hint { font-size: 12px; padding: 10px; border-radius: 4px; line-height: 1.5;
-        color: var(--muted); background: var(--panel-2); }
-.msg { font-size: 13px; padding: 10px; border-radius: 4px; margin-top: 12px; }
-.erreur { color: var(--danger); background: rgba(239,68,68,0.08);
-          border: 1px solid rgba(239,68,68,0.3); }
-.succes { color: var(--text); background: rgba(34,197,94,0.1);
-          border: 1px solid rgba(34,197,94,0.35); }
-h3 { font-size: 14px; margin: 0 0 8px; }
+.hint { font-size: var(--t-xs); color: var(--discret); line-height: 1.5; margin: 6px 0 var(--e-3); }
+.field .hint { margin-bottom: 0; }
+.msg {
+  display: flex; gap: var(--e-2); align-items: flex-start;
+  font-size: var(--t-s); line-height: 1.5; color: var(--texte);
+  padding: var(--e-3); border-radius: var(--r-2); margin-top: var(--e-3);
+}
+.msg .icone { flex-shrink: 0; margin-top: 2px; }
+.erreur {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.erreur .icone { color: var(--danger); }
+.succes {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.succes .icone { color: var(--ok); }
+h3 {
+  display: flex; align-items: center; gap: var(--e-2);
+  font-size: var(--t-m); font-weight: 600; margin: 0 0 var(--e-2);
+}
+h3 .icone { color: var(--accent-texte); }
 </style>

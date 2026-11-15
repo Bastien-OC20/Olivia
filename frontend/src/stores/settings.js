@@ -57,6 +57,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const enregistre = ref(copier(DEFAULTS))
   const open = ref(false)
   const saving = ref(false)
+  // Vrai une fois les réglages de l'organisation reçus du serveur. Avant, `data`
+  // contient les valeurs par défaut (ex. privacy_consent = false) qui ne doivent
+  // déclencher aucun affichage, comme le bandeau de confidentialité.
+  const charge = ref(false)
   // { chiffres: bool, a_ressaisir: [noms] } d'après le serveur ; null si inconnu.
   const etatSecrets = ref(null)
 
@@ -84,6 +88,7 @@ export const useSettingsStore = defineStore('settings', () => {
     etatSecrets.value = etat && typeof etat === 'object' ? etat : null
     data.value = fusionner(DEFAULTS, reglages)
     enregistre.value = copier(data.value)
+    charge.value = true
   }
 
   async function load() {
@@ -130,8 +135,9 @@ export const useSettingsStore = defineStore('settings', () => {
     data.value = copier(DEFAULTS)
     enregistre.value = copier(DEFAULTS)
     etatSecrets.value = null
+    charge.value = false
     open.value = false
   }
 
-  return { data, open, saving, etatSecrets, load, save, show, hide, reset }
+  return { data, open, saving, charge, etatSecrets, load, save, show, hide, reset }
 })

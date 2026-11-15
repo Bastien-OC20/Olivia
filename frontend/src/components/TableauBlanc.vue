@@ -5,11 +5,15 @@
   >
     <header class="barre">
       <button
-        class="ghost"
+        class="btn btn-secondaire"
         type="button"
         @click="fermer"
       >
-        ← Conversation
+        <Icone
+          nom="chevron-gauche"
+          :taille="16"
+        />
+        Conversation
       </button>
       <label
         for="titre-tableau"
@@ -25,9 +29,26 @@
       >
       <span
         class="etat"
-        :class="{ erreur: tableaux.sauvegarde === 'erreur' }"
         aria-live="polite"
-      >{{ libelleEtat }}</span>
+      >
+        <span
+          v-if="libelleEtat"
+          class="pastille"
+          :class="{ erreur: tableaux.sauvegarde === 'erreur', ok: tableaux.sauvegarde === 'enregistre' }"
+        >
+          <Icone
+            v-if="tableaux.sauvegarde === 'enregistre'"
+            nom="coche"
+            :taille="14"
+          />
+          <Icone
+            v-else-if="tableaux.sauvegarde === 'erreur'"
+            nom="alerte"
+            :taille="14"
+          />
+          {{ libelleEtat }}
+        </span>
+      </span>
     </header>
 
     <!-- Excalidraw (React) est monté dans cette zone ; la page reste en Vue. -->
@@ -55,6 +76,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useTableauxStore } from '../stores/tableaux.js'
+import Icone from './Icone.vue'
 
 const tableaux = useTableauxStore()
 const racine = ref(null)
@@ -79,6 +101,15 @@ let racineReact = null
 let serialiser = null
 let apiExcalidraw = null      // interface d'Excalidraw (remise par excalidrawAPI)
 let cadre = false             // le cadrage de départ n'a lieu qu'une fois
+let observateurTheme = null   // suit le thème de l'application (attribut data-theme)
+let rendre = null             // (re)dessine Excalidraw avec le thème courant
+
+// Thème d'Excalidraw = thème de l'application, jamais celui de la scène : il est
+// passé par la propriété `theme` (Excalidraw ne l'écrit pas dans le fichier
+// enregistré, format 'local') et se met à jour en direct.
+function themeExcalidraw() {
+  return document.documentElement.dataset.theme === 'clair' ? 'light' : 'dark'
+}
 
 // Cadre tout le contenu dans la vue à l'ouverture : un schéma plus grand que
 // l'écran (typique d'un tableau produit par /tableau) ne doit pas déborder sous
@@ -102,8 +133,8 @@ function cadrerUneFois(elements, appState) {
 
 const libelleEtat = computed(() => ({
   en_cours: 'Enregistrement…',
-  enregistre: '✓ Enregistré',
-  erreur: `⚠️ ${tableaux.erreurSauvegarde || 'Non enregistré'}`,
+  enregistre: 'Enregistré',
+  erreur: tableaux.erreurSauvegarde || 'Non enregistré',
 }[tableaux.sauvegarde] || ''))
 
 onMounted(async () => {
@@ -124,10 +155,14 @@ onMounted(async () => {
     const scene = tableau.scene || {}
     derniereScene = JSON.stringify(scene)
     racineReact = createRoot(racine.value)
-    racineReact.render(React.createElement(excalidraw.Excalidraw, {
+    // Un thème resté dans une ancienne scène ne doit pas contredire celui de l'application.
+    const etatScene = { ...(scene.appState || {}) }
+    delete etatScene.theme
+    rendre = () => racineReact?.render(React.createElement(excalidraw.Excalidraw, {
+      theme: themeExcalidraw(),
       initialData: {
         elements: scene.elements || [],
-        appState: { ...(scene.appState || {}), theme: scene.appState?.theme || 'dark' },
+        appState: etatScene,
         files: scene.files || {},
       },
       excalidrawAPI: (api) => { apiExcalidraw = api },
@@ -146,6 +181,11 @@ onMounted(async () => {
         minuteur = setTimeout(enregistrer, DELAI_SAUVEGARDE_MS)
       },
     }))
+    rendre()
+    observateurTheme = new MutationObserver(() => rendre?.())
+    observateurTheme.observe(document.documentElement, {
+      attributes: true, attributeFilter: ['data-theme'],
+    })
   } catch (e) {
     console.error('Excalidraw indisponible :', e)
     erreurChargement.value = "Le tableau blanc n'a pas pu se charger. Rechargez la page, puis réessayez."
@@ -184,6 +224,9 @@ async function fermer() {
 onBeforeUnmount(() => {
   // Changement de tableau ou déconnexion : on envoie ce qui attend encore.
   if (sceneEnAttente) enregistrer()
+  observateurTheme?.disconnect()
+  observateurTheme = null
+  rendre = null
   racineReact?.unmount()
   racineReact = null
   apiExcalidraw = null
@@ -193,23 +236,24 @@ onBeforeUnmount(() => {
 <style scoped>
 .tableau { display: flex; flex-direction: column; height: 100%; }
 .barre {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+  display: flex; align-items: center; gap: var(--e-3);
+  padding: var(--e-2) var(--e-3); border-bottom: 1px solid var(--bordure); background: var(--surface);
 }
-.barre .ghost { background: var(--panel-2); color: var(--text); }
 .titre {
-  flex: 1; min-width: 120px; max-width: 420px; font-size: 14px; font-weight: 600;
-  background: transparent; border: 1px solid transparent; color: var(--text);
-  padding: 5px 8px; border-radius: 6px;
+  flex: 1; min-width: 120px; max-width: 420px; font-size: var(--t-m); font-weight: 600;
+  background: transparent; border: 1px solid transparent; color: var(--texte);
+  padding: 5px var(--e-2); border-radius: var(--r-1);
 }
-.titre:hover, .titre:focus { border-color: var(--border); background: var(--panel-2); }
-.etat { font-size: 12px; color: var(--muted); }
-.etat.erreur { color: var(--danger); }
+.titre:hover, .titre:focus { border-color: var(--bordure); background: var(--surface-2); }
+.etat { font-size: var(--t-xs); }
+.pastille.ok .icone { color: var(--ok); }
+.pastille.erreur { color: var(--texte); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+.pastille.erreur .icone { color: var(--danger); }
 .zone { position: relative; flex: 1; min-height: 0; }
 .racine { position: absolute; inset: 0; }
 .message {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  margin: 0; color: var(--muted); font-size: 14px; pointer-events: none;
+  margin: 0; color: var(--discret); font-size: var(--t-m); pointer-events: none;
 }
 .message.erreur { color: var(--danger); }
 </style>
