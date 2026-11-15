@@ -30,7 +30,7 @@
     dans le build :
 
       - ai-webapp\ollama\                          (moteur + modèles)
-      - ai-webapp\_internal\backend\conversations\ (historique)
+      - ai-webapp\_internal\backend\conversations\ (historique d'avant les organisations)
       - ai-webapp\_internal\backend\settings.json  (réglages, dont secrets)
       - ai-webapp\_internal\backend\.env           (configuration : OLLAMA_URL, FS_ROOT…)
       - ai-webapp\_internal\backend\profiles\      (comptes et organisations)
@@ -100,6 +100,30 @@ function Write-Etape([string]$texte) {
     Write-Host "==> $texte" -ForegroundColor Cyan
 }
 
+
+# Nombre de conversations enregistrees sur le disque. Depuis l'arrivee des
+# organisations, elles vivent dans profiles\<organisation>\conversations\ ;
+# l'ancien dossier backend\conversations\ n'est plus alimente mais compte
+# encore s'il en reste. Ne compter que ce dernier (comme avant) donnait toujours
+# 0 avant et 0 apres : le garde-fou de fin de mise a jour ne verifiait plus rien.
+function Get-NbConversations([string]$appDir) {
+    $backend = Join-Path $appDir '_internal\backend'
+    $total = 0
+    $ancien = Join-Path $backend 'conversations'
+    if (Test-Path $ancien) {
+        $total += @(Get-ChildItem $ancien -Filter '*.json' -ErrorAction SilentlyContinue).Count
+    }
+    $profils = Join-Path $backend 'profiles'
+    if (Test-Path $profils) {
+        foreach ($org in Get-ChildItem $profils -Directory -ErrorAction SilentlyContinue) {
+            $dossier = Join-Path $org.FullName 'conversations'
+            if (Test-Path $dossier) {
+                $total += @(Get-ChildItem $dossier -Filter '*.json' -ErrorAction SilentlyContinue).Count
+            }
+        }
+    }
+    return $total
+}
 
 function Get-TailleGo([string]$chemin) {
     if (-not (Test-Path $chemin)) { return $null }
@@ -222,10 +246,7 @@ if (-not $installExistante -and -not $Force) {
 $modeReplace = [bool]$Replace
 if ($installExistante -and -not $Update -and -not $Replace) {
     Write-Etape 'Installation existante detectee'
-    $conv = Join-Path $app '_internal\backend\conversations'
-    $nb = if (Test-Path $conv) {
-        @(Get-ChildItem $conv -Filter '*.json' -ErrorAction SilentlyContinue).Count
-    } else { 0 }
+    $nb = Get-NbConversations $app
     Write-Host ("  Modeles       : {0}" -f
                 $(if (Get-TailleGo (Join-Path $app 'ollama')) {
                     "$(Get-TailleGo (Join-Path $app 'ollama')) Go" } else { 'absents' }))
@@ -394,10 +415,10 @@ if (Test-Path $modeleWordSource) {
 # --- 4. Application --------------------------------------------------------
 Write-Etape "Synchronisation de l'application vers $app"
 
+# Ancien dossier des conversations (avant les organisations) : toujours exclu du
+# miroir, au cas ou il en contiendrait encore.
 $dossierConv = Join-Path $app '_internal\backend\conversations'
-$nbConversations = if (Test-Path $dossierConv) {
-    @(Get-ChildItem $dossierConv -Filter '*.json' -ErrorAction SilentlyContinue).Count
-} else { 0 }
+$nbConversations = Get-NbConversations $app
 
 # Caches derives du contenu des documents (texte OCR, index vectoriel de la
 # recherche par le sens) : absents du build PyInstaller (voir build.spec), et
@@ -414,7 +435,7 @@ $docindexDest = Join-Path $app '_internal\backend\docindex'
 $profilesDest = Join-Path $app '_internal\backend\profiles'
 
 if ($installExistante) {
-    Write-Host "  Preserve : conversations\ ($nbConversations enregistrees)"
+    Write-Host "  Preserve : conversations ($nbConversations enregistrees, toutes organisations)"
     Write-Host '  Preserve : settings.json et .env (configuration)'
     Write-Host '  Preserve : profiles\ (comptes et organisations)'
     Write-Host '  Preserve : ocr_cache\ et docindex\ (caches reconstructibles)'
@@ -468,9 +489,7 @@ foreach ($c in $controles.GetEnumerator()) {
     }
 }
 
-$convApres = if (Test-Path $dossierConv) {
-    @(Get-ChildItem $dossierConv -Filter '*.json' -ErrorAction SilentlyContinue).Count
-} else { 0 }
+$convApres = Get-NbConversations $app
 if ($convApres -ne $nbConversations) {
     Write-Host ('  ALERTE  conversations : {0} avant, {1} apres' -f `
                 $nbConversations, $convApres) -ForegroundColor Red

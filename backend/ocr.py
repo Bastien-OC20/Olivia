@@ -30,8 +30,19 @@ ont accès au MÊME fichier, sur le même disque, ce qu'aucune entrée de cache 
 leur permet d'obtenir de plus. Le partager économise un OCR complet sur un
 dossier commun, sans rien révéler qui ne soit déjà lisible.
 Ce qui est bien cloisonné, en revanche : les réglages lus (`ocr_enabled`,
-`ocr_tesseract_path`) le sont pour le profil appelant, et la purge RGPD
-(`vider_cache`) ne retire que les entrées issues des dossiers de ce profil.
+`ocr_tesseract_path`) le sont pour le profil appelant, et chaque entrée du cache
+retient les organisations pour lesquelles elle a été calculée ou servie
+(`profils`). La purge RGPD (`vider_cache`) retire l'organisation demandeuse de
+chaque entrée et supprime celles que plus personne n'utilise. Elle ne dépend donc
+plus des dossiers configurés au moment de l'effacement : auparavant, une racine
+retirée des Paramètres (ou une clé USB débranchée) avant l'effacement gardait
+son texte reconnu.
+
+UN ÉCHEC N'EST PAS UN RÉSULTAT : un OCR coupé par un délai, par le budget du
+document ou par une erreur du moteur est marqué incomplet (`Resultat.complet`).
+Il n'est resservi depuis le cache que pendant RETENTE_ECHEC secondes, puis
+recalculé — sans quoi un moteur momentanément surchargé figeait pour toujours un
+texte vide ou tronqué.
 """
 import hashlib
 import json
@@ -75,12 +86,17 @@ _verrou_moteur = threading.BoundedSemaphore(MAX_CONCURRENCE)
 # ---------- Cache disque ----------
 # Placé avec les autres données d'Olivia (voir emplacements.py) : dans backend/
 # sur le disque portable, où le cache voyage avec l'application et survit au
-# débranchement de la clé ; dans C:\ProgramData\Olivia sur un poste installé,
-# Program Files n'étant pas modifiable par un utilisateur standard.
+# débranchement de la clé ; dans le profil du compte Windows sur un poste
+# installé, Program Files n'étant pas modifiable par un utilisateur standard.
 DOSSIER_CACHE = emplacements.dossier_donnees() / "ocr_cache"
 VERSION_CACHE = 1                  # à incrémenter si le format du texte produit change
 MAX_FICHIERS_CACHE = 400
 _verrou_cache = threading.Lock()
+# Délai avant de retenter un OCR resté incomplet. Le resservir pendant ce délai
+# évite qu'un document qui dépasse toujours le budget ne coûte 20 s à CHAQUE
+# recherche ; le recalculer ensuite laisse sa chance à un poste moins chargé ou à
+# un moteur réparé.
+RETENTE_ECHEC = 15 * 60.0
 
 # Mémo très court du réglage, PAR ORGANISATION : `est_active()` est interrogée une
 # fois par fichier candidat pendant une recherche (jusqu'à des milliers).
@@ -92,10 +108,19 @@ _reglage_memo: dict[str, tuple[float, bool]] = {}
 
 
 class Resultat(NamedTuple):
-    """Texte reconnu, nombre de pages traitées, et notice si une borne a coupé."""
+    """Texte reconnu, nombre de pages traitées, notice si une borne a coupé, et
+    `complet` : faux si un délai, le budget ou une erreur du moteur ont empêché
+    de traiter des pages qui auraient pu l'être (résultat à retenter). Une borne
+    FIXE (MAX_PAGES, image trop lourde) donne un résultat complet : le recalculer
+    donnerait exactement la même chose."""
     texte: str
     pages: int
     notice: str
+    complet: bool = True
+
+
+class EchecMoteur(Exception):
+    """Tesseract a rendu un code d'erreur : la page n'a pas été lue."""
 
 
 # ---------- Réglage ----------
@@ -255,7 +280,9 @@ def _tesseract(exe: Path, image: bytes, timeout: float) -> str:
         creationflags=flags,
     )
     if proc.returncode != 0:
-        return ""
+        # Lever plutôt que rendre "" : une chaîne vide se confondait avec une page
+        # blanche, et l'échec finissait en cache comme un résultat définitif.
+        raise EchecMoteur(f"code retour {proc.returncode}")
     return proc.stdout.decode("utf-8", errors="replace")
 
 
@@ -311,6 +338,10 @@ def _ocr_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
     morceaux: list[str] = []
     notice = ""
     pages_faites = 0
+    # Faux dès qu'une page n'a pas été lue pour une raison PASSAGÈRE (délai,
+    # budget, erreur du moteur) : voir Resultat.complet. Une page que pdfium ne
+    # sait pas rendre, elle, ne le saura pas davantage la fois suivante.
+    complet = True
     try:
         document = pdfium.PdfDocument(str(chemin))
     except Exception:
@@ -322,6 +353,7 @@ def _ocr_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
             if time.monotonic() - debut > BUDGET_DOCUMENT:
                 notice = (f"Reconnaissance interrompue après {int(BUDGET_DOCUMENT)} secondes : "
                           f"{pages_faites} page(s) sur {total} analysée(s).")
+                complet = False
                 break
             try:
                 page = document[i]
@@ -337,8 +369,10 @@ def _ocr_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
                 morceaux.append(_tesseract(exe, image, TIMEOUT_PAGE))
             except subprocess.TimeoutExpired:
                 notice = "Une page trop complexe a été abandonnée par la reconnaissance."
+                complet = False
                 continue
             except Exception:
+                complet = False
                 continue
             pages_faites += 1
         else:
@@ -350,7 +384,7 @@ def _ocr_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
             document.close()
         except Exception:
             pass
-    return Resultat("\n".join(morceaux), pages_faites, notice)
+    return Resultat("\n".join(morceaux), pages_faites, notice, complet)
 
 
 def _ocr_image(profile_id: str, chemin: Path) -> Optional[Resultat]:
@@ -366,7 +400,10 @@ def _ocr_image(profile_id: str, chemin: Path) -> Optional[Resultat]:
     try:
         return Resultat(_tesseract(exe, donnees, TIMEOUT_PAGE), 1, "")
     except subprocess.TimeoutExpired:
-        return Resultat("", 0, "Reconnaissance abandonnée : image trop longue à analyser.")
+        return Resultat("", 0, "Reconnaissance abandonnée : image trop longue à analyser.",
+                        False)
+    except EchecMoteur:
+        return Resultat("", 0, "", False)
     except Exception:
         return None
 
@@ -382,36 +419,89 @@ def _cle(chemin: Path) -> Optional[str]:
     return hashlib.sha256(brut.encode("utf-8", "replace")).hexdigest()[:40]
 
 
-def _lire_cache(cle: str) -> Optional[Resultat]:
-    fichier = DOSSIER_CACHE / f"{cle}.json"
+def _lire_json(fichier: Path) -> Optional[dict]:
     try:
         with open(fichier, encoding="utf-8") as f:
             donnees = json.load(f)
-        return Resultat(str(donnees.get("texte", "")), int(donnees.get("pages", 0)),
-                        str(donnees.get("notice", "")))
+    except Exception:
+        return None
+    return donnees if isinstance(donnees, dict) else None
+
+
+def _ecrire_json(fichier: Path, charge: dict) -> None:
+    """Écriture atomique (fichier .tmp puis remplacement). À appeler sous
+    `_verrou_cache`."""
+    DOSSIER_CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = fichier.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(charge, f, ensure_ascii=False)
+    tmp.replace(fichier)
+
+
+def _profils(donnees: dict) -> Optional[list[str]]:
+    """Organisations d'une entrée, ou None pour une entrée d'avant ce champ."""
+    profils = donnees.get("profils")
+    if not isinstance(profils, list):
+        return None
+    return [p for p in profils if isinstance(p, str)]
+
+
+def _lire_cache(cle: str, profile_id: str) -> Optional[Resultat]:
+    """Résultat en cache pour `cle`, ou None s'il faut (re)calculer.
+
+    Une entrée sans le champ `complet` vient d'une version qui mettait aussi les
+    échecs en cache : rien ne permet d'y distinguer un texte complet d'un texte
+    coupé par un délai, elle est donc recalculée (et réécrite) une fois.
+    Servir une entrée à une organisation l'y inscrit (`profils`) : c'est ce qui
+    permet à son effacement RGPD de la retrouver, quels que soient ses dossiers à
+    ce moment-là.
+    """
+    fichier = DOSSIER_CACHE / f"{cle}.json"
+    try:
+        with _verrou_cache:
+            donnees = _lire_json(fichier)
+            if donnees is None or not isinstance(donnees.get("complet"), bool):
+                return None
+            complet = donnees["complet"]
+            if not complet:
+                age = time.time() - float(donnees.get("calcule_le") or 0)
+                if not 0 <= age < RETENTE_ECHEC:
+                    return None
+            resultat = Resultat(str(donnees.get("texte", "")), int(donnees.get("pages", 0)),
+                                str(donnees.get("notice", "")), complet)
+            profils = _profils(donnees) or []
+            if profile_id and profile_id not in profils:
+                donnees["profils"] = profils + [profile_id]
+                _ecrire_json(fichier, donnees)
+            return resultat
     except Exception:
         return None
 
 
-def _ecrire_cache(cle: str, resultat: Resultat, chemin: Path) -> None:
+def _ecrire_cache(cle: str, resultat: Resultat, chemin: Path, profile_id: str) -> None:
     fichier = DOSSIER_CACHE / f"{cle}.json"
     try:
         source_absolue = str(chemin.resolve())
     except OSError:
         source_absolue = str(chemin)
-    # `source_path` est indispensable à la purge RGPD ciblée : la clé du cache
-    # est un hash non réversible, donc sans ce champ il serait impossible de
-    # savoir de quel dossier — et donc de quelle organisation — vient une entrée.
+    # `source_path` dit d'où vient le texte (la clé du cache est un hash non
+    # réversible) : utile pour inspecter le cache, la purge RGPD passant
+    # désormais par `profils`.
     charge = {"texte": resultat.texte, "pages": resultat.pages,
               "notice": resultat.notice, "source": chemin.name,
-              "source_path": source_absolue}
+              "source_path": source_absolue, "complet": bool(resultat.complet),
+              "calcule_le": time.time()}
     try:
         with _verrou_cache:
-            DOSSIER_CACHE.mkdir(parents=True, exist_ok=True)
-            tmp = fichier.with_suffix(".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(charge, f, ensure_ascii=False)
-            tmp.replace(fichier)
+            # Un recalcul (entrée incomplète périmée) ne fait pas oublier les
+            # organisations qui ont déjà reçu ce texte : leur effacement doit
+            # toujours pouvoir les retirer.
+            ancien = _lire_json(fichier) or {}
+            profils = _profils(ancien) or []
+            if profile_id and profile_id not in profils:
+                profils.append(profile_id)
+            charge["profils"] = profils
+            _ecrire_json(fichier, charge)
             _purger()
     except Exception:
         pass                                  # un cache indisponible ne casse rien
@@ -430,76 +520,81 @@ def _purger() -> None:
             pass
 
 
-def _sous_une_racine(source: str, racines: list[Path]) -> bool:
-    """Le fichier d'origine tombe-t-il sous l'un des dossiers fournis ?"""
-    if not source:
-        return False
-    try:
-        chemin = Path(source)
-    except (OSError, ValueError):
-        return False
-    for racine in racines:
-        try:
-            if chemin == racine or chemin.is_relative_to(racine):
-                return True
-        except (OSError, ValueError):
-            continue
-    return False
-
-
-def vider_cache(racines: list[Path]) -> int:
-    """RGPD : supprime les entrées de cache issues des dossiers `racines`
-    (les `fs_roots` de l'organisation demandeuse). Renvoie le nombre effacé.
+def vider_cache(profile_id: str) -> int:
+    """RGPD : retire l'organisation `profile_id` du cache. Renvoie le nombre
+    d'entrées supprimées.
 
     Le cache étant COMMUN à toutes les organisations (voir l'en-tête du module),
     tout vider sur une demande d'effacement détruirait le travail des autres — et,
-    plus grave, ferait passer pour une purge ciblée ce qui n'en est pas une. On ne
-    retire donc que ce qui provient des dossiers du demandeur.
+    plus grave, ferait passer pour une purge ciblée ce qui n'en est pas une.
+    Chaque entrée dit pour quelles organisations elle a été calculée ou servie
+    (`profils`) : le demandeur en est retiré, et l'entrée supprimée quand plus
+    personne ne l'utilise. Une entrée partagée reste en place pour les autres,
+    qui ont accès au même fichier.
 
-    Cas particulier assumé : une entrée écrite par une version antérieure ne porte
-    pas de `source_path` et n'est donc rattachable à aucun dossier. Elle est
-    supprimée. Le mauvais choix serait l'inverse : laisser en place, après une
-    demande d'effacement, un texte reconnu qui appartient très probablement au
-    demandeur. Ce que ça coûte aux autres organisations est un simple OCR à
-    repayer, le cache étant reconstructible par construction.
+    Entrées d'avant le champ `profils` : `_lire_cache` ne les sert plus (elles
+    sont recalculées), les garder ne conserverait donc que des données
+    personnelles, sans aucun gain. Elles sont toutes supprimées, plutôt que
+    filtrées sur les dossiers configurés du demandeur comme auparavant : ce
+    filtre laissait en place le texte d'une racine retirée des Paramètres ou
+    débranchée avant l'effacement. Une entrée illisible est supprimée aussi
+    (non rattachable, donc présumée appartenir au demandeur) ; le coût pour les
+    autres organisations se limite à un OCR à repayer.
     """
     efface = 0
     with _verrou_cache:
         for fichier in DOSSIER_CACHE.glob("*.json"):
-            try:
-                with open(fichier, encoding="utf-8") as f:
-                    source = str((json.load(f) or {}).get("source_path") or "")
-            except Exception:
-                source = ""          # entrée illisible : traitée comme non rattachable
-            if source and not _sous_une_racine(source, racines):
-                continue
+            donnees = _lire_json(fichier)
+            profils = _profils(donnees) if donnees is not None else None
+            if profils is not None:
+                if profile_id not in profils:
+                    continue
+                restants = [p for p in profils if p != profile_id]
+                if restants:
+                    donnees["profils"] = restants
+                    try:
+                        _ecrire_json(fichier, donnees)
+                    except OSError:
+                        pass
+                    continue
             try:
                 fichier.unlink()
                 efface += 1
             except OSError:
                 pass
+        # Un .tmp resté après une coupure pendant l'écriture contient lui aussi
+        # du texte reconnu, sans qu'on sache pour qui : il est supprimé.
+        for reste in DOSSIER_CACHE.glob("*.tmp"):
+            try:
+                reste.unlink()
+            except OSError:
+                pass
     return efface
 
 
-def _avec_cache(chemin: Path, calcul: Callable[[Path], Optional[Resultat]]) -> Optional[Resultat]:
+def _avec_cache(profile_id: str, chemin: Path,
+                calcul: Callable[[Path], Optional[Resultat]]) -> Optional[Resultat]:
     cle = _cle(chemin)
     if cle is not None:
-        depuis_cache = _lire_cache(cle)
+        depuis_cache = _lire_cache(cle, profile_id)
         if depuis_cache is not None:
             return depuis_cache
     with _verrou_moteur:
         resultat = calcul(chemin)
+    # Un résultat incomplet est mémorisé AVEC son marqueur (voir RETENTE_ECHEC) :
+    # ne rien mémoriser ferait repayer jusqu'à 20 s d'OCR à chaque recherche pour
+    # un document qui dépasse toujours le budget.
     if resultat is not None and cle is not None:
-        _ecrire_cache(cle, resultat, chemin)
+        _ecrire_cache(cle, resultat, chemin, profile_id)
     return resultat
 
 
 # ---------- API publique ----------
 def texte_pdf(profile_id: str, chemin: Path) -> Optional[Resultat]:
     """Texte reconnu d'un PDF scanné, ou None si la reconnaissance est impossible."""
-    return _avec_cache(chemin, lambda p: _ocr_pdf(profile_id, p))
+    return _avec_cache(profile_id, chemin, lambda p: _ocr_pdf(profile_id, p))
 
 
 def texte_image(profile_id: str, chemin: Path) -> Optional[Resultat]:
     """Texte reconnu d'une image, ou None si la reconnaissance est impossible."""
-    return _avec_cache(chemin, lambda p: _ocr_image(profile_id, p))
+    return _avec_cache(profile_id, chemin, lambda p: _ocr_image(profile_id, p))

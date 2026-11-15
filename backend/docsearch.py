@@ -35,10 +35,11 @@ MAX_FILES = 1200                   # nombre de fichiers réellement examinés
 MAX_SECONDS = 12.0                 # durée maximale d'une recherche
 MAX_RESULTS = 50                   # documents renvoyés
 
-# ---------- Cache mémoire, clé (chemin, mtime, taille) ----------
+# ---------- Cache mémoire, clé (chemin, mtime, taille, état de l'OCR) ----------
 _CACHE_MAX_FILES = 400
 _CACHE_MAX_CHARS = 6_000_000
-_cache: "OrderedDict[tuple, tuple[str, str, dict]]" = OrderedDict()
+# Valeur : (texte d'origine, texte normalisé, provenance, organisations servies).
+_cache: "OrderedDict[tuple, tuple[str, str, dict, set]]" = OrderedDict()
 _cache_chars = 0
 _cache_lock = threading.Lock()
 
@@ -114,50 +115,80 @@ def motif_litteral(mot: str) -> re.Pattern:
 
 
 # ---------- Cache d'extraction ----------
+# Extensions dont le texte dépend de la reconnaissance de caractères.
+_EXT_OCR = {".pdf"} | documents.OCR_IMAGE_EXT
+
+
 def _texte_indexe(profile_id: str, path: Path, mtime_ns: int,
                   size: int) -> tuple[str, str, dict]:
     """(texte d'origine, texte normalisé, provenance) — extrait une fois par version.
 
-    La provenance ({"ocr": bool, "notice": str}) vient de `documents` : elle dit
-    si le texte a été reconnu automatiquement sur un document scanné, ce que
-    l'interface doit signaler.
+    La provenance ({"ocr": bool, "notice": str, "complet": bool}) vient de
+    `documents` : elle dit si le texte a été reconnu automatiquement sur un
+    document scanné, ce que l'interface doit signaler.
 
     Le cache est COMMUN à toutes les organisations, pour la même raison que le
-    cache OCR (voir l'en-tête de ocr.py) : sa clé est (chemin, date, taille), donc
+    cache OCR (voir l'en-tête de ocr.py) : sa clé désigne un fichier précis, donc
     deux organisations ne s'y croisent que sur un fichier auquel elles ont déjà
-    accès toutes les deux. `profile_id` ne sert qu'à décider si la reconnaissance
-    de caractères est active, jamais à choisir ce qui est lu.
+    accès toutes les deux.
+
+    Deux pièges corrigés (audit du 15/11/2026) :
+      - l'état de l'OCR de l'organisation fait partie de la clé pour un PDF ou
+        une image. Sans lui, le texte VIDE d'un PDF scanné lu avec l'OCR
+        désactivé restait servi après son activation, jusqu'au redémarrage ; et
+        une organisation qui a désactivé l'OCR recevait le texte reconnu pour
+        une autre ;
+      - un texte INCOMPLET (OCR impossible ou interrompu, fichier verrouillé)
+        n'est jamais mis en cache : il sera retenté à la recherche suivante.
     """
-    cle = (str(path), mtime_ns, size)
+    ext = path.suffix.lower()
+    etat_ocr = documents.ocr_actif(profile_id) if ext in _EXT_OCR else None
+    cle = (str(path), mtime_ns, size, etat_ocr)
     with _cache_lock:
         hit = _cache.get(cle)
         if hit is not None:
             _cache.move_to_end(cle)
-            return hit
+            hit[3].add(profile_id)
+            return hit[0], hit[1], hit[2]
     brut, meta = documents.extract_text_meta(profile_id, path)
     valeur = (brut, fold(brut), meta)
-    _ranger_en_cache(cle, valeur)
+    if meta.get("complet", True):
+        _ranger_en_cache(cle, valeur, profile_id)
     return valeur
 
 
-def _ranger_en_cache(cle: tuple, valeur: tuple[str, str, dict]) -> None:
+def _ranger_en_cache(cle: tuple, valeur: tuple[str, str, dict], profile_id: str) -> None:
     global _cache_chars
     with _cache_lock:
         if cle in _cache:
+            _cache[cle][3].add(profile_id)
             return
-        _cache[cle] = valeur
+        _cache[cle] = (*valeur, {profile_id})
         _cache_chars += len(valeur[0])
         while _cache and (len(_cache) > _CACHE_MAX_FILES or _cache_chars > _CACHE_MAX_CHARS):
             _, vieux = _cache.popitem(last=False)
             _cache_chars -= len(vieux[0])
 
 
-def vider_cache() -> None:
-    """Utile aux tests ; l'application n'a pas besoin de l'appeler."""
+def vider_cache(profile_id: str | None = None) -> None:
+    """Vide le cache, ou seulement ce qu'a reçu l'organisation `profile_id`.
+
+    Effacement RGPD : chaque entrée retient les organisations qui l'ont reçue.
+    Le demandeur en est retiré, et l'entrée disparaît quand plus personne ne
+    l'utilise ; une entrée partagée reste servie aux autres organisations, qui
+    ont accès au même fichier. Sans argument : tout vider (tests).
+    """
     global _cache_chars
     with _cache_lock:
-        _cache.clear()
-        _cache_chars = 0
+        if profile_id is None:
+            _cache.clear()
+            _cache_chars = 0
+            return
+        for cle in list(_cache):
+            profils = _cache[cle][3]
+            profils.discard(profile_id)
+            if not profils:
+                _cache_chars -= len(_cache.pop(cle)[0])
 
 
 # ---------- Extraits de contexte ----------

@@ -2,9 +2,10 @@
 Emplacement des données hors du dossier de l'application (audit, point 6).
 
 Sur un poste installé, l'application est dans Program Files, qu'un utilisateur
-standard ne peut pas modifier : les données doivent vivre ailleurs
-(C:\\ProgramData\\Olivia, désigné par olivia.ini). Sur un disque portable et en
-développement, rien ne change.
+standard ne peut pas modifier : les données doivent vivre ailleurs — dans le
+profil du compte Windows (%LOCALAPPDATA%\\Olivia, désigné par olivia.ini), et
+plus dans C:\\ProgramData\\Olivia, commun au poste et ouvert à tous ses comptes
+(audit du 15/11/2026). Sur un disque portable et en développement, rien ne change.
 
 Les vérifications qui demandent un nouveau process (chemins calculés au
 chargement des modules) passent par un sous-process Python : le process de test
@@ -106,6 +107,58 @@ def test_migration_reprend_apres_interruption(tmp_path):
     assert (nouveau / "users.json").is_file()
 
 
+# ---------- Reprise de l'ancien dossier commun au poste ----------
+def _ancien_commun(racine: Path) -> None:
+    _anciens_profils(racine / "profiles")
+    (racine / "ocr_cache").mkdir()
+    (racine / "ocr_cache" / "abc.json").write_text('{"texte": "bulletin"}', encoding="utf-8")
+    (racine / "modeles-ia").mkdir()
+    (racine / "modeles-ia" / "blob").write_text("poids", encoding="utf-8")
+
+
+def test_reprise_deplace_les_donnees_hors_du_dossier_commun(tmp_path):
+    """Comptes, sessions et conversations ne doivent plus rester lisibles par
+    les autres comptes Windows : ils sont repris PUIS retirés de l'ancien
+    dossier. Les modèles d'IA, eux, restent partagés."""
+    commun, perso = tmp_path / "ProgramData" / "Olivia", tmp_path / "Local" / "Olivia"
+    _ancien_commun(commun)
+    assert emplacements.reprendre_dossier_commun(commun, perso) is True
+    assert json.loads((perso / "profiles" / "users.json").read_text())["users"][0]["id"] == "u"
+    assert (perso / "profiles" / "abc" / "settings.json").is_file()
+    assert not (commun / "profiles").exists()
+    assert not (commun / "ocr_cache").exists()
+    assert (commun / "modeles-ia" / "blob").is_file()
+
+
+def test_reprise_ne_touche_a_rien_si_le_compte_a_deja_ses_donnees(tmp_path):
+    """Le second compte Windows du poste a déjà son dossier : il ne reprend
+    rien, n'écrase rien, et ne vide pas l'ancien dossier d'un autre."""
+    commun, perso = tmp_path / "commun", tmp_path / "perso"
+    _ancien_commun(commun)
+    (perso / "profiles").mkdir(parents=True)
+    (perso / "profiles" / "users.json").write_text('{"users": []}', encoding="utf-8")
+    assert emplacements.reprendre_dossier_commun(commun, perso) is False
+    assert json.loads((perso / "profiles" / "users.json").read_text()) == {"users": []}
+    assert (commun / "profiles" / "users.json").is_file()
+
+
+def test_reprise_sans_ancien_dossier(tmp_path):
+    assert emplacements.reprendre_dossier_commun(tmp_path / "rien", tmp_path / "perso") is False
+    assert not (tmp_path / "perso").exists()
+
+
+def test_ancien_dossier_designe_par_la_variable_ou_par_olivia_ini(
+        sans_reglage, tmp_path, monkeypatch):
+    monkeypatch.delenv(emplacements.VARIABLE_REPRISE, raising=False)
+    assert emplacements.ancien_dossier_commun() is None
+    (sans_reglage / emplacements.NOM_INI).write_text(
+        f"[{emplacements.SECTION_INI}]\n{emplacements.CLE_INI}={tmp_path / 'perso'}\n"
+        f"{emplacements.CLE_INI_REPRISE}={tmp_path / 'commun'}\n", encoding="utf-8")
+    assert emplacements.ancien_dossier_commun() == tmp_path / "commun"
+    monkeypatch.setenv(emplacements.VARIABLE_REPRISE, str(tmp_path / "autre"))
+    assert emplacements.ancien_dossier_commun() == tmp_path / "autre"
+
+
 # ---------- Bout en bout, dans un process neuf ----------
 def _python(code: str, env_extra: dict) -> str:
     env = {**os.environ, **env_extra}
@@ -129,6 +182,20 @@ def test_tous_les_chemins_suivent_le_dossier_des_donnees(tmp_path):
     assert Path(comptes) == data / "profiles" / "users.json"
     assert Path(sess) == data / "profiles" / "sessions.json"
     assert reserve is True                      # le dossier des données est réservé
+
+
+def test_reprise_au_demarrage_dans_un_process_neuf(tmp_path):
+    """L'application de bureau désigne l'ancien dossier commun par
+    OLIVIA_DATA_REPRISE : au chargement du backend, les comptes sont dans le
+    dossier du compte Windows et plus dans l'ancien."""
+    commun, perso = tmp_path / "commun", tmp_path / "perso"
+    _ancien_commun(commun)
+    sortie = _python(
+        "from backend import users; print(users.existe_un_compte())",
+        {emplacements.VARIABLE_ENV: str(perso), emplacements.VARIABLE_REPRISE: str(commun)})
+    assert sortie == "True"
+    assert (perso / "profiles" / "users.json").is_file()
+    assert not (commun / "profiles").exists()
 
 
 def test_creation_de_compte_ecrit_dans_le_dossier_des_donnees(tmp_path):

@@ -27,21 +27,104 @@ async function choisirPort (estLibre, debut = PORT_PREFERE, fin = PORT_MAX) {
  * Dossier des données d'Olivia (comptes, réglages, conversations), transmis au
  * backend par la variable OLIVIA_DATA_DIR (voir backend/emplacements.py).
  *
- * - Windows : C:\ProgramData\Olivia, COMMUN au poste, comme l'installeur
- *   historique — les comptes créés par le service informatique servent à
- *   toutes les sessions Windows. L'installeur le rend modifiable par les
- *   utilisateurs (build/installer.nsh). S'il ne l'est pas (installation
- *   manuelle, droits retirés), repli sur le dossier propre à l'utilisateur.
+ * - Windows : %LOCALAPPDATA%\Olivia, PROPRE AU COMPTE WINDOWS. Les versions
+ *   précédentes utilisaient C:\ProgramData\Olivia, commun au poste et rendu
+ *   modifiable par tous : sur un poste partagé, un autre compte Windows
+ *   pouvait y lire les conversations, copier un jeton de session ou remplacer
+ *   un mot de passe (audit du 15/11/2026). « Local » et non « Roaming »
+ *   (userData d'Electron) : l'index et le cache OCR sont volumineux, et un
+ *   profil itinérant les recopierait à chaque ouverture de session Windows.
  * - macOS / Linux : dossier de l'application propre à l'utilisateur
  *   (~/Library/Application Support/Olivia), l'usage normal sur ces systèmes.
  */
-function dossierDonnees ({ plateforme, env, dossierUtilisateur, estInscriptible }) {
+function dossierDonnees ({ plateforme, env, dossierUtilisateur }) {
   if (env.OLIVIA_DATA_DIR) return env.OLIVIA_DATA_DIR
-  if (plateforme === 'win32' && env.PROGRAMDATA) {
-    const commun = path.win32.join(env.PROGRAMDATA, 'Olivia')
-    if (estInscriptible(commun)) return commun
+  if (plateforme === 'win32' && env.LOCALAPPDATA) {
+    return path.win32.join(env.LOCALAPPDATA, 'Olivia')
   }
   return dossierUtilisateur
+}
+
+/**
+ * Ancien dossier commun au poste (C:\ProgramData\Olivia), que le backend
+ * reprend au premier démarrage dans le dossier du compte Windows puis retire
+ * (variable OLIVIA_DATA_REPRISE, voir backend/emplacements.py). Chaîne vide
+ * hors Windows, ou quand l'exploitant a choisi lui-même le dossier des données.
+ */
+function ancienDossierCommun ({ plateforme, env }) {
+  if (plateforme !== 'win32' || env.OLIVIA_DATA_DIR || !env.PROGRAMDATA) return ''
+  return path.win32.join(env.PROGRAMDATA, 'Olivia')
+}
+
+/**
+ * Dossier des modèles d'IA COMMUN au poste (C:\ProgramData\Olivia\modeles-ia),
+ * ou chaîne vide pour laisser le backend les ranger avec les données.
+ *
+ * Les modèles pèsent plusieurs Go et ne contiennent aucune donnée personnelle :
+ * les ranger dans le dossier de chaque compte Windows ferait retélécharger
+ * (et stocker) le tout pour chaque personne du poste. Ils restent donc partagés,
+ * dans un sous-dossier que l'installeur ouvre en écriture (build/installer.nsh)
+ * — et lui seul : comptes et conversations n'y sont plus.
+ */
+function dossierModelesCommun ({ plateforme, env, estInscriptible }) {
+  if (plateforme !== 'win32' || env.OLLAMA_MODELS || env.OLIVIA_DATA_DIR || !env.PROGRAMDATA) return ''
+  const commun = path.win32.join(env.PROGRAMDATA, 'Olivia', 'modeles-ia')
+  return estInscriptible(commun) ? commun : ''
+}
+
+/** Variables d'environnement qui désignent ses dossiers au backend. */
+function envDonnees ({ dossier, reprise = '', modeles = '' }) {
+  const env = { OLIVIA_DATA_DIR: dossier }
+  if (reprise) env.OLIVIA_DATA_REPRISE = reprise
+  if (modeles) env.OLLAMA_MODELS = modeles
+  return env
+}
+
+// Premier lancement : PyInstaller (décompression), antivirus et Ollama peuvent être lents.
+const DELAI_DEMARRAGE_MS = 120_000
+// Marge laissée au lanceur : il abandonne un peu AVANT Electron, pour que l'échec
+// soit déclaré par le lanceur (qui arrête proprement Ollama) plutôt que par une
+// attente d'Electron qui se terminerait au même instant.
+const MARGE_LANCEUR_MS = 10_000
+
+/** Valeur de `--max-wait` (secondes entières) transmise à launch.py. */
+function delaiLanceurSecondes (delaiMs = DELAI_DEMARRAGE_MS, margeMs = MARGE_LANCEUR_MS) {
+  return Math.max(1, Math.floor((delaiMs - margeMs) / 1000))
+}
+
+/**
+ * Préférences de l'utilisatrice (fichier JSON du compte Windows). Un fichier
+ * absent, vide ou abîmé ne doit jamais gêner le démarrage : valeurs par défaut.
+ * Par défaut, AUCUN contact avec GitHub (majAuto: false).
+ */
+function lirePreferences (texte) {
+  const defaut = { majAuto: false }
+  if (typeof texte !== 'string' || !texte.trim()) return defaut
+  try {
+    const donnees = JSON.parse(texte)
+    if (donnees && typeof donnees === 'object') {
+      return { majAuto: donnees.majAuto === true }
+    }
+  } catch { /* fichier abîmé : valeurs par défaut */ }
+  return defaut
+}
+
+/** Texte du fichier de préférences (seules les clés connues sont écrites). */
+function preferencesVersTexte (preferences) {
+  return JSON.stringify({ majAuto: preferences?.majAuto === true }, null, 2) + '\n'
+}
+
+/**
+ * Filtre de copie de `ollama/` vers l'application (option `filter` de
+ * fs.cpSync) : écarte le dossier `models` et tout ce qu'il contient. Les modèles
+ * pèsent plusieurs Go (limite de 2 Gio par fichier de release) et Program Files
+ * n'est pas inscriptible : ils sont téléchargés au premier lancement.
+ * Insensible à la casse (Windows). Rend true pour copier.
+ */
+function copierSaufModeles (racine, chemin, chemins = path) {
+  const relatif = chemins.relative(racine, chemin)
+  if (!relatif) return true
+  return chemins.normalize(relatif).split(/[\\/]/)[0].toLowerCase() !== 'models'
 }
 
 /**
@@ -54,6 +137,10 @@ function dossierDonnees ({ plateforme, env, dossierUtilisateur, estInscriptible 
 function commandeBackend ({ empaquete, plateforme, ressources, depot, port, pythonDev }) {
   const args = ['--no-browser', '--port', String(port), '--parent-stdin']
   if (empaquete) {
+    // Sans cela, launch.py abandonne au bout de 30 s (son défaut) alors
+    // qu'Electron patiente DELAI_DEMARRAGE_MS : au premier lancement lent
+    // (antivirus), le moteur mourait avant que la fenêtre ait fini d'attendre.
+    args.push('--max-wait', String(delaiLanceurSecondes()))
     const nom = plateforme === 'win32' ? 'ai-webapp.exe' : 'ai-webapp'
     const exe = path.join(ressources, 'backend', nom)
     return { commande: exe, args, cwd: path.dirname(exe) }
@@ -100,6 +187,15 @@ module.exports = {
   PORT_MAX,
   choisirPort,
   dossierDonnees,
+  ancienDossierCommun,
+  dossierModelesCommun,
+  envDonnees,
+  DELAI_DEMARRAGE_MS,
+  MARGE_LANCEUR_MS,
+  delaiLanceurSecondes,
+  lirePreferences,
+  preferencesVersTexte,
+  copierSaufModeles,
   commandeBackend,
   pythonDeveloppement,
   estAdresseInterne,

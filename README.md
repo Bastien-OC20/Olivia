@@ -11,7 +11,7 @@ l'extérieur — le modèle d'IA tourne sur le poste (Ollama), les documents res
 disque.
 
 > **Nom** : l'application s'affiche sous le nom **Oliv'IA**. Les noms techniques gardent
-> « Olivia » : dossiers des données (`C:\ProgramData\Olivia`…), fichiers (`olivia.ini`,
+> « Olivia » : dossiers des données (`%LOCALAPPDATA%\Olivia`…), fichiers (`olivia.ini`,
 > `Lancer-Olivia.bat`, `ai-webapp.exe`), variables `OLIVIA_*`, nom interne de l'application de
 > bureau (`Olivia.app`, `Olivia Setup <version>.exe`) et dossier d'installation. Les renommer
 > ferait perdre, à la mise à jour, les comptes et conversations déjà enregistrés, et casserait
@@ -121,8 +121,8 @@ Elle s'utilise de quatre façons, avec le même code :
   (choix manuel).
 - **Mode simple** par défaut (réglages techniques masqués).
 - **Application de bureau** macOS et Windows : fenêtre native, icône dans la barre des menus /
-  zone de notification, raccourci global, instance unique, mises à jour automatiques
-  (Windows).
+  zone de notification, raccourci global, instance unique, mises à jour (Windows,
+  désactivées par défaut).
 - Exécutable Windows autonome, installeur Inno Setup, disque portable.
 
 **Conformité**
@@ -143,7 +143,7 @@ un endroit différent et a évolué séparément.
 | Application de bureau | 1.0.0 | `desktop/package.json` (nom des installeurs et des releases) |
 | Installeur Inno Setup | 1.0.0 | `installer Olivia/olivia.iss` (`#define AppVersion`) |
 
-Les **mises à jour automatiques** de l'application de bureau comparent la version de
+Les **mises à jour** de l'application de bureau, quand elles sont activées, comparent la version de
 `desktop/package.json` à celle de la dernière release GitHub : c'est ce numéro qu'il faut
 augmenter avant de publier une nouvelle version (voir
 [Intégration continue](#-tests-et-intégration-continue)).
@@ -270,9 +270,15 @@ choix assumé, cohérent avec le RGPD.
 - **menus en français** ;
 - **installeurs** `.dmg` / `.zip` (macOS) et `.exe` (Windows, NSIS, installation pour tous les
   utilisateurs du poste) ;
-- **mises à jour automatiques** depuis les releases GitHub du dépôt (electron-updater) : actives
-  sur Windows ; sur macOS seulement une fois l'application signée (macOS refuse sinon
-  d'installer la mise à jour) — activer alors `olivia.majAutoMac` dans `desktop/package.json`.
+- **mises à jour** depuis les releases GitHub du dépôt (electron-updater), **désactivées par
+  défaut** : sans action de votre part, l'application ne contacte jamais GitHub. Le menu
+  propose *Rechercher une mise à jour…* (une vérification à la demande) et une case *Mises à
+  jour automatiques* (vérification au démarrage puis toutes les 6 h), mémorisée pour chaque
+  compte Windows. Pourquoi : les installeurs ne sont pas signés et s'installent pour tout le
+  poste ; une mise à jour automatique installerait sur tout le parc ce qui serait publié dans
+  les releases, et chaque vérification transmet à GitHub l'adresse du poste et la version.
+  Sur macOS seulement une fois l'application signée (macOS refuse sinon d'installer la mise à
+  jour) — activer alors `olivia.majAutoMac` dans `desktop/package.json`.
   Une release ne sert de mise à jour qu'une fois **publiée** (le workflow crée un brouillon),
   et seulement si le dépôt est accessible aux postes ;
 - **création de compte** : sur un poste sans compte, l'écran de connexion propose « Ouvrir
@@ -297,20 +303,22 @@ composants). Sous Windows, il inclut les bibliothèques NVIDIA CUDA (v12 et v13 
 selon le pilote) et Vulkan, d'où un installeur d'environ 1,5 Go. Si un Ollama tourne déjà sur le
 poste (port 11434), Oliv'IA l'utilise à la place du sien, avec ses modèles.
 
-**Modèles** : rangés dans le dossier des données, sous-dossier `modeles-ia`
-(`C:\ProgramData\Olivia\modeles-ia`, `~/Library/Application Support/Olivia/modeles-ia`), et
-non dans le dossier de l'application, qui n'est pas modifiable par un utilisateur standard et
-serait remplacé à chaque mise à jour.
+**Modèles** : rangés hors du dossier de l'application, qui n'est pas modifiable par un
+utilisateur standard et serait remplacé à chaque mise à jour. Sous Windows :
+`C:\ProgramData\Olivia\modeles-ia`, **commun au poste** (plusieurs Go, aucune donnée
+personnelle : chaque compte Windows n'a pas à les retélécharger). Sous macOS :
+`~/Library/Application Support/Olivia/modeles-ia`.
 
 Les installeurs n'étant **pas signés** : Windows affiche SmartScreen (*Informations
 complémentaires → Exécuter quand même*) ; macOS bloque l'ouverture (autoriser dans *Réglages
 Système → Confidentialité et sécurité*, ou `xattr -dr com.apple.quarantine
 /Applications/Olivia.app` par le service informatique).
 
-**Données** : `C:\ProgramData\Olivia` sous Windows (commun au poste ; l'installeur NSIS y donne
-le droit de modification au groupe Utilisateurs, repli sur le dossier de l'utilisateur si ce
-dossier n'est pas modifiable), `~/Library/Application Support/Olivia` sous macOS. Transmis au
-backend par `OLIVIA_DATA_DIR`. **Journal** : `olivia.log`, dans le dossier des journaux
+**Données** : `%LOCALAPPDATA%\Olivia` sous Windows, **propre au compte Windows** (voir
+« Emplacement des données » pour la reprise de l'ancien dossier commun
+`C:\ProgramData\Olivia`), `~/Library/Application Support/Olivia` sous macOS. Transmis au
+backend par `OLIVIA_DATA_DIR`. L'installeur NSIS ne donne plus de droit d'écriture aux
+utilisateurs que sur le sous-dossier commun des modèles (`C:\ProgramData\Olivia\modeles-ia`). **Journal** : `olivia.log`, dans le dossier des journaux
 d'Electron (`app.getPath('logs')`).
 
 **Sécurité de la fenêtre** : `contextIsolation`, `sandbox`, aucun accès Node pour la page ;
@@ -401,10 +409,20 @@ notée dans le script).
 4. compiler `installer Olivia\olivia.iss` avec Inno Setup → `Installer-Olivia-<version>.exe`.
 
 L'installeur :
-- place les **données** dans `C:\ProgramData\Olivia`, rendu modifiable par les utilisateurs du
-  poste, et écrit `ai-webapp\olivia.ini` pour le désigner ;
-- propose de **créer le premier compte** en fin d'installation (case cochée seulement s'il n'en
-  existe aucun) et ajoute un raccourci **« Créer un compte Oliv'IA »** au menu Démarrer ;
+- range les **modèles d'IA** dans `C:\ProgramData\Olivia\modeles-ia`, commun au poste et
+  modifiable par ses utilisateurs (seul dossier commun ouvert en écriture), et non plus dans
+  Program Files, où un modèle à télécharger plus tard (mode Léger) ne pouvait pas s'écrire. Une
+  mise à jour ne recopie que les modèles absents, et libère les ~9 Go laissés dans Program
+  Files par une version antérieure ;
+- vide `ai-webapp\_internal\` avant de le recopier, pour qu'aucun module d'une ancienne
+  version ne subsiste ;
+- place les **données** dans `%LOCALAPPDATA%\Olivia`, propre à chaque compte Windows, et écrit
+  `ai-webapp\olivia.ini` pour le désigner (ainsi que l'ancien dossier commun à reprendre, voir
+  « Emplacement des données ») ;
+- propose de **créer le premier compte** en fin d'installation, pour le compte Windows qui a
+  lancé l'installation (case proposée seulement s'il n'en existe aucun), et ajoute un raccourci
+  **« Créer un compte Oliv'IA »** au menu Démarrer, à utiliser dans la session de chaque
+  personne ;
 - ne supprime **jamais** le dossier des données à la désinstallation.
 
 ---
@@ -478,17 +496,28 @@ dans un même dossier, choisi par `backend/emplacements.py`, par ordre de priori
 |---|---|
 | Sources / développement | `backend/` (`backend/profiles/`, ignoré par Git) |
 | Disque portable | `ai-webapp\_internal\backend\` |
-| Installeur Inno Setup | `C:\ProgramData\Olivia` |
-| Application de bureau Windows | `C:\ProgramData\Olivia` (repli : dossier de l'utilisateur) |
+| Installeur Inno Setup | `%LOCALAPPDATA%\Olivia` (propre au compte Windows) |
+| Application de bureau Windows | `%LOCALAPPDATA%\Olivia` (propre au compte Windows) |
 | Application de bureau macOS | `~/Library/Application Support/Olivia` |
 
 Une installation antérieure qui écrivait dans Program Files est **recopiée** au premier
 démarrage (l'ancien dossier reste en sauvegarde). Le lanceur affiche l'emplacement retenu et
 signale clairement un dossier non modifiable.
 
-> Un dossier **commun au poste** (`ProgramData`) est lisible par tous les utilisateurs Windows
-> du poste, comme un disque portable. C'est voulu (les comptes créés par le service
-> informatique servent à toutes les sessions), mais à connaître.
+> **Un dossier par compte Windows.** Jusqu'à la version précédente, les données d'un poste
+> installé vivaient dans `C:\ProgramData\Olivia`, commun au poste et modifiable par tous ses
+> utilisateurs : un autre compte Windows pouvait y lire les conversations, copier un jeton de
+> session ou remplacer un mot de passe. Elles sont désormais dans le profil de chaque compte
+> Windows, que le système protège des autres comptes.
+>
+> - **Reprise** : au premier démarrage après la mise à jour, le compte Windows qui lance
+>   Oliv'IA reprend les données de l'ancien dossier commun, qui en est alors vidé. Les autres
+>   comptes Windows du poste démarrent sans compte Oliv'IA et créent le leur. Faites donc
+>   lancer Oliv'IA en premier par la personne à qui appartiennent ces données.
+> - **Conséquence** : les comptes Oliv'IA ne sont plus partagés entre deux sessions Windows.
+>   Pour un dossier commun à plusieurs sessions (à vos risques), désignez-le par
+>   `OLIVIA_DATA_DIR` et réglez vous-même ses droits.
+> - Un **disque portable** reste lisible par quiconque le branche : c'est sa nature.
 
 ---
 
@@ -498,6 +527,30 @@ Se connecter est **obligatoire**. Chaque compte appartient à exactement une **o
 conversations, réglages, index et modèle Word sont rangés dans
 `profiles/<profile_id>/` du dossier des données — un identifiant deviné d'une autre
 organisation ne donne accès à rien.
+
+**Rôles.** Chaque compte est **responsable** ou **membre** :
+
+| | Responsable | Membre |
+|---|---|---|
+| Converser, documents, recherche, tableaux | oui | oui |
+| Ton, style, mode de calcul, mode simple, température | oui | oui |
+| Dossiers de travail, boîte mail et connecteurs, recherche web, OCR, prompt système, formules et modèle Word | oui | non |
+| Gérer les comptes de l'organisation, effacer ses données | oui | non |
+
+Le premier compte d'une organisation est responsable, les suivants membres (sauf choix
+contraire). Les comptes créés avant l'arrivée des rôles sont tous responsables. Les réglages de
+confort laissés au membre restent communs à toute l'organisation.
+
+**Conversations et tableaux privés.** Chaque compte ne voit que ses conversations et ses
+tableaux blancs, responsable compris. Ceux créés avant cette version, dont l'auteur n'est pas
+connu, restent visibles de tous les comptes de l'organisation. Les conversations d'un compte
+supprimé restent sur le disque, invisibles, jusqu'à l'effacement des données de
+l'organisation.
+
+**Gérer les comptes.** Dans *Paramètres → Mon compte*, chacun change son mot de passe (les
+autres sessions du compte sont fermées). Dans *Paramètres → Comptes*, le responsable réinitialise
+un mot de passe, débloque un compte, change un rôle ou supprime un compte de son organisation ;
+il ne peut ni se supprimer lui-même ni retirer le dernier responsable.
 
 Une installation neuve démarre **sans aucun compte**. L'écran de connexion le détecte
 (`GET /api/auth/etat`) et explique comment créer le premier. La création est volontairement
@@ -511,14 +564,26 @@ réservée au **service informatique**, en ligne de commande, sans formulaire d'
 | Exécutable | `ai-webapp.exe init` |
 | Sources | `python launch.py init` ou `python backend/manage_users.py init` |
 
+> **Ajouter un compte à une organisation existante** demande l'identifiant et le mot de passe
+> d'un compte de cette organisation (trois essais, même temporisation qu'à la connexion) : sans
+> cela, n'importe qui devant le poste pouvait s'y rattacher et lire ses conversations. Créer une
+> **nouvelle** organisation, ou le premier compte d'une organisation qui n'en a pas, reste
+> libre.
+
 Commandes détaillées (mêmes noms avec `ai-webapp.exe`, `python launch.py` ou
 `python backend/manage_users.py`) :
 
 ```bash
 init                                   # assistant : organisation + compte
 create-profile "Nom de l'organisation" # crée une organisation, affiche son identifiant
-create-user <identifiant> <id-du-profil>
+create-user <identifiant> <id-du-profil> [--role responsable|membre]
 list-profiles
+list-users [--profil <id-du-profil>]   # comptes, rôle, blocage
+change-password <identifiant>          # l'ancien mot de passe est demandé
+reset-password <identifiant>           # oubli : nouveau mot de passe sans l'ancien
+delete-user <identifiant>              # confirmation demandée
+unlock <identifiant>                   # après trop d'échecs de connexion
+set-role <identifiant> responsable|membre
 ```
 
 - Le mot de passe est **demandé au clavier, masqué et confirmé** (passé en argument, il
@@ -528,9 +593,12 @@ list-profiles
 - **Politique** : 8 caractères minimum et 3 types parmi minuscules, majuscules, chiffres,
   caractères spéciaux.
 - **Session** : cookie `olivia_session` (`HttpOnly`, `SameSite=Lax`), valable **8 h**.
-- **Suppression** : aucune commande à ce jour ; retirer l'entrée de `profiles/registry.json` /
-  `profiles/users.json` et le dossier `profiles/<profile_id>/`. Les sessions d'un compte
-  supprimé sont refusées dès la requête suivante.
+- **Suppression** : `delete-user`, ou *Paramètres → Comptes* pour le responsable. Les sessions
+  du compte sont fermées aussitôt. Le dernier responsable d'une organisation ne peut être ni
+  supprimé ni rétrogradé.
+- La ligne de commande est l'outil du service informatique : seule `change-password` demande
+  l'ancien mot de passe. Toute personne qui peut lancer Oliv'IA sous le compte Windows qui
+  détient les données peut donc gérer ses comptes.
 
 ---
 
@@ -620,6 +688,11 @@ conversation est enregistrée **à la fin de chaque réponse** (y compris après
 `profiles/<profile_id>/conversations/<id>.json`, écriture atomique. « ＋ Nouvelle
 conversation » ne crée d'entrée qu'une fois un échange fait.
 
+Les **documents joints** appartiennent à leur conversation : on les retrouve en y revenant, et
+ils ne suivent pas dans une autre. Seuls leur chemin et leur nom sont enregistrés, jamais leur
+contenu, qui est relu sur le disque à la réouverture. Un document supprimé ou dont le dossier a
+été retiré n'est plus rattaché, et l'interface le signale.
+
 Le HTML des réponses est assaini (DOMPurify) : une réponse nourrie par le web n'est pas du
 contenu de confiance ; les balises qui déclencheraient une requête réseau (`img`, `iframe`,
 `video`…) sont retirées.
@@ -658,6 +731,14 @@ Champ de recherche de l'onglet Documents, deux modes :
 Chaque résultat peut être **ajouté à la conversation** (plusieurs à la fois) ; Oliv'IA précise de
 quel document vient chaque information. Le contexte transmis est borné (**8 000 caractères**
 par document, **24 000** au total) et **toute coupe est signalée** (« ⚠️ tronqué »).
+
+L'index de la recherche par le sens ne perd rien quand un dossier de travail est absent (clé USB
+débranchée) ou quand on ne met à jour qu'un sous-dossier : seuls les fichiers réellement disparus
+d'un dossier parcouru en sont retirés.
+
+**Limites de l'aperçu** : un fichier texte n'est lu que sur ses 120 premiers Ko, un CSV sur ses
+2 premiers Mo ; un Word ou un Excel qui dépasserait 200 Mo une fois décompressé (ou 10 000
+éléments) n'est ni affiché ni indexé — il s'ouvre normalement dans Word ou Excel.
 
 ### 🎨 Tableau blanc (Excalidraw)
 
@@ -723,6 +804,9 @@ Oliv'IA cherche le moteur livré dans `tesseract/`, puis celui du `PATH`, puis l
 Ce chemin étant **exécuté**, il doit désigner un programme nommé `tesseract` (ou son dossier) :
 tout autre programme est refusé. **Sans moteur, rien ne casse** : les documents scannés restent
 consultables, ils ne sortent simplement pas dans les recherches.
+
+Un échec du moteur ou une reconnaissance coupée par le délai n'est **pas figé** : le document est
+retenté au bout de 15 minutes.
 
 ### 📄 Créer un document Word
 
@@ -838,17 +922,23 @@ inexistantes. Leurs clés restées dans un `settings.json` sont ignorées.
 
 ## 🔒 RGPD — vos données
 
-Tout reste **local**, sauf la recherche web quand elle est activée. *Paramètres →
+Tout reste **local**, sauf la recherche web et les mises à jour de l'application de bureau,
+quand elles sont activées (les deux sont désactivées par défaut). *Paramètres →
 Confidentialité* :
 
-- **Export** (`GET /api/privacy/export`) : toutes les données de l'organisation connectée en
-  JSON (réglages, conversations, tableaux blancs…). Les **secrets** (mot de passe IMAP, clé Brave, jeton Notion)
+- **Export** (`GET /api/privacy/export`) : pour un membre, ses conversations et tableaux blancs
+  (et les anciens, communs à l'organisation) ; pour le responsable, toutes les données de
+  l'organisation, liste des comptes comprise (champ `perimetre`). Réglages compris, en JSON. Les **secrets** (mot de passe IMAP, clé Brave, jeton Notion)
   y sont **masqués**, listés dans `secrets_masques` — un fichier téléchargé circule.
-- **Effacement** (`POST /api/privacy/delete`), pour l'organisation connectée seulement :
+- **Effacement** (`POST /api/privacy/delete`), réservé au responsable, pour l'organisation
+  connectée seulement :
   réinitialise les réglages (GPU/CPU re-détecté), supprime conversations, tableaux blancs et
   index de recherche par le sens, vide le dossier `_uploads` des dossiers de travail et retire du cache OCR le
-  texte de ses documents. Les autres documents ne sont pas touchés. L'effacement de l'index ne
-  peut pas être annulé par une construction en cours.
+  texte reconnu pour cette organisation — y compris pour un dossier retiré ou débranché avant
+  l'effacement ; un texte que partage une autre organisation reste pour elle. Le cache mémoire
+  de la recherche et les fichiers temporaires des conversations et tableaux sont aussi effacés.
+  Les autres documents ne sont pas touchés. L'effacement de l'index ne peut pas être annulé par
+  une construction en cours.
 - **Consentement** : bandeau informatif au premier lancement.
 - `GET` / `PUT /api/settings` ne renvoient jamais les secrets en clair.
 
@@ -898,6 +988,16 @@ Confidentialité* :
 - Un identifiant inconnu est traité **comme un vrai**, dans le même temps : ni la réponse ni le
   chronomètre ne révèlent quels comptes existent.
 - Sessions par jeton opaque (32 octets), 8 h ; compte supprimé → session refusée et supprimée.
+  Seule l'**empreinte SHA-256** du jeton est enregistrée (`sessions.json`) : lire ce fichier ne
+  permet pas de reprendre une session. Un fichier de sessions abîmé repart de zéro (tout le
+  monde se reconnecte) au lieu de bloquer l'application.
+- **Secrets** (mot de passe IMAP, jeton Notion, clé Brave) : sur un poste installé sous Windows,
+  chiffrés avec le compte Windows de la personne (DPAPI) dans `settings.json`. Sur la clé
+  portable, sous macOS et sous Linux, ils restent en clair, et les Paramètres l'indiquent. Des
+  réglages copiés vers un autre compte Windows ou un autre poste demandent de ressaisir ces
+  secrets. Ils ne sortent jamais en clair de l'API, et l'effacement des données les supprime.
+- Boîte mail (IMAP) : certificat du serveur **vérifié**, délai de 15 s, lecture seule — l'aperçu
+  ne marque aucun message comme lu.
 
 **HTTP**
 - Écoute sur `127.0.0.1` par défaut ; **CORS** limité au poste local.
@@ -915,20 +1015,21 @@ Toutes les routes exigent une session, sauf `POST /api/auth/login`, `GET /api/au
 
 | Domaine | Routes |
 |---|---|
-| Authentification | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/auth/etat` (y a-t-il au moins un compte ?) |
+| Authentification | `POST /api/auth/login` et `GET /api/auth/me` (renvoient `role` : `responsable` ou `membre`), `POST /api/auth/logout`, `GET /api/auth/etat` (y a-t-il au moins un compte ?), `POST /api/auth/mot-de-passe` (`{ancien, nouveau}`) |
+| Comptes (responsable) | `GET /api/comptes`, `POST /api/comptes/{id}/mot-de-passe` (`{nouveau}`), `POST /api/comptes/{id}/debloquer`, `PUT /api/comptes/{id}/role` (`{role}`), `DELETE /api/comptes/{id}` |
 | Modèles et chat | `GET /api/models`, `GET /api/moteur/etat` (Ollama joignable ? modèles nécessaires installés ? progression des téléchargements), `POST /api/moteur/telecharger` (`{modele}` : seulement un modèle attendu par Oliv'IA), `POST /api/chat/stream` (SSE), `POST /api/chat` |
 | Fichiers | `GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/preview`, `GET /api/fs/text`, `GET /api/fs/download`, `POST /api/fs/upload` |
-| Choix des dossiers | `GET /api/fs/drives`, `GET /api/fs/browse` |
+| Choix des dossiers (responsable) | `GET /api/fs/drives`, `GET /api/fs/browse` |
 | Recherche documentaire | `GET /api/fs/search` (mots-clés), `GET /api/fs/search/semantic` (par le sens) |
 | Index par le sens | `GET /api/docindex/status`, `POST /api/docindex/build`, `POST /api/docindex/cancel` |
-| Réglages | `GET /api/settings`, `PUT /api/settings` |
+| Réglages | `GET /api/settings` (avec `etat_secrets` : secrets chiffrés sur ce poste ? à ressaisir ?), `PUT /api/settings` (réglages d'organisation réservés au responsable) |
 | OCR | `GET /api/ocr/status` |
-| Documents Word | `GET /api/documents/status`, `POST /api/documents/modele`, `POST /api/documents/generate` |
+| Documents Word | `GET /api/documents/status`, `POST /api/documents/modele` (responsable), `POST /api/documents/generate` |
 | Recherche web | `POST /api/search` (`{query, limit}`) |
-| Conversations | `GET /api/conversations`, `GET`/`PUT`/`DELETE /api/conversations/{id}`, `POST /api/conversations` |
+| Conversations | `GET /api/conversations`, `GET`/`PUT`/`DELETE /api/conversations/{id}`, `POST /api/conversations` (champ `documents` : jusqu'à 10 `{path, name}`, sans contenu ; absent au `PUT` = inchangé) |
 | Tableaux blancs | `GET /api/tableaux`, `POST /api/tableaux` (`{titre, scene}`), `GET`/`PUT`/`DELETE /api/tableaux/{id}` (`PUT` : `{titre}` et/ou `{scene}`) |
 | Connecteurs | `GET /api/connectors/status`, `GET /api/connectors/mail/unread`, `GET /api/connectors/imap/preview`, `GET /api/connectors/calendar/preview` |
-| RGPD | `GET /api/privacy/export`, `POST /api/privacy/delete` |
+| RGPD | `GET /api/privacy/export`, `POST /api/privacy/delete` (responsable) |
 | Service | `GET /api/health` (état, version, adresse d'Ollama), `GET /` (redirige vers `/ui/`, ou `/docs` sans interface buildée) |
 
 ---
@@ -1010,7 +1111,7 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
   testée **sous Linux** (même code que macOS : backend embarqué, connexion, arrêt du backend en
   moins d'une seconde à la fermeture comme après un plantage, navigation externe bloquée). Pas
   encore vérifiés sur de vrais postes : installeurs, premier lancement non signé sur macOS,
-  droits de `C:\ProgramData\Olivia`, icônes, raccourci global, mise à jour automatique. Le
+  reprise de l'ancien dossier `C:\ProgramData\Olivia` vers le profil du compte Windows, icônes, raccourci global, mise à jour automatique. Le
   workflow « Application de bureau » n'a pas encore été exécuté.
 - **Mode 🪶 Léger** : `qwen2.5:1.5b` n'a **pas** été passé au prompt de référence qui a servi à
   choisir les deux autres modèles (Ollama injoignable depuis l'environnement où il a été
@@ -1101,7 +1202,7 @@ Olivia/
 │   ├── scripts/preparer.mjs ← copie du backend compilé avant empaquetage
 │   ├── scripts/embarquer_ollama.py ← télécharge et vérifie le moteur Ollama embarqué
 │   ├── licences/          ← licence d'Ollama (MIT), livrée avec le moteur
-│   ├── build/             ← icon.png (macOS), icon.ico (Windows), installer.nsh (droits sur ProgramData\Olivia)
+│   ├── build/             ← icon.png (macOS), icon.ico (Windows), installer.nsh (dossier commun des modèles d'IA)
 │   ├── icons/             ← icônes de fenêtre et de barre des menus
 │   └── test/outils.test.js
 ├── backend/

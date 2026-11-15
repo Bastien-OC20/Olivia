@@ -6,6 +6,10 @@ import {
   sujetCommandeTableau, messagesTableau,
   analyserSchema, schemaExploitable, titreTableau, versMermaid, sceneDepuisMermaid,
 } from '../tableauIA.js'
+import {
+  DOC_MAX, reponseApplicable, idAAppliquerApresEnregistrement, normaliserDocuments,
+  documentsPourEnvoi, documentDepuisTexte, avisDocumentsIndisponibles, fusionnerDocuments,
+} from '../conversationDocs.js'
 
 // Recherche web : nombre de résultats injectés et longueur max de la requête
 // envoyée au moteur (une demande de chat peut être un paragraphe entier).
@@ -34,7 +38,6 @@ const MESSAGE_OLIVIA_INJOIGNABLE = (typeof window !== 'undefined' && window.oliv
 // ce qui est injecté, par document ET au total. Quand un document est coupé,
 // l'interface DOIT le dire (voir `fileContextPlan`) — Olivia ne doit jamais
 // répondre sur un extrait partiel sans que cela se voie.
-const DOC_MAX = 10                 // nombre de documents dans la conversation
 const DOC_CHARS_MAX = 8000         // par document (un seul document : inchangé)
 const DOC_CHARS_TOTAL = 24000      // budget global, tous documents confondus
 const DOC_CHARS_MIN = 1200         // part plancher pour qu'un document reste utile
@@ -131,17 +134,20 @@ export const useChatStore = defineStore('chat', () => {
     }
     fileContexts.value.push(doc)
     fileContextNotice.value = ''
+    enregistrerDocuments()
     return true
   }
 
   function removeFileContext(path) {
     fileContexts.value = fileContexts.value.filter((d) => d.path !== path)
     fileContextNotice.value = ''
+    enregistrerDocuments()
   }
 
   function clearFileContexts() {
     fileContexts.value = []
     fileContextNotice.value = ''
+    enregistrerDocuments()
   }
 
   // Historique des conversations (persistées côté backend).
@@ -150,6 +156,30 @@ export const useChatStore = defineStore('chat', () => {
   // Vrai si le backend ne sait pas gérer l'historique : l'interface le signale
   // sans se casser (les routes peuvent être absentes d'une ancienne version).
   const historyUnavailable = ref(false)
+
+  // Contexte = une « visite » d'une conversation (ouverte, ou nouvelle). Un nouveau
+  // contexte est créé à chaque ouverture ou nouvelle conversation. Tout ce qui est
+  // asynchrone (enregistrement, rechargement des documents) garde le contexte qui
+  // l'a lancé et ne touche l'écran que si c'est encore le contexte actif : sinon la
+  // réponse tardive d'une conversation A venait écraser la conversation B affichée.
+  //   id       : identifiant de la conversation enregistrée (null si jamais enregistrée)
+  //   messages : tableau des messages de CETTE conversation (reste valable hors écran)
+  //   docs     : documents joints, figés quand on quitte le contexte
+  let contexte = { id: null, messages: messages.value, docs: null }
+  // Jeton de la dernière ouverture demandée : deux clics rapides, seule la dernière compte.
+  let demandeOuverture = {}
+
+  function docsDe(ctx) { return ctx === contexte ? fileContexts.value : (ctx.docs || []) }
+
+  /** Bascule l'affichage sur une autre conversation (ou une vierge). */
+  function changerContexte(id, msgs, docs) {
+    contexte.docs = fileContexts.value
+    messages.value = msgs
+    fileContexts.value = docs
+    fileContextNotice.value = ''
+    currentId.value = id
+    contexte = { id, messages: messages.value, docs: null }
+  }
 
   /**
    * `recommandes` : noms de modèles déjà triés par pertinence pour l'appareil
@@ -223,35 +253,64 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** Contenu d'un document joint, rechargé depuis le disque (jamais stocké avec la
+   *  conversation). Même objet que celui que FileExplorer.vue passe à addFileContext. */
+  async function chargerDocument(d) {
+    const r = await fetch(`/api/fs/text?path=${encodeURIComponent(d.path)}`)
+    const data = await r.json().catch(() => null)
+    if (!r.ok) throw new Error(data?.detail || `HTTP ${r.status}`)
+    return documentDepuisTexte(d.path, d.name, data)
+  }
+
+  /** Recharge les documents d'une conversation ouverte. Un document devenu illisible
+   *  (supprimé, dossier retiré) n'est pas rattaché, et l'utilisatrice en est prévenue. */
+  async function rechargerDocuments(ctx, liste) {
+    const resultats = await Promise.all(liste.map(async (d) => {
+      try { return { doc: await chargerDocument(d) } } catch { return { nom: d.name } }
+    }))
+    if (ctx !== contexte) return        // on a changé de conversation entre-temps
+    const recharges = resultats.filter((r) => r.doc).map((r) => r.doc)
+    fileContexts.value = fusionnerDocuments(fileContexts.value, recharges)
+    fileContextNotice.value = avisDocumentsIndisponibles(
+      resultats.filter((r) => !r.doc).map((r) => r.nom))
+  }
+
   async function openConversation(id) {
     if (isStreaming.value) stop()
+    const jeton = {}
+    demandeOuverture = jeton
     try {
       const r = await fetch(`/api/conversations/${encodeURIComponent(id)}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data = await r.json()
-      messages.value = (data.messages || []).map((m) => ({
+      // Un clic plus récent (autre conversation, ou « Nouvelle ») a pris la main.
+      if (!reponseApplicable(jeton, demandeOuverture)) return
+      if (isStreaming.value) stop()
+      changerContexte(data.id ?? id, (data.messages || []).map((m) => ({
         role: m.role,
         content: m.content || '',
         sources: m.sources || [],
         searchNote: m.searchNote || '',
         erreur: m.erreur || '',
         ...(m.tableau ? { tableau: m.tableau } : {}),
-      }))
-      currentId.value = data.id ?? id
+      })), [])
       historyUnavailable.value = false
+      const aRecharger = normaliserDocuments(data.documents)
+      if (aRecharger.length) await rechargerDocuments(contexte, aRecharger)
     } catch (e) {
+      if (!reponseApplicable(jeton, demandeOuverture)) return
       historyUnavailable.value = true
       console.warn('Ouverture de la conversation impossible :', e.message)
     }
   }
 
-  /** Repart d'une conversation vierge. Rien n'est envoyé au backend tant que
-   *  le premier échange n'est pas terminé : une conversation vide ne crée
-   *  aucune entrée dans l'historique. */
+  /** Repart d'une conversation vierge, sans document joint. Rien n'est envoyé au
+   *  backend tant que le premier échange n'est pas terminé : une conversation vide
+   *  ne crée aucune entrée dans l'historique. */
   function newConversation() {
     if (isStreaming.value) stop()
-    messages.value = []
-    currentId.value = null
+    demandeOuverture = {}              // annule une ouverture encore en attente
+    changerContexte(null, [], [])
   }
 
   async function renameConversation(id, titre) {
@@ -287,52 +346,85 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /** Sauvegarde de la conversation courante. Appelée UNIQUEMENT à la fin du
-   *  streaming (ou quand l'utilisatrice interrompt) — jamais à chaque token. */
-  async function persist() {
-    if (!messages.value.length) return
-    const body = { messages: serialize(messages.value) }
-    try {
-      let r
-      if (currentId.value) {
-        r = await fetch(`/api/conversations/${encodeURIComponent(currentId.value)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-      } else {
-        body.title = deriveTitle(messages.value)
-        r = await fetch('/api/conversations', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
+  // Les écritures partent l'une après l'autre : deux enregistrements d'une conversation
+  // neuve ne créent pas deux entrées, et un envoi tardif n'écrase pas un plus récent.
+  let fileEcriture = Promise.resolve()
+  function enfiler(tache) {
+    const suite = fileEcriture.then(tache, tache)
+    fileEcriture = suite.catch(() => {})
+    return suite
+  }
+
+  /** Écrit la conversation `ctx` (messages et documents joints). Le contenu des
+   *  documents n'est jamais envoyé, seulement leur chemin et leur nom. */
+  function ecrire(ctx, avecMessages) {
+    return enfiler(async () => {
+      const msgs = ctx.messages || []
+      if (avecMessages && !msgs.length) return
+      const body = { documents: documentsPourEnvoi(docsDe(ctx)) }
+      if (avecMessages) body.messages = serialize(msgs)
+      try {
+        let r
+        if (ctx.id) {
+          r = await fetch(`/api/conversations/${encodeURIComponent(ctx.id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        } else {
+          if (!avecMessages) return        // rien à enregistrer pour l'instant
+          body.title = deriveTitle(msgs)
+          r = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const data = await r.json().catch(() => null)
+        // Création : l'identifiant revient à CETTE conversation, qu'elle soit encore
+        // à l'écran ou non ; l'affichage n'est touché que si elle y est toujours.
+        if (!ctx.id && data?.id) ctx.id = data.id
+        const aAppliquer = idAAppliquerApresEnregistrement(ctx, contexte, ctx.id)
+        if (aAppliquer) currentId.value = aAppliquer
+        historyUnavailable.value = false
+        if (avecMessages) await loadConversations()
+      } catch (e) {
+        historyUnavailable.value = true
+        console.warn('Sauvegarde de la conversation impossible :', e.message)
       }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data = await r.json().catch(() => null)
-      if (data?.id) currentId.value = data.id
-      historyUnavailable.value = false
-      await loadConversations()
-    } catch (e) {
-      historyUnavailable.value = true
-      console.warn('Sauvegarde de la conversation impossible :', e.message)
-    }
+    })
+  }
+
+  /** Sauvegarde d'une conversation (par défaut la courante). Appelée UNIQUEMENT à la
+   *  fin du streaming (ou quand l'utilisatrice interrompt) — jamais à chaque token.
+   *  `ctx` est capturé au départ de l'échange : la fin d'une réponse de A ne doit
+   *  jamais enregistrer ce qui est affiché pour B. */
+  function persist(ctx = contexte) { return ecrire(ctx, true) }
+
+  /** Documents joints ajoutés ou retirés dans une conversation DÉJÀ enregistrée :
+   *  enregistrés tout de suite, pour ne rien perdre si l'on change de conversation
+   *  avant le prochain message. Sans identifiant, ils partent avec le premier échange. */
+  function enregistrerDocuments() {
+    if (contexte.id) ecrire(contexte, false)
   }
 
   async function send(userMessage, useWebSearch = false) {
     if (isStreaming.value) return
+    const ctx = contexte
     // Aucun modèle choisi : le plus souvent, Ollama était éteint au chargement
     // de la page. Il a pu démarrer depuis, on retente une fois. Auparavant,
     // l'envoi était abandonné en silence — et la zone de saisie déjà vidée :
     // le message tapé disparaissait sans réponse ni explication.
     if (!currentModel.value) await loadModels()
+    if (ctx !== contexte || isStreaming.value) return   // l'écran a changé pendant l'attente
     if (!currentModel.value) {
       messages.value.push({ role: 'user', content: userMessage })
       messages.value.push({
         role: 'assistant', content: '', sources: [], searchNote: '',
         erreur: modelsErreur.value || MESSAGE_MOTEUR_ETEINT,
       })
-      await persist()
+      await persist(ctx)
       return
     }
     messages.value.push({ role: 'user', content: userMessage })
@@ -378,7 +470,7 @@ export const useChatStore = defineStore('chat', () => {
     if (plan.length) {
       ollamaMessages.push({ role: 'user', content: withDocuments(plan) })
     }
-    for (const m of messages.value) {
+    for (const m of ctx.messages) {
       if (m === assistantMsg) continue
       // Un tour d'Olivia sans texte est une réponse en échec (son erreur vit à
       // part, dans `erreur`) : l'envoyer au modèle comme une réponse vide ne
@@ -469,7 +561,7 @@ export const useChatStore = defineStore('chat', () => {
       // besoin (sans effet si le moteur va bien : l'erreur venait d'ailleurs).
       if (assistantMsg.erreur && !assistantMsg.content) useMoteurStore().signalerPanne()
       // Sauvegarde en fin de streaming, y compris après un « Stop ».
-      await persist()
+      await persist(ctx)
     }
   }
 
@@ -491,6 +583,7 @@ export const useChatStore = defineStore('chat', () => {
    */
   async function creerTableau(userMessage) {
     if (isStreaming.value) return
+    const ctx = contexte
     const sujet = sujetCommandeTableau(userMessage)
     if (sujet === null) return
     const texteSaisi = userMessage.trim()
@@ -500,17 +593,18 @@ export const useChatStore = defineStore('chat', () => {
       messages.value.push({
         role: 'assistant', content: AIDE_TABLEAU, sources: [], searchNote: '', erreur: '',
       })
-      await persist()
+      await persist(ctx)
       return
     }
     if (!currentModel.value) await loadModels()
+    if (ctx !== contexte || isStreaming.value) return   // l'écran a changé pendant l'attente
     if (!currentModel.value) {
       messages.value.push({ role: 'user', content: texteSaisi })
       messages.value.push({
         role: 'assistant', content: '', sources: [], searchNote: '',
         erreur: modelsErreur.value || MESSAGE_MOTEUR_ETEINT,
       })
-      await persist()
+      await persist(ctx)
       return
     }
 
@@ -529,7 +623,7 @@ export const useChatStore = defineStore('chat', () => {
     const base = []
     const plan = fileContextPlan.value
     if (plan.length) base.push({ role: 'user', content: withDocuments(plan) })
-    for (const m of messages.value.slice(0, -2)) {
+    for (const m of ctx.messages.slice(0, -2)) {
       if (m.tableau || (m.role === 'user' && sujetCommandeTableau(m.content) !== null)) continue
       if (m.role === 'assistant' && !(m.content || '').trim()) continue
       base.push({ role: m.role, content: m.content })
@@ -597,9 +691,10 @@ export const useChatStore = defineStore('chat', () => {
       // Sauvegarde AVANT d'ouvrir le tableau : à la première sauvegarde d'une
       // conversation neuve, `currentId` change et App.vue ferme alors tout tableau
       // ouvert (watch sur chat.currentId).
-      await persist()
+      await persist(ctx)
     }
-    if (aOuvrir) {
+    // Pas d'ouverture si l'utilisatrice a changé de conversation pendant ce temps.
+    if (aOuvrir && ctx === contexte) {
       await nextTick()
       try {
         await useTableauxStore().ouvrir(aOuvrir)

@@ -478,8 +478,43 @@ def _retirer(index, meta: dict, cle: str) -> None:
 
 
 # ---------- Construction de l'index ----------
+def _sous_un_dossier(cle: str, dossiers: list[Path]) -> bool:
+    """Le fichier indexé sous `cle` (chemin résolu) est-il dans l'un des dossiers ?"""
+    try:
+        chemin = Path(cle)
+    except (TypeError, ValueError):
+        return False
+    for dossier in dossiers:
+        try:
+            if chemin.is_relative_to(dossier):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _dossiers_purgeables(dossiers_balayes) -> list[Path]:
+    """Dossiers balayés sous lesquels un fichier non vu peut être retiré.
+
+    Un dossier qui n'existe plus à la FIN du balayage en est écarté : une clé USB
+    débranchée pendant l'indexation fait remonter un parcours vide (os.walk
+    ignore l'erreur en silence), qui n'est pas la preuve que ses documents ont
+    été supprimés.
+    """
+    retenus: list[Path] = []
+    for dossier in dossiers_balayes or []:
+        try:
+            chemin = Path(dossier)
+            if chemin.is_dir():
+                retenus.append(chemin)
+        except (OSError, TypeError, ValueError):
+            continue
+    return retenus
+
+
 def construire_index(profile_id: str, fichiers,
-                     on_progress: Optional[Callable[[dict], None]] = None) -> dict:
+                     on_progress: Optional[Callable[[dict], None]] = None,
+                     dossiers_balayes: Optional[list] = None) -> dict:
     """Construit ou met à jour l'index de CETTE organisation. BLOQUANTE : à
     appeler dans un thread.
 
@@ -487,6 +522,15 @@ def construire_index(profile_id: str, fichiers,
     même contrat que `main._iter_searchable_files`. C'est l'appelant qui l'a
     construit à partir des `fs_roots` du même profil : ce module ne voit donc
     jamais les documents d'une autre organisation.
+
+    `dossiers_balayes` : dossiers (chemins RÉSOLUS) effectivement parcourus pour
+    produire `fichiers`. Seuls les fichiers indexés SOUS ces dossiers peuvent être
+    retirés de l'index faute d'avoir été revus. Sans cette liste, la purge
+    retirait tout fichier non vu : un balayage partiel (un sous-dossier, ou une
+    racine absente parce que la clé USB est débranchée et que
+    `main.get_fs_root_entries` la saute) effaçait les extraits de tout le reste,
+    qu'il fallait ensuite revectoriser, ce qui est lent. None : étendue
+    inconnue, rien n'est purgé.
 
     Incrémentale : un fichier dont la date de modification et la taille n'ont
     pas bougé n'est pas revectorisé. Réindexer un dossier entier après l'ajout
@@ -544,8 +588,10 @@ def construire_index(profile_id: str, fichiers,
             examines += 1
             vus.add(cle)
             ancien = meta["files"].get(cle)
+            # Un texte incomplet (OCR interrompu ou impossible) est retenté à
+            # chaque construction, même si le fichier n'a pas changé.
             if isinstance(ancien, dict) and ancien.get("mtime_ns") == st.st_mtime_ns \
-                    and ancien.get("size") == st.st_size:
+                    and ancien.get("size") == st.st_size and ancien.get("complet", True):
                 continue
             traite, premier_appel = _indexer_fichier(profile_id, index, meta, chemin,
                                                      cle, st, client, premier_appel)
@@ -566,8 +612,12 @@ def construire_index(profile_id: str, fichiers,
     # Purge des fichiers disparus — UNIQUEMENT si le balayage est allé au bout.
     # Interrompu (annulation ou borne atteinte), il n'a pas vu tout le corpus :
     # purger sur cette base effacerait des documents parfaitement présents.
+    # Et seulement SOUS les dossiers balayés (voir `dossiers_balayes`) : un
+    # dossier non parcouru n'est pas un dossier vide.
     if not resume["annule"] and not resume["tronque"]:
-        for cle in [c for c in meta["files"] if c not in vus]:
+        purgeables = _dossiers_purgeables(dossiers_balayes)
+        for cle in [c for c in meta["files"]
+                    if c not in vus and _sous_un_dossier(c, purgeables)]:
             _retirer(index, meta, cle)
             modifie = True
 
@@ -593,6 +643,10 @@ def _indexer_fichier(profile_id: str, index, meta: dict, chemin: Path, cle: str,
     except Exception:
         return None, premier_appel
     extraits = _decouper(texte)
+    if not extraits and not (provenance or {}).get("complet", True):
+        # Lecture en échec (fichier verrouillé, OCR impossible) : ce n'est pas un
+        # document vide, l'éventuelle version déjà indexée est gardée.
+        return None, premier_appel
     if not extraits:
         # Document vide ou illisible : on retire une éventuelle version
         # précédente, sans quoi l'index garderait un contenu périmé.
@@ -624,6 +678,7 @@ def _indexer_fichier(profile_id: str, index, meta: dict, chemin: Path, cle: str,
         "mtime_ns": st.st_mtime_ns,
         "size": st.st_size,
         "ocr": bool((provenance or {}).get("ocr")),
+        "complet": bool((provenance or {}).get("complet", True)),
         "chunk_ids": identifiants,
     }
     for ordre, (identifiant, extrait) in enumerate(zip(identifiants, extraits)):
@@ -632,7 +687,7 @@ def _indexer_fichier(profile_id: str, index, meta: dict, chemin: Path, cle: str,
 
 
 # ---------- Pilotage de la construction en tâche de fond ----------
-def _construire_en_thread(profile_id: str, fichiers) -> None:
+def _construire_en_thread(profile_id: str, fichiers, dossiers_balayes=None) -> None:
     """Corps du thread de construction d'UNE organisation.
 
     `fichiers` est encore un GÉNÉRATEUR : le matérialiser coûte quelques
@@ -650,7 +705,8 @@ def _construire_en_thread(profile_id: str, fichiers) -> None:
                      fichier=str(etape.get("fichier") or ""))
 
     try:
-        construire_index(profile_id, fichiers, on_progress=noter)
+        construire_index(profile_id, fichiers, on_progress=noter,
+                         dossiers_balayes=dossiers_balayes)
     except Exception as e:
         _maj_progres(profile_id, erreur=f"{type(e).__name__} : {e}")
     finally:
@@ -658,13 +714,16 @@ def _construire_en_thread(profile_id: str, fichiers) -> None:
         _verrou_construction(profile_id).release()
 
 
-def lancer_construction(profile_id: str, fichiers) -> bool:
+def lancer_construction(profile_id: str, fichiers,
+                        dossiers_balayes: Optional[list] = None) -> bool:
     """Démarre un thread démon si aucune construction n'est en cours POUR CETTE
     organisation.
 
     Renvoie False sans rien faire si une construction tourne déjà pour elle :
     deux constructions simultanées écriraient le même index. Une autre
     organisation, elle, n'est pas bloquée — elle a son propre verrou.
+
+    `dossiers_balayes` : voir `construire_index` (sans elle, rien n'est purgé).
     """
     if not FAISS_DISPONIBLE:
         return False
@@ -674,7 +733,8 @@ def lancer_construction(profile_id: str, fichiers) -> bool:
     _annulation(profile_id).clear()
     _maj_progres(profile_id, en_cours=True, fait=0, total=0, fichier="", erreur="")
     try:
-        threading.Thread(target=_construire_en_thread, args=(profile_id, fichiers),
+        threading.Thread(target=_construire_en_thread,
+                         args=(profile_id, fichiers, dossiers_balayes),
                          daemon=True).start()
     except Exception as e:
         _maj_progres(profile_id, en_cours=False, erreur=f"{type(e).__name__} : {e}")

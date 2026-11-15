@@ -4,7 +4,7 @@
  *
  *   - dist/ai-webapp/   backend + interface compilés par PyInstaller (OBLIGATOIRE ;
  *                       build.spec, lancé depuis la racine du dépôt) ;
- *   - ollama/           moteur d'IA portable + modèles   (facultatif) ;
+ *   - ollama/           moteur d'IA portable, SANS son dossier models/ (facultatif) ;
  *   - tesseract/        moteur OCR portable              (facultatif) ;
  *   - modeles/          modèle Word commun               (facultatif).
  *
@@ -17,7 +17,11 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+
+// lib/outils.js est un module CommonJS (partagé avec main.js et ses tests).
+const { copierSaufModeles } = createRequire(import.meta.url)('../lib/outils.js')
 
 const ici = path.dirname(fileURLToPath(import.meta.url))
 const depot = path.resolve(ici, '..', '..')
@@ -54,7 +58,18 @@ for (const { dossier, temoin, role } of facultatifs) {
     console.log(`– ${dossier.padEnd(12)}  ignoré : pas de ${temoin} pour ce système (${role} non embarqué)`)
     continue
   }
-  fs.cpSync(source, path.join(cible, dossier), { recursive: true, verbatimSymlinks: true })
+  const options = { recursive: true, verbatimSymlinks: true }
+  let modelesIgnores = false
+  if (dossier === 'ollama') {
+    // Les modèles ne partent pas dans l'installeur (voir outils.copierSaufModeles).
+    modelesIgnores = fs.readdirSync(source).some((nom) => nom.toLowerCase() === 'models')
+    options.filter = (chemin) => copierSaufModeles(source, chemin)
+  }
+  fs.cpSync(source, path.join(cible, dossier), options)
   console.log(`✓ ${dossier.padEnd(12)}  ${source}`)
+  if (modelesIgnores) {
+    console.log(`  ${''.padEnd(12)}  dossier « models » ignoré : les modèles d'IA ne sont pas embarqués`
+      + ' (téléchargés au premier lancement)')
+  }
 }
 console.log(`Ressources prêtes : ${cible}`)

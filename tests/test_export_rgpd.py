@@ -85,3 +85,12 @@ def test_le_secret_reste_utilisable_par_l_application(client):
     client.get("/api/privacy/export")
     pid = users.get_user_by_username("marie")["profile_id"]
     assert settings.reglages(pid).get()["connectors"]["imap"]["password"] == SECRETS[0]
+
+
+def test_l_export_contient_les_documents_joints(client):
+    # Lot 2 : chaque conversation garde la référence de ses documents joints
+    # (chemin et nom, jamais le contenu) ; c'est une donnée de l'organisation.
+    docs = [{"path": "r0/conseil.docx", "name": "conseil.docx"}]
+    client.post("/api/conversations", json={"messages": [], "documents": docs})
+    export = client.get("/api/privacy/export").json()
+    assert export["conversations"][0]["documents"] == docs

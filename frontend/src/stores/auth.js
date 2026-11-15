@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { estResponsable as estResponsableRole } from '../roles.js'
 
 export const useAuthStore = defineStore('auth', () => {
   // `null` tant que le serveur n'a pas répondu : l'interface ne doit afficher NI
@@ -90,5 +91,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { connecte, identite, avis, verifier, connexion, deconnexion, surveillerExpiration }
+  // Rôle du compte connecté (« responsable » ou « membre »). Un compte dont le
+  // rôle est inconnu est traité comme un membre : mieux vaut masquer à tort une
+  // option que montrer à une personne ce que le serveur lui refusera. Simple
+  // confort d'affichage : le serveur vérifie lui-même chaque route réservée.
+  const role = computed(() => identite.value?.role || null)
+  const estResponsable = computed(() => estResponsableRole(role.value))
+
+  return { connecte, identite, avis, role, estResponsable, verifier, connexion, deconnexion, surveillerExpiration }
 })

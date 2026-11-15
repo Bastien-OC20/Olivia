@@ -56,6 +56,17 @@
         {{ chat.fileContextNotice }}
       </p>
     </div>
+    <!-- Aucun document rattaché (tous devenus illisibles) : le bandeau est absent,
+         mais l'avis doit rester visible. -->
+    <div
+      v-else-if="chat.fileContextNotice"
+      class="file-banner"
+      role="status"
+    >
+      <p class="file-warn">
+        {{ chat.fileContextNotice }}
+      </p>
+    </div>
 
     <div
       ref="messagesEl"

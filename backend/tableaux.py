@@ -16,6 +16,13 @@ données, et chaque sauvegarde automatique avec.
 
 Ce sont des données de l'organisation : incluses dans l'export RGPD et
 supprimées par l'effacement (voir main.privacy_export / privacy_delete).
+
+PRIVÉS PAR COMPTE (lot 4), même règle que conversations.py : un tableau créé
+par un compte (y compris par la commande /tableau d'une conversation) porte son
+`proprietaire` et n'est visible que de lui ; un tableau d'avant les comptes
+privés, sans propriétaire, reste commun à l'organisation et le reste après
+modification. `pour_compte` None = vue d'organisation (export du responsable,
+effacement).
 """
 import json
 import time
@@ -73,6 +80,13 @@ def _scene_valide(scene) -> dict:
     return scene
 
 
+def _visible(donnees, pour_compte: str | None) -> bool:
+    if pour_compte is None:
+        return True
+    proprietaire = donnees.get("proprietaire") if isinstance(donnees, dict) else None
+    return not proprietaire or proprietaire == pour_compte
+
+
 def _enregistrer(profile_id: str, donnees: dict) -> None:
     dossier = _dossier(profile_id)
     dossier.mkdir(parents=True, exist_ok=True)
@@ -83,9 +97,9 @@ def _enregistrer(profile_id: str, donnees: dict) -> None:
     tmp.replace(chemin)
 
 
-def lister(profile_id: str) -> list[dict]:
-    """Métadonnées des tableaux de CETTE organisation, du plus récent au plus
-    ancien. Un fichier illisible est ignoré."""
+def lister(profile_id: str, pour_compte: str | None = None) -> list[dict]:
+    """Métadonnées des tableaux de CETTE organisation visibles de `pour_compte`,
+    du plus récent au plus ancien. Un fichier illisible est ignoré."""
     dossier = _dossier(profile_id)
     with _lock:
         if not dossier.exists():
@@ -97,6 +111,8 @@ def lister(profile_id: str) -> list[dict]:
             try:
                 with open(f, encoding="utf-8") as fh:
                     d = json.load(fh)
+                if not _visible(d, pour_compte):
+                    continue
                 elements = d.get("scene", {}).get("elements", [])
                 resultats.append({
                     "id": d["id"],
@@ -111,8 +127,9 @@ def lister(profile_id: str) -> list[dict]:
         return resultats
 
 
-def lire(profile_id: str, tableau_id: str) -> dict | None:
-    """Tableau complet, ou None (absent, invalide, ou d'une autre organisation)."""
+def lire(profile_id: str, tableau_id: str, pour_compte: str | None = None) -> dict | None:
+    """Tableau complet, ou None (absent, invalide, d'une autre organisation ou
+    d'un autre compte)."""
     if not _est_id_valide(tableau_id):
         return None
     with _lock:
@@ -121,12 +138,13 @@ def lire(profile_id: str, tableau_id: str) -> dict | None:
             return None
         try:
             with open(chemin, encoding="utf-8") as f:
-                return json.load(f)
+                donnees = json.load(f)
         except Exception:
             return None
+        return donnees if _visible(donnees, pour_compte) else None
 
 
-def creer(profile_id: str, titre=None, scene=None) -> dict:
+def creer(profile_id: str, titre=None, scene=None, proprietaire: str | None = None) -> dict:
     scene = _scene_valide(scene)
     with _lock:
         maintenant = time.time()
@@ -137,16 +155,20 @@ def creer(profile_id: str, titre=None, scene=None) -> dict:
             "modifie_le": maintenant,
             "scene": scene,
         }
+        if proprietaire:
+            donnees["proprietaire"] = proprietaire
         _enregistrer(profile_id, donnees)
         return donnees
 
 
-def modifier(profile_id: str, tableau_id: str, titre=None, scene=None) -> dict | None:
-    """Met à jour le titre et/ou la scène. None si le tableau n'existe pas."""
+def modifier(profile_id: str, tableau_id: str, titre=None, scene=None,
+             pour_compte: str | None = None) -> dict | None:
+    """Met à jour le titre et/ou la scène. None si le tableau n'existe pas (ou
+    n'est pas visible de `pour_compte`). Le propriétaire n'est jamais touché."""
     if scene is not None:
         scene = _scene_valide(scene)
     with _lock:
-        donnees = lire(profile_id, tableau_id)
+        donnees = lire(profile_id, tableau_id, pour_compte)
         if donnees is None:
             return None
         if titre is not None:
@@ -158,19 +180,27 @@ def modifier(profile_id: str, tableau_id: str, titre=None, scene=None) -> dict |
         return donnees
 
 
-def supprimer(profile_id: str, tableau_id: str) -> bool:
+def supprimer(profile_id: str, tableau_id: str, pour_compte: str | None = None) -> bool:
     if not _est_id_valide(tableau_id):
         return False
     with _lock:
         chemin = _chemin(profile_id, tableau_id)
         if not chemin.exists():
             return False
+        # Illisible avec un compte désigné : propriétaire inconnu, on n'y touche pas.
+        if pour_compte is not None and lire(profile_id, tableau_id, pour_compte) is None:
+            return False
         chemin.unlink()
         return True
 
 
 def supprimer_tout(profile_id: str) -> int:
-    """RGPD : supprime les tableaux de CETTE organisation seulement."""
+    """RGPD : supprime les tableaux de CETTE organisation seulement.
+
+    Les `.tmp` aussi : un plantage pendant une écriture (fichier .tmp puis
+    remplacement) laisse une copie complète d'un tableau, qui survivait à
+    l'effacement. Rien d'autre n'est touché. Seuls les `.json` sont comptés.
+    """
     dossier = _dossier(profile_id)
     with _lock:
         if not dossier.exists():
@@ -182,10 +212,17 @@ def supprimer_tout(profile_id: str) -> int:
                 n += 1
             except OSError:
                 pass
+        for f in dossier.glob("*.tmp"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
         return n
 
 
-def exporter_tout(profile_id: str) -> list[dict]:
-    """RGPD : tableaux complets de CETTE organisation, pour l'export."""
+def exporter_tout(profile_id: str, pour_compte: str | None = None) -> list[dict]:
+    """RGPD : tableaux complets de CETTE organisation, pour l'export ; seulement
+    ceux que `pour_compte` voit s'il est donné (export d'un membre)."""
     with _lock:
-        return [d for d in (lire(profile_id, t["id"]) for t in lister(profile_id)) if d]
+        return [d for d in (lire(profile_id, t["id"], pour_compte)
+                            for t in lister(profile_id, pour_compte)) if d]

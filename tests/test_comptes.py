@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import main, manage_users, profiles, sessions, settings, users
+from backend import main, manage_users, profiles, sessions, settings, tentatives, users
 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE))
@@ -96,13 +96,77 @@ def test_init_abandon_ne_laisse_aucune_organisation_vide(stockage, monkeypatch):
 def test_init_rattache_a_une_organisation_existante(stockage, monkeypatch):
     org = profiles.create_profile("Mairie")
     users.create_user("paul", "Secret-01", org["id"])
-    # « x » : choix invalide ; « paul » : déjà pris ; « abc » : mot de passe trop court.
-    _clavier(monkeypatch, ["x", "1", "paul", "julie"], ["abc", "Secret-02", "Secret-02"])
+    # « x » : choix invalide ; « paul » (1re fois) : confirmation par le compte
+    # existant ; « » : rôle par défaut (membre, lot 4) ; « paul » (2e fois) :
+    # identifiant déjà pris ; « abc » : mot de passe trop court.
+    _clavier(monkeypatch, ["x", "1", "paul", "", "paul", "julie"],
+             ["Secret-01", "abc", "Secret-02", "Secret-02"])
     assert manage_users.main(["init"]) == 0
     assert len(profiles.list_profiles()) == 1          # aucune organisation ajoutée
     julie = users.get_user_by_username("julie")
     assert julie["profile_id"] == org["id"]
     assert _connexion("julie", "Secret-02").status_code == 200
+
+
+# ---------- `init` : pas de compte ajouté librement à une organisation existante ----------
+def _deux_organisations(stockage):
+    a = profiles.create_profile("Mairie A")
+    b = profiles.create_profile("Mairie B")
+    users.create_user("paul", "Secret-01", a["id"])
+    users.create_user("zoe", "Secret-09", b["id"])
+    return a, b
+
+
+def test_init_refuse_sans_identifiants_valides(stockage, monkeypatch, capsys):
+    """Choisir une organisation existante sans en connaître un compte ne crée rien."""
+    _deux_organisations(stockage)
+    n = manage_users.ESSAIS_CONFIRMATION
+    _clavier(monkeypatch, ["1"] + ["paul"] * n, ["faux-mdp"] * n)
+    assert manage_users.main(["init"]) == 1
+    assert users.get_user_by_username("julie") is None
+    assert "doit le confirmer" in capsys.readouterr().out
+
+
+def test_init_refuse_avec_le_compte_d_une_autre_organisation(stockage, monkeypatch):
+    """Les identifiants valides de l'organisation B n'ouvrent pas l'organisation A."""
+    _deux_organisations(stockage)
+    n = manage_users.ESSAIS_CONFIRMATION
+    _clavier(monkeypatch, ["1"] + ["zoe"] * n + ["julie"], ["Secret-09"] * n)
+    assert manage_users.main(["init"]) == 1
+    assert users.get_user_by_username("julie") is None
+
+
+def test_init_accepte_le_compte_de_l_organisation(stockage, monkeypatch):
+    a, _ = _deux_organisations(stockage)
+    # Un premier essai raté, puis le bon ; « » : rôle par défaut (lot 4).
+    _clavier(monkeypatch, ["1", "paul", "paul", "", "julie"],
+             ["mauvais", "Secret-01", "Secret-02", "Secret-02"])
+    assert manage_users.main(["init"]) == 0
+    assert users.get_user_by_username("julie")["profile_id"] == a["id"]
+
+
+def test_init_respecte_la_temporisation_des_echecs(stockage, monkeypatch):
+    _deux_organisations(stockage)
+    for _ in range(3):
+        tentatives.noter_echec("paul")
+    # Le BON mot de passe est refusé pendant l'attente.
+    _clavier(monkeypatch, ["1", "paul"], ["Secret-01"])
+    assert manage_users.main(["init"]) == 1
+    assert users.get_user_by_username("julie") is None
+
+
+def test_init_organisation_existante_sans_compte_ne_demande_rien(stockage, monkeypatch):
+    profiles.create_profile("Vide")
+    _clavier(monkeypatch, ["1", "marie"], ["Secret-01", "Secret-01"])
+    assert manage_users.main(["init"]) == 0
+    assert users.get_user_by_username("marie") is not None
+
+
+def test_init_nouvelle_organisation_ne_demande_rien_de_plus(stockage, monkeypatch):
+    _deux_organisations(stockage)
+    _clavier(monkeypatch, ["n", "Nouvelle", "marie"], ["Secret-03", "Secret-03"])
+    assert manage_users.main(["init"]) == 0
+    assert "Nouvelle" in [p["name"] for p in profiles.list_profiles()]
 
 
 # ---------- create-user : mot de passe demandé, plus en argument ----------

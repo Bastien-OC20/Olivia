@@ -11,12 +11,21 @@ moindre écriture (ouvrir une session à la connexion, enregistrer un réglage)
 Trois cas, par ordre de priorité (voir `dossier_donnees`) :
   1. variable d'environnement OLIVIA_DATA_DIR : choix explicite de l'exploitant ;
   2. fichier `olivia.ini` à côté de l'application, section [donnees], clé
-     `dossier` : écrit par l'installeur, qui y désigne C:\\ProgramData\\Olivia
-     (dossier commun au poste, ouvert en écriture aux utilisateurs) ;
+     `dossier` : écrit par l'installeur, qui y désigne %LOCALAPPDATA%\\Olivia,
+     dossier PROPRE AU COMPTE WINDOWS de la personne qui lance Olivia ;
   3. sinon le paquet `backend/` lui-même, comme avant : c'est le cas du
      disque portable (les données voyagent avec la clé) et du développement.
      Aucune installation existante ne change donc d'emplacement sans l'avoir
      demandé.
+
+POURQUOI UN DOSSIER PAR COMPTE WINDOWS (audit du 15/11/2026) : les versions
+précédentes rangeaient les données dans C:\\ProgramData\\Olivia, commun au poste
+et rendu modifiable par tous ses utilisateurs. Sur un poste partagé, n'importe
+quel autre compte Windows pouvait donc y lire les conversations, copier un
+jeton de session ou remplacer un mot de passe. Olivia tourne sous la session
+Windows de la personne : seul un dossier de SON profil Windows est protégé des
+autres comptes par le système. Les données de l'ancien dossier commun sont
+REPRISES au premier démarrage (voir `reprendre_dossier_commun`).
 
 Ce module ne dépend d'aucun autre module du backend : profiles.py et ocr.py
 l'importent pour calculer leurs chemins au chargement.
@@ -32,6 +41,14 @@ VARIABLE_ENV = "OLIVIA_DATA_DIR"
 NOM_INI = "olivia.ini"
 SECTION_INI = "donnees"
 CLE_INI = "dossier"
+# Ancien dossier COMMUN au poste, à reprendre au premier démarrage : désigné par
+# l'application de bureau (variable d'environnement) ou par l'installeur (clé
+# `reprise` de olivia.ini). Absent sur un disque portable et en développement.
+VARIABLE_REPRISE = "OLIVIA_DATA_REPRISE"
+CLE_INI_REPRISE = "reprise"
+# Dossier des modèles d'IA désigné par l'installeur (clé `modeles` de
+# olivia.ini) : commun au poste et inscriptible, hors de Program Files.
+CLE_INI_MODELES = "modeles"
 
 ORIGINE_ENV = "variable d'environnement"
 ORIGINE_INI = "installation"
@@ -50,8 +67,8 @@ def dossier_application() -> Path:
     return DOSSIER_BACKEND.parent
 
 
-def _lire_ini(chemin: Path) -> str:
-    """Valeur de [donnees] dossier dans `chemin`, ou "" si absente/illisible.
+def _lire_ini(chemin: Path, cle: str = CLE_INI) -> str:
+    """Valeur de [donnees] `cle` dans `chemin`, ou "" si absente/illisible.
 
     Un fichier présent mais illisible ne doit pas empêcher Olivia de démarrer :
     on retombe alors sur l'emplacement par défaut, et le lanceur affiche
@@ -65,7 +82,7 @@ def _lire_ini(chemin: Path) -> str:
         lecteur.read(chemin, encoding="utf-8-sig")
     except (configparser.Error, OSError, UnicodeDecodeError):
         return ""
-    return lecteur.get(SECTION_INI, CLE_INI, fallback="").strip()
+    return lecteur.get(SECTION_INI, cle, fallback="").strip()
 
 
 def _resoudre() -> tuple[Path, str]:
@@ -87,6 +104,17 @@ def dossier_donnees() -> Path:
     donc un redémarrage, comme tout réglage d'installation.
     """
     return _resoudre()[0]
+
+
+def origine_donnees() -> str:
+    """Origine du choix du dossier des données (ORIGINE_ENV, ORIGINE_INI ou
+    ORIGINE_DEFAUT).
+
+    Lue par backend/coffre.py : les secrets ne sont chiffrés que sur un poste
+    installé (olivia.ini ou OLIVIA_DATA_DIR), jamais sur la clé portable, dont
+    les données doivent rester lisibles d'un ordinateur à l'autre.
+    """
+    return _resoudre()[1]
 
 
 def description() -> str:
@@ -129,6 +157,50 @@ def migrer_ancien_dossier(ancien: Path, nouveau: Path) -> bool:
         return False
 
 
+def dossier_modeles_ini() -> Path | None:
+    """Dossier des modèles d'IA désigné par olivia.ini (installeur), ou None.
+
+    L'installeur Inno Setup y range les modèles livrés, dans
+    C:\\ProgramData\\Olivia\\modeles-ia : Program Files n'est pas modifiable par
+    un utilisateur standard, et un modèle téléchargé plus tard (changement de
+    mode de calcul) n'aurait pas pu s'y écrire.
+    """
+    brut = _lire_ini(dossier_application() / NOM_INI, CLE_INI_MODELES)
+    return Path(os.path.expandvars(brut)).expanduser() if brut else None
+
+
+def ancien_dossier_commun() -> Path | None:
+    """Ancien dossier commun au poste désigné pour une reprise, ou None."""
+    brut = os.environ.get(VARIABLE_REPRISE, "").strip()
+    if not brut:
+        brut = _lire_ini(dossier_application() / NOM_INI, CLE_INI_REPRISE)
+    return Path(os.path.expandvars(brut)).expanduser() if brut else None
+
+
+def reprendre_dossier_commun(ancien: Path, nouveau: Path) -> bool:
+    """Reprend les données de l'ancien dossier commun au poste (`ancien`) dans
+    le dossier du compte Windows (`nouveau`), puis les RETIRE de l'ancien.
+
+    Retrait et non simple copie, contrairement à `migrer_ancien_dossier` : le
+    but est précisément que les comptes, sessions et conversations cessent
+    d'être lisibles par les autres comptes Windows du poste. Le cache OCR
+    commun (texte recopié de documents personnels) est retiré lui aussi : il se
+    reconstruit.
+
+    C'est le PREMIER compte Windows à lancer Olivia après la mise à jour qui
+    reprend les données ; les suivants démarrent sur un dossier neuf. La copie
+    est complète (dossier temporaire renommé) avant tout retrait, et un retrait
+    impossible (droits) laisse simplement l'ancien dossier en place.
+
+    Renvoie True si une reprise a eu lieu. Ne lève jamais.
+    """
+    if not migrer_ancien_dossier(ancien / "profiles", nouveau / "profiles"):
+        return False
+    for reste in (ancien / "profiles", ancien / "ocr_cache"):
+        shutil.rmtree(reste, ignore_errors=True)
+    return True
+
+
 def preparer() -> Path:
     """Calcule le dossier des profils et, en mode installé, migre l'ancien.
 
@@ -141,4 +213,9 @@ def preparer() -> Path:
     dossier_profils = racine / "profiles"
     if origine == ORIGINE_INI:
         migrer_ancien_dossier(DOSSIER_BACKEND / "profiles", dossier_profils)
+    # Ancien dossier commun au poste (C:\ProgramData\Olivia) : repris dans le
+    # dossier du compte Windows, une seule fois (voir l'en-tête du module).
+    commun = ancien_dossier_commun()
+    if commun is not None:
+        reprendre_dossier_commun(commun, racine)
     return dossier_profils

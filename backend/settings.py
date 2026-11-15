@@ -17,10 +17,13 @@ alimenté par `main.get_current_profile()` — jamais par un identifiant fourni 
 le client.
 """
 import json
+import logging
 from pathlib import Path
 from threading import RLock
 
-from . import hardware, profiles
+from . import coffre, hardware, profiles
+
+journal = logging.getLogger(__name__)
 
 # Modèles recommandés selon le périphérique de calcul.
 #   gpu : cible RTX 5060 8 Go (voir README) — modèle quantifié Q4_K_M
@@ -179,6 +182,16 @@ CONNECTEURS = {
     "obsidian": {"enabled": bool, "vault_path": 1000},
     "notion": {"enabled": bool, "api_token": 500},
 }
+# Secrets des réglages, désignés par leur chemin dans le dictionnaire. SEULE
+# liste à tenir à jour : chiffrés sur disque par backend/coffre.py (poste
+# installé sous Windows), déchiffrés en mémoire. Le masquage des réponses de
+# l'API reste dans main._masquer_secrets, qui couvre ces trois chemins.
+SECRETS = (
+    ("connectors", "imap", "password"),
+    ("connectors", "notion", "api_token"),
+    ("search_brave_api_key",),
+)
+
 # Validés à part, dans main.update_settings (existence des dossiers, dossiers
 # réservés) : transmis ici tels quels.
 VALIDES_AILLEURS = {"fs_roots"}
@@ -273,10 +286,39 @@ def _merge(base: dict, patch: dict) -> dict:
     return base
 
 
+def _nom_secret(chemin: tuple) -> str:
+    """« connectors.imap.password » : même nommage que main._masquer_secrets."""
+    return ".".join(chemin)
+
+
+def _lire_chemin(data: dict, chemin: tuple):
+    for cle in chemin:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(cle)
+    return data
+
+
+def _ecrire_chemin(data: dict, chemin: tuple, valeur) -> None:
+    *parents, derniere = chemin
+    for cle in parents:
+        data = data.get(cle)
+        if not isinstance(data, dict):
+            return            # bloc absent ou corrompu : rien à écrire
+    data[derniere] = valeur
+
+
 class Settings:
     def __init__(self, path: Path):
         self.path = path
         self._lock = RLock()
+        # Secrets chiffrés impossibles à relire (autre compte Windows, fichier
+        # copié d'un autre poste, valeur corrompue) : nom -> valeur brute lue sur
+        # disque. En mémoire ils valent "" ; la valeur brute est réécrite telle
+        # quelle tant que l'utilisatrice n'a pas saisi de nouveau secret, pour
+        # que l'avertissement « à ressaisir » survive à un redémarrage (et qu'un
+        # retour sur le bon compte Windows retrouve le secret).
+        self._illisibles: dict[str, str] = {}
         self._data = self._load()
 
     def _load(self) -> dict:
@@ -298,14 +340,65 @@ class Settings:
             return merged
         result = _merge(merged, saved)
         result["device_models"] = _deep_default()["device_models"]
+        self._dechiffrer_secrets(result)
         return result
+
+    def _dechiffrer_secrets(self, data: dict) -> None:
+        """Remplace en place chaque secret chiffré par sa valeur en clair.
+
+        Un secret illisible devient "" et son nom est retenu (voir
+        `secrets_a_ressaisir`) ; JAMAIS d'exception : des réglages illisibles
+        rendraient toute l'organisation inutilisable (erreur 500 partout) pour
+        un simple mot de passe IMAP. Le fichier n'est pas réécrit ici.
+        Un secret en clair (version antérieure, poste qui ne chiffre pas) est
+        gardé tel quel : il sera chiffré au prochain enregistrement.
+        """
+        self._illisibles = {}
+        for chemin in SECRETS:
+            valeur = _lire_chemin(data, chemin)
+            if not coffre.est_chiffre(valeur):
+                continue
+            try:
+                clair = coffre.dechiffrer(valeur)
+            except coffre.SecretIllisible:
+                self._illisibles[_nom_secret(chemin)] = valeur
+                clair = ""
+            _ecrire_chemin(data, chemin, clair)
+
+    def _version_disque(self) -> dict:
+        """Copie des réglages telle qu'elle doit être écrite sur disque :
+        secrets chiffrés si le poste chiffre (`coffre.actif`), en clair sinon."""
+        disque = json.loads(json.dumps(self._data))
+        chiffrer = coffre.actif()
+        for chemin in SECRETS:
+            nom = _nom_secret(chemin)
+            valeur = _lire_chemin(disque, chemin)
+            if nom in self._illisibles and not valeur:
+                _ecrire_chemin(disque, chemin, self._illisibles[nom])
+            elif chiffrer and isinstance(valeur, str) and valeur:
+                try:
+                    _ecrire_chemin(disque, chemin, coffre.chiffrer(valeur))
+                except coffre.SecretIllisible:
+                    # Windows refuse de chiffrer (cas jamais observé) : on garde
+                    # le comportement antérieur — en clair dans le dossier du
+                    # compte Windows — plutôt que de perdre le secret ou de
+                    # faire échouer l'enregistrement de tous les réglages.
+                    journal.warning("Chiffrement impossible pour %s : enregistré en clair.",
+                                    nom)
+        return disque
 
     def _save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, ensure_ascii=False)
+            json.dump(self._version_disque(), f, indent=2, ensure_ascii=False)
         tmp.replace(self.path)
+
+    def secrets_a_ressaisir(self) -> list[str]:
+        """Noms des secrets enregistrés mais illisibles sur ce poste
+        (« connectors.imap.password »…), à faire ressaisir par l'interface."""
+        with self._lock:
+            return sorted(self._illisibles)
 
     def get(self) -> dict:
         with self._lock:
@@ -322,6 +415,12 @@ class Settings:
             patch.pop("device_models", None)
             _merge(self._data, patch)
             self._data["device_models"] = _deep_default()["device_models"]
+            # Un secret illisible n'est oublié que lorsqu'une NOUVELLE valeur est
+            # saisie : l'interface renvoie "" pour chaque champ vide à chaque
+            # « Enregistrer », ce qui ne vaut pas une ressaisie.
+            for chemin in SECRETS:
+                if _lire_chemin(self._data, chemin):
+                    self._illisibles.pop(_nom_secret(chemin), None)
             self._save()
             return self.get()
 
@@ -337,6 +436,8 @@ class Settings:
         with self._lock:
             self._data = _deep_default()
             self._data["compute_device"] = hardware.detect_default_device()
+            # Effacement : un secret illisible ne doit pas être réécrit sur disque.
+            self._illisibles = {}
             self._save()
             return self.get()
 

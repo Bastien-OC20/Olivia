@@ -5,7 +5,13 @@ Routes principales :
   POST /api/auth/login                   : ouvre une session (cookie HttpOnly)
   GET  /api/auth/etat                    : au moins un compte existe-t-il ? (public)
   POST /api/auth/logout                  : ferme la session courante
-  GET  /api/auth/me                      : compte et organisation connectés
+  GET  /api/auth/me                      : compte, organisation et rôle connectés
+  POST /api/auth/mot-de-passe            : le compte change son mot de passe (ancien exigé)
+  GET  /api/comptes                      : (responsable) comptes de l'organisation
+  POST /api/comptes/{id}/mot-de-passe    : (responsable) réinitialise un mot de passe
+  POST /api/comptes/{id}/debloquer       : (responsable) efface les échecs de connexion
+  PUT  /api/comptes/{id}/role            : (responsable) responsable ou membre
+  DELETE /api/comptes/{id}               : (responsable) supprime un compte
   GET  /api/health                       : diagnostic de service
   GET  /api/models                       : liste des modèles Ollama installés
   GET  /api/moteur/etat                  : Ollama joignable ? modèles nécessaires installés ?
@@ -25,10 +31,10 @@ Routes principales :
   GET  /api/fs/preview                   : prévisualisation (txt/csv/xlsx/docx/img/pdf)
   POST /api/fs/upload                    : upload d'un fichier (sandboxé, filtré)
   GET  /api/fs/download                  : téléchargement d'un fichier (sandboxé)
-  GET  /api/fs/drives                    : lecteurs disponibles (hors sandbox, dossiers only)
-  GET  /api/fs/browse                    : sous-dossiers d'un chemin absolu (hors sandbox)
+  GET  /api/fs/drives                    : (responsable) lecteurs disponibles (dossiers only)
+  GET  /api/fs/browse                    : (responsable) sous-dossiers d'un chemin absolu
   GET  /api/documents/status             : état du modèle Word de l'établissement
-  POST /api/documents/modele             : (re)fabrique le modèle depuis un document réel
+  POST /api/documents/modele             : (responsable) fabrique le modèle Word
   POST /api/documents/generate           : produit un document Word (sandboxé)
   POST /api/search                       : recherche web via provider configuré
   GET  /api/connectors/status            : état stylisable de tous les connecteurs
@@ -36,7 +42,7 @@ Routes principales :
   GET  /api/connectors/imap/preview      : aperçu boîte mail
   GET  /api/connectors/calendar/preview  : aperçu calendrier .ics
   GET  /api/privacy/export               : RGPD — export des données de l'organisation
-  POST /api/privacy/delete               : RGPD — suppression des données de l'organisation
+  POST /api/privacy/delete               : (responsable) RGPD — effacement de l'organisation
   GET  /api/conversations                : liste des conversations (métadonnées)
   GET  /api/conversations/{conv_id}      : conversation complète
   POST /api/conversations                : crée une conversation
@@ -52,6 +58,10 @@ CLOISONNEMENT PAR ORGANISATION : hormis /api/health (diagnostic de service),
 une session ouverte et ne travaille que
 sur le profil qu'elle résout, via `Depends(get_current_profile)`. Aucun
 identifiant d'organisation n'est jamais accepté depuis le client.
+
+RÔLES (lot 4) : certaines routes et certains réglages sont réservés au
+responsable de l'organisation (`exiger_responsable`, CLES_RESERVEES_RESPONSABLE) ;
+conversations et tableaux sont privés au compte qui les crée (`get_identite`).
 """
 import json
 import os
@@ -77,6 +87,7 @@ from pydantic import BaseModel
 
 from .settings import reglages, style_directives, valider_patch
 from .search import web_search
+from . import coffre
 from . import documents
 from . import docsearch
 from . import docindex
@@ -266,11 +277,15 @@ def _identite(user: dict) -> dict:
         "username": user.get("username", ""),
         "profile_id": user.get("profile_id", ""),
         "profile_name": profil["name"] if profil else "",
+        # « responsable » ou « membre » : l'interface masque ce qui est réservé
+        # au responsable. Simple confort d'affichage : chaque route réservée
+        # vérifie elle-même le rôle (exiger_responsable).
+        "role": users.role_de(user),
     }
 
 
-def get_current_session(request: Request) -> dict:
-    """Session résolue depuis le cookie, ou 401 si absente/invalide/expirée.
+def _resoudre_session(request: Request) -> tuple[dict, dict]:
+    """(session, compte) de la requête, ou 401. Seul endroit qui lit le cookie.
 
     Le compte doit aussi EXISTER encore, et appartenir toujours à l'organisation
     de la session : un compte supprimé (ou rattaché ailleurs) dans users.json
@@ -286,10 +301,32 @@ def get_current_session(request: Request) -> dict:
     if user is None or user.get("profile_id") != session.get("profile_id"):
         sessions.delete_session(jeton)
         raise HTTPException(401, "Compte supprimé ou modifié : reconnectez-vous")
-    return session
+    return session, user
 
 
-def get_current_profile(request: Request) -> str:
+def get_current_session(request: Request) -> dict:
+    """Session résolue depuis le cookie, ou 401 si absente/invalide/expirée
+    (voir _resoudre_session)."""
+    return _resoudre_session(request)[0]
+
+
+def get_identite(request: Request) -> dict:
+    """Identité complète de la session : `user_id`, `profile_id`, `role`. Ou 401.
+
+    Le rôle est relu dans users.json à CHAQUE requête, jamais mémorisé dans la
+    session : un compte rétrogradé perd ses droits immédiatement, sans attendre
+    la fin de sa session. FastAPI ne calcule une dépendance qu'une fois par
+    requête : une route qui demande à la fois get_current_profile et
+    get_identite (ou exiger_responsable) ne lit le cookie qu'une fois.
+    """
+    session, user = _resoudre_session(request)
+    profile_id = session.get("profile_id", "")
+    if not profiles.is_valid_id(profile_id):
+        raise HTTPException(401, "Session rattachée à un profil invalide")
+    return {"user_id": user["id"], "profile_id": profile_id, "role": users.role_de(user)}
+
+
+def get_current_profile(identite: dict = Depends(get_identite)) -> str:
     """Identifiant du profil (organisation) de la session courante, ou 401.
 
     C'est LE point d'entrée du cloisonnement : toute route touchant à des données
@@ -297,10 +334,24 @@ def get_current_profile(request: Request) -> str:
     ce profile_id — jamais un identifiant fourni par le client, qui pourrait
     désigner l'organisation d'à côté.
     """
-    profile_id = get_current_session(request).get("profile_id", "")
-    if not profiles.is_valid_id(profile_id):
-        raise HTTPException(401, "Session rattachée à un profil invalide")
-    return profile_id
+    return identite["profile_id"]
+
+
+MESSAGE_RESERVE_RESPONSABLE = (
+    "Cette action est réservée au responsable de l'organisation dans Oliv'IA. "
+    "Demandez-lui de la faire pour vous."
+)
+
+
+def exiger_responsable(identite: dict = Depends(get_identite)) -> dict:
+    """Identité de la session si son compte est responsable, 403 sinon.
+
+    403 et non 404 : la route existe et la personne est connectée ; lui dire
+    que l'action est réservée (et à qui s'adresser) vaut mieux qu'un « introuvable ».
+    """
+    if identite["role"] != users.ROLE_RESPONSABLE:
+        raise HTTPException(403, MESSAGE_RESERVE_RESPONSABLE)
+    return identite
 
 
 # Route volontairement SYNCHRONE (def et non async def) : la vérification du
@@ -377,14 +428,179 @@ async def auth_logout(request: Request, response: Response):
 
 
 @app.get("/api/auth/me")
-async def auth_me(session: dict = Depends(get_current_session)):
-    """Compte et organisation de la session courante."""
-    user = users.get_user(session.get("user_id", ""))
+async def auth_me(identite: dict = Depends(get_identite)):
+    """Compte, organisation et rôle de la session courante."""
+    user = users.get_user(identite["user_id"])
     if user is None:
         # Session valide mais compte supprimé entre-temps : à traiter comme une
         # session morte, pas comme une erreur serveur.
         raise HTTPException(401, "Compte introuvable")
     return _identite(user)
+
+
+# ---------- Comptes : mot de passe et gestion par le responsable (lot 4c) ----------
+# Les mots de passe ne sont jamais renvoyés ni journalisés. Routes en `def` :
+# PBKDF2 est un calcul bloquant (voir auth_login).
+class DemandeChangementMotDePasse(BaseModel):
+    ancien: str
+    nouveau: str
+
+
+class DemandeNouveauMotDePasse(BaseModel):
+    nouveau: str
+
+
+class DemandeRole(BaseModel):
+    role: str
+
+
+def _refus_temporise(attente: float) -> HTTPException:
+    return HTTPException(
+        429,
+        "Trop de tentatives pour cet identifiant. Réessayez dans "
+        f"{tentatives.formater_attente(attente)}.",
+        headers={"Retry-After": str(int(attente) + 1)},
+    )
+
+
+@app.post("/api/auth/mot-de-passe")
+def auth_mot_de_passe(demande: DemandeChangementMotDePasse, request: Request,
+                      identite: dict = Depends(get_identite)):
+    """Le compte connecté change son propre mot de passe (l'ancien est exigé).
+
+    Même temporisation que la connexion, sur le même compteur : sans elle, une
+    session laissée ouverte sur un poste partagé permettait d'essayer des
+    milliers de mots de passe sans jamais passer par l'écran de connexion. Les
+    AUTRES sessions du compte sont fermées (un mot de passe change souvent
+    parce qu'il a fuité) ; celle-ci reste ouverte.
+    """
+    user = users.get_user(identite["user_id"])
+    if user is None:
+        raise HTTPException(401, "Compte introuvable")
+    identifiant = user["username"]
+    attente = tentatives.attente_restante(identifiant)
+    if attente > 0:
+        raise _refus_temporise(attente)
+    try:
+        ok = users.changer_mot_de_passe(user["id"], demande.ancien, demande.nouveau)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not ok:
+        tentatives.noter_echec(identifiant)
+        # 400 et non 401 : la session reste valable, l'interface ne doit pas
+        # déconnecter l'utilisatrice pour une faute de frappe.
+        raise HTTPException(400, "Mot de passe actuel incorrect.")
+    tentatives.noter_succes(identifiant)
+    fermees = sessions.supprimer_sessions_du_compte(
+        user["id"], sauf_jeton=request.cookies.get(COOKIE_SESSION, ""))
+    return {"ok": True, "sessions_fermees": fermees}
+
+
+def _vue_compte(u: dict, moi: str) -> dict:
+    """Ce que le responsable voit d'un compte : jamais le dérivé du mot de passe."""
+    return {
+        "id": u.get("id", ""),
+        "username": u.get("username", ""),
+        "role": users.role_de(u),
+        "created_at": u.get("created_at", 0),
+        "bloque": tentatives.est_bloque(u.get("username", "")),
+        "moi": u.get("id") == moi,
+    }
+
+
+def _compte_de_l_organisation(user_id: str, profile_id: str) -> dict:
+    """Compte de CETTE organisation, ou 404 — y compris pour le compte d'une autre
+    organisation, indiscernable d'un identifiant inventé."""
+    u = users.get_user(user_id)
+    if u is None or u.get("profile_id") != profile_id:
+        raise HTTPException(404, "Compte introuvable")
+    return u
+
+
+@app.get("/api/comptes")
+def comptes_liste(profile_id: str = Depends(get_current_profile),
+                  identite: dict = Depends(exiger_responsable)):
+    """Comptes de l'organisation du responsable connecté (et d'elle seule)."""
+    return {"comptes": [_vue_compte(u, identite["user_id"])
+                        for u in users.lister_comptes(profile_id)]}
+
+
+@app.post("/api/comptes/{user_id}/mot-de-passe")
+def comptes_reinitialiser(user_id: str, demande: DemandeNouveauMotDePasse,
+                          profile_id: str = Depends(get_current_profile),
+                          identite: dict = Depends(exiger_responsable)):
+    """Le responsable fixe un nouveau mot de passe pour un compte (oubli).
+
+    Toutes les sessions du compte sont fermées, et ses échecs de connexion
+    effacés : sans quoi la personne, bloquée après ses essais infructueux, ne
+    pourrait pas utiliser tout de suite le mot de passe qu'on vient de lui donner.
+    Refusé sur son propre compte : l'ancien mot de passe y serait contourné,
+    ainsi que sa temporisation.
+    """
+    u = _compte_de_l_organisation(user_id, profile_id)
+    if u["id"] == identite["user_id"]:
+        raise HTTPException(
+            400, "Pour votre propre compte, utilisez « Changer mon mot de passe » : "
+                 "votre mot de passe actuel vous sera demandé.")
+    try:
+        if not users.reinitialiser_mot_de_passe(u["id"], demande.nouveau):
+            raise HTTPException(404, "Compte introuvable")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    sessions.supprimer_sessions_du_compte(u["id"])
+    tentatives.debloquer(u["username"])
+    return {"ok": True}
+
+
+@app.post("/api/comptes/{user_id}/debloquer")
+def comptes_debloquer(user_id: str, profile_id: str = Depends(get_current_profile),
+                      identite: dict = Depends(exiger_responsable)):
+    """Efface les échecs de connexion d'un compte (attente en cours comprise)."""
+    u = _compte_de_l_organisation(user_id, profile_id)
+    tentatives.debloquer(u["username"])
+    return _vue_compte(u, identite["user_id"])
+
+
+@app.put("/api/comptes/{user_id}/role")
+def comptes_role(user_id: str, demande: DemandeRole,
+                 profile_id: str = Depends(get_current_profile),
+                 identite: dict = Depends(exiger_responsable)):
+    """Nomme un compte responsable ou membre. Le dernier responsable de
+    l'organisation ne peut pas devenir membre (409)."""
+    u = _compte_de_l_organisation(user_id, profile_id)
+    if demande.role not in users.ROLES:
+        raise HTTPException(400, "Rôle inconnu : choisissez « responsable » ou « membre ».")
+    try:
+        modifie = users.changer_role(u["id"], demande.role)
+    except users.OperationRefusee as e:
+        raise HTTPException(409, str(e))
+    if modifie is None:
+        raise HTTPException(404, "Compte introuvable")
+    return _vue_compte(modifie, identite["user_id"])
+
+
+@app.delete("/api/comptes/{user_id}")
+def comptes_supprimer(user_id: str, profile_id: str = Depends(get_current_profile),
+                      identite: dict = Depends(exiger_responsable)):
+    """Supprime un compte de l'organisation et ferme ses sessions.
+
+    Ses conversations et tableaux privés restent sur le disque, invisibles,
+    jusqu'à l'effacement RGPD de l'organisation (voir users.supprimer_compte).
+    On ne peut pas supprimer son propre compte ici : une fausse manœuvre
+    fermerait la porte au seul responsable présent.
+    """
+    u = _compte_de_l_organisation(user_id, profile_id)
+    if u["id"] == identite["user_id"]:
+        raise HTTPException(
+            400, "Vous ne pouvez pas supprimer votre propre compte depuis Oliv'IA. "
+                 "Demandez-le à un autre responsable, ou au service informatique.")
+    try:
+        if users.supprimer_compte(u["id"]) is None:
+            raise HTTPException(404, "Compte introuvable")
+    except users.OperationRefusee as e:
+        raise HTTPException(409, str(e))
+    sessions.supprimer_sessions_du_compte(u["id"])
+    return {"ok": True}
 
 
 # ---------- Sécurité : anti path-traversal ----------
@@ -840,8 +1056,11 @@ async def fs_read(path: str = Query(...), profile_id: str = Depends(get_current_
         raise HTTPException(500, f"Erreur lecture : {e}")
 
 
+# Route synchrone (def) : l'aperçu ouvre et décode le fichier (Word, Excel, CSV),
+# travail disque et CPU qui, dans une route async, figeait tout le serveur — le
+# flux du chat compris. La lecture elle-même est bornée dans documents.preview().
 @app.get("/api/fs/preview")
-async def fs_preview(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
+def fs_preview(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
     p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
         raise HTTPException(404, f"Fichier introuvable : {p}")
@@ -1100,7 +1319,26 @@ def _indexer_automatiquement(profile_id: str) -> None:
     """
     if docindex.etat(profile_id).get("modele_disponible"):
         cibles = _resolve_search_targets(profile_id, "")
-        docindex.lancer_construction(profile_id, _iter_searchable_files(cibles))
+        docindex.lancer_construction(profile_id, _iter_searchable_files(cibles),
+                                     _dossiers_balayes(cibles))
+
+
+def _dossiers_balayes(cibles) -> list[Path]:
+    """Dossiers réellement parcourus par un balayage, chemins résolus.
+
+    Transmis à l'index sémantique : il ne retire un fichier non revu que s'il se
+    trouve sous l'un d'eux. Une racine absente (clé USB débranchée) n'est pas
+    dans `cibles` (`get_fs_root_entries` la saute), ses extraits restent donc
+    dans l'index ; il en va de même du reste du corpus quand on ne balaie qu'un
+    sous-dossier.
+    """
+    dossiers: list[Path] = []
+    for dossier, _root, _prefix in cibles:
+        try:
+            dossiers.append(Path(dossier).resolve())
+        except OSError:
+            continue
+    return dossiers
 
 
 def _demarrer_indexation_semantique():
@@ -1138,7 +1376,8 @@ def docindex_build(path: str = Query(""), profile_id: str = Depends(get_current_
     sémantique en tâche de fond. Route synchrone : le lancement est instantané,
     le travail réel se fait dans un thread démon (voir docindex.py)."""
     targets = _resolve_search_targets(profile_id, path)
-    demarree = docindex.lancer_construction(profile_id, _iter_searchable_files(targets))
+    demarree = docindex.lancer_construction(profile_id, _iter_searchable_files(targets),
+                                            _dossiers_balayes(targets))
     etat = docindex.etat(profile_id)
     etat["demarree"] = demarree
     return etat
@@ -1190,9 +1429,13 @@ def fs_search_semantic(q: str = Query(..., min_length=1), path: str = Query(""),
 #   - un seul niveau de profondeur par appel (aucune récursion) ;
 #   - les dossiers illisibles (droits système) sont ignorés silencieusement ;
 #   - elles doivent rester réservées à une session authentifiée comme toute route
-#     /api/* (voir get_current_profile) : ne jamais les en exempter.
+#     /api/* (voir get_current_profile) : ne jamais les en exempter ;
+#   - et au RESPONSABLE de l'organisation (lot 4) : elles ne servent qu'à choisir
+#     les dossiers de travail, réglage qui lui est réservé, et montrent
+#     l'arborescence du poste hors de ces dossiers.
 @app.get("/api/fs/drives")
-async def fs_drives(profile_id: str = Depends(get_current_profile)):
+async def fs_drives(profile_id: str = Depends(get_current_profile),
+                    _responsable: dict = Depends(exiger_responsable)):
     """Lecteurs disponibles : lettres existantes sous Windows, '/' sous POSIX."""
     drives: list[str] = []
     if os.name == "nt":
@@ -1211,7 +1454,8 @@ async def fs_drives(profile_id: str = Depends(get_current_profile)):
 
 @app.get("/api/fs/browse")
 async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sandbox)"),
-                    profile_id: str = Depends(get_current_profile)):
+                    profile_id: str = Depends(get_current_profile),
+                    _responsable: dict = Depends(exiger_responsable)):
     """Sous-dossiers directs d'un chemin absolu — et rien d'autre (voir note ci-dessus)."""
     p = Path(path)
     if not p.is_absolute():
@@ -1233,14 +1477,98 @@ async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sand
 
 
 # ---------- Routes Settings ----------
+def _reponse_reglages(profile_id: str) -> JSONResponse:
+    """Réglages masqués, plus l'état des secrets sous `etat_secrets` (hors des
+    réglages : `valider_patch` ignore cette clé si l'interface la renvoie).
+
+    - `chiffres` : faux sur une clé portable, sous macOS ou Linux, où les
+      secrets restent en clair dans settings.json (voir coffre.py) ; l'interface
+      le dit à côté des champs concernés ;
+    - `a_ressaisir` : secrets enregistrés mais illisibles ici (réglages copiés
+      depuis un autre compte Windows ou un autre poste), à saisir de nouveau.
+    """
+    reglages_profil = reglages(profile_id)
+    donnees = _mask_secrets(reglages_profil.get())
+    donnees["etat_secrets"] = {
+        "chiffres": coffre.actif(),
+        "a_ressaisir": reglages_profil.secrets_a_ressaisir(),
+    }
+    return JSONResponse(donnees)
+
+
 @app.get("/api/settings")
-async def get_settings(profile_id: str = Depends(get_current_profile)):
+def get_settings(profile_id: str = Depends(get_current_profile)):
     """Réglages de l'organisation connectée (jamais ceux d'une autre)."""
-    return JSONResponse(_mask_secrets(reglages(profile_id).get()))
+    return _reponse_reglages(profile_id)
 
 
+# Réglages d'ORGANISATION, réservés au responsable (lot 4) : ils décident de ce
+# qu'Olivia lit (dossiers), de ce qui sort du poste (recherche web, connecteurs
+# et leurs identifiants), de ce qu'elle exécute (moteur OCR) et de ce qu'elle
+# dit et signe au nom de l'organisation (prompt système, formules des
+# documents). Le membre garde les réglages de confort : style, ton, moteur de
+# calcul, mode simple, température, consentement. Liste unique : toute clé
+# d'organisation ajoutée aux réglages doit l'être ici.
+CLES_RESERVEES_RESPONSABLE = frozenset({
+    "fs_roots", "connectors",
+    "search_provider", "searxng_url", "search_brave_api_key", "search_official_only",
+    "ocr_enabled", "ocr_tesseract_path",
+    "system_prompt",
+    "docgen_appel", "docgen_formule_politesse", "docgen_lieu", "docgen_signature",
+})
+
+
+def _racines_comparables(valeur) -> list[tuple[str, str]] | None:
+    """`fs_roots` réduit à (chemin, libellé), sous la forme qu'update_settings
+    enregistre ; None si ce n'est pas une liste (forcément une modification)."""
+    if not isinstance(valeur, list):
+        return None
+    sortie = []
+    for entree in valeur:
+        if isinstance(entree, str):
+            chemin, libelle = entree.strip(), ""
+        elif isinstance(entree, dict):
+            chemin = str(entree.get("path") or "").strip()
+            libelle = str(entree.get("label") or "").strip()[:60]
+        else:
+            return None
+        if chemin:
+            sortie.append((chemin, libelle))
+    return sortie
+
+
+def _valeur_modifiee(nouvelle, actuelle) -> bool:
+    """La valeur reçue changerait-elle la valeur enregistrée ?
+
+    Les objets sont FUSIONNÉS clé à clé à l'enregistrement (settings._merge) :
+    seules comptent les clés reçues. Un secret renvoyé masqué a déjà été retiré
+    par _strip_masked, il ne compte donc pas comme une modification.
+    """
+    if isinstance(nouvelle, dict):
+        if not isinstance(actuelle, dict):
+            return True
+        return any(_valeur_modifiee(v, actuelle.get(k)) for k, v in nouvelle.items())
+    return nouvelle != actuelle
+
+
+def _cles_reservees_modifiees(patch: dict, actuels: dict) -> list[str]:
+    modifiees = []
+    for cle in sorted(CLES_RESERVEES_RESPONSABLE & patch.keys()):
+        if cle == "fs_roots":
+            nouvelles = _racines_comparables(patch[cle])
+            change = nouvelles is None or nouvelles != _racines_comparables(actuels.get(cle))
+        else:
+            change = _valeur_modifiee(patch[cle], actuels.get(cle))
+        if change:
+            modifiees.append(cle)
+    return modifiees
+
+
+# En `def` : l'enregistrement écrit sur disque et, sur un poste installé sous
+# Windows, chiffre les secrets (DPAPI, voir coffre.py).
 @app.put("/api/settings")
-async def update_settings(patch: dict, profile_id: str = Depends(get_current_profile)):
+def update_settings(patch: dict, identite: dict = Depends(get_identite),
+                    profile_id: str = Depends(get_current_profile)):
     # Types et bornes de chaque réglage connu (voir settings.valider_patch) :
     # une valeur invalide est refusée ici, avec un message qui nomme le champ,
     # au lieu d'être enregistrée puis de faire échouer chaque appel au modèle.
@@ -1250,6 +1578,20 @@ async def update_settings(patch: dict, profile_id: str = Depends(get_current_pro
         raise HTTPException(400, f"Réglage refusé : {e}")
     # On ignore les secrets masqués renvoyés tels quels par l'UI (valeur sentinelle).
     _strip_masked(patch)
+    # Un membre ne peut pas CHANGER un réglage d'organisation. Il peut en
+    # revanche le renvoyer inchangé : l'interface renvoie tous les réglages à
+    # chaque « Enregistrer », et refuser toute clé réservée l'empêcherait
+    # d'enregistrer son ton ou son style. Comparaison faite après validation
+    # et retrait des secrets masqués, donc sur les valeurs qui seraient écrites.
+    if identite["role"] != users.ROLE_RESPONSABLE:
+        refusees = _cles_reservees_modifiees(patch, reglages(profile_id).get())
+        if refusees:
+            raise HTTPException(
+                403,
+                "Ces réglages sont réservés au responsable de l'organisation dans "
+                f"Oliv'IA ({', '.join(refusees)}). Rien n'a été enregistré : annulez ces "
+                "changements, ou demandez au responsable de les faire.",
+            )
     # Plus un réglage : l'emplacement du modèle Word est fixé par le code, un
     # fichier par organisation (voir docmodele.chemin_modele). Laissé libre, il
     # permettait d'ÉCRIRE un fichier n'importe où sur le disque (fabrication du
@@ -1296,7 +1638,7 @@ async def update_settings(patch: dict, profile_id: str = Depends(get_current_pro
         patch["fs_roots"] = cleaned
     reglages_profil = reglages(profile_id)
     reglages_profil.update(patch)
-    return JSONResponse(_mask_secrets(reglages_profil.get()))
+    return _reponse_reglages(profile_id)
 
 
 def _valider_chemin_tesseract(brut, actuel: str = "") -> str:
@@ -1409,8 +1751,12 @@ def documents_status(profile_id: str = Depends(get_current_profile)):
 
 
 @app.post("/api/documents/modele")
-async def documents_modele(body: dict, profile_id: str = Depends(get_current_profile)):
+async def documents_modele(body: dict, profile_id: str = Depends(get_current_profile),
+                           _responsable: dict = Depends(exiger_responsable)):
     """(Re)fabrique le modèle de l'établissement à partir d'un document réel.
+
+    Réservé au responsable : le modèle s'applique à tous les documents produits
+    par l'organisation (logo, en-tête, styles).
 
     `source` est un chemin virtuel `rN/...` : la lecture reste sandboxée. Le
     modèle produit est écrit hors du sandbox, dans le dossier de l'organisation
@@ -1534,35 +1880,48 @@ async def do_search(body: dict, profile_id: str = Depends(get_current_profile)):
 # du profil appelant, donc un identifiant deviné est indiscernable d'un identifiant
 # inventé. C'est exactement l'effet voulu : aucune réponse ne confirme l'existence
 # d'une conversation qu'on n'a pas le droit de voir.
+# Conversations et tableaux sont PRIVÉS PAR COMPTE (lot 4) : chaque route passe
+# le user_id de la session (`identite["user_id"]`) aux magasins, qui ne montrent
+# que les entrées de ce compte et les anciennes entrées communes, sans
+# propriétaire (voir conversations.py). La conversation d'un collègue répond 404,
+# comme celle d'une autre organisation — responsable compris : privé veut dire
+# privé. Routes en `def` : lecture et écriture de fichiers.
 @app.get("/api/conversations")
-async def list_conversations(profile_id: str = Depends(get_current_profile)):
+def list_conversations(profile_id: str = Depends(get_current_profile),
+                       identite: dict = Depends(get_identite)):
     """Liste des conversations (métadonnées seules), triées par date de mise à jour."""
-    return {"conversations": conversations.list_conversations(profile_id)}
+    return {"conversations": conversations.list_conversations(
+        profile_id, pour_compte=identite["user_id"])}
 
 
 @app.get("/api/conversations/{conv_id}")
-async def get_conversation(conv_id: str, profile_id: str = Depends(get_current_profile)):
+def get_conversation(conv_id: str, profile_id: str = Depends(get_current_profile),
+                     identite: dict = Depends(get_identite)):
     """Conversation complète (messages inclus)."""
-    conv = conversations.get_conversation(profile_id, conv_id)
+    conv = conversations.get_conversation(profile_id, conv_id, pour_compte=identite["user_id"])
     if conv is None:
         raise HTTPException(404, "Conversation introuvable")
     return conv
 
 
 @app.post("/api/conversations")
-async def create_conversation(body: dict, profile_id: str = Depends(get_current_profile)):
-    """Crée une nouvelle conversation et la renvoie (avec son id)."""
+def create_conversation(body: dict, profile_id: str = Depends(get_current_profile),
+                        identite: dict = Depends(get_identite)):
+    """Crée une nouvelle conversation, privée au compte connecté, et la renvoie."""
     return conversations.create_conversation(
         profile_id, messages=body.get("messages"), title=body.get("title"),
+        documents=body.get("documents"), proprietaire=identite["user_id"],
     )
 
 
 @app.put("/api/conversations/{conv_id}")
-async def update_conversation(conv_id: str, body: dict,
-                              profile_id: str = Depends(get_current_profile)):
+def update_conversation(conv_id: str, body: dict,
+                        profile_id: str = Depends(get_current_profile),
+                        identite: dict = Depends(get_identite)):
     """Met à jour les messages et/ou le titre d'une conversation existante."""
     conv = conversations.update_conversation(
         profile_id, conv_id, messages=body.get("messages"), title=body.get("title"),
+        documents=body.get("documents"), pour_compte=identite["user_id"],
     )
     if conv is None:
         raise HTTPException(404, "Conversation introuvable")
@@ -1570,45 +1929,56 @@ async def update_conversation(conv_id: str, body: dict,
 
 
 @app.delete("/api/conversations/{conv_id}")
-async def delete_conversation(conv_id: str, profile_id: str = Depends(get_current_profile)):
+def delete_conversation(conv_id: str, profile_id: str = Depends(get_current_profile),
+                        identite: dict = Depends(get_identite)):
     """Supprime une conversation."""
-    if not conversations.delete_conversation(profile_id, conv_id):
+    if not conversations.delete_conversation(profile_id, conv_id,
+                                             pour_compte=identite["user_id"]):
         raise HTTPException(404, "Conversation introuvable")
     return {"ok": True}
 
 
 # ---------- Routes Tableaux blancs (Excalidraw) ----------
+# Même règle que les conversations, y compris pour un tableau créé par la
+# commande /tableau : l'interface le crée par POST /api/tableaux, il appartient
+# donc au compte qui a lancé la commande.
 @app.get("/api/tableaux")
-async def tableaux_liste(profile_id: str = Depends(get_current_profile)):
-    """Tableaux de l'organisation (métadonnées seules), du plus récent au plus ancien."""
-    return {"tableaux": tableaux.lister(profile_id)}
+def tableaux_liste(profile_id: str = Depends(get_current_profile),
+                   identite: dict = Depends(get_identite)):
+    """Tableaux du compte (métadonnées seules), du plus récent au plus ancien."""
+    return {"tableaux": tableaux.lister(profile_id, pour_compte=identite["user_id"])}
 
 
 @app.get("/api/tableaux/{tableau_id}")
-async def tableau_lire(tableau_id: str, profile_id: str = Depends(get_current_profile)):
+def tableau_lire(tableau_id: str, profile_id: str = Depends(get_current_profile),
+                 identite: dict = Depends(get_identite)):
     """Tableau complet, scène Excalidraw comprise."""
-    donnees = tableaux.lire(profile_id, tableau_id)
+    donnees = tableaux.lire(profile_id, tableau_id, pour_compte=identite["user_id"])
     if donnees is None:
         raise HTTPException(404, "Tableau introuvable")
     return donnees
 
 
 @app.post("/api/tableaux")
-async def tableau_creer(body: dict, profile_id: str = Depends(get_current_profile)):
+def tableau_creer(body: dict, profile_id: str = Depends(get_current_profile),
+                  identite: dict = Depends(get_identite)):
     """Crée un tableau (vide, ou à partir d'une scène fournie) et le renvoie."""
     try:
-        return tableaux.creer(profile_id, titre=body.get("titre"), scene=body.get("scene"))
+        return tableaux.creer(profile_id, titre=body.get("titre"), scene=body.get("scene"),
+                              proprietaire=identite["user_id"])
     except tableaux.TableauInvalide as e:
         raise HTTPException(400, str(e))
 
 
 @app.put("/api/tableaux/{tableau_id}")
-async def tableau_modifier(tableau_id: str, body: dict,
-                           profile_id: str = Depends(get_current_profile)):
+def tableau_modifier(tableau_id: str, body: dict,
+                     profile_id: str = Depends(get_current_profile),
+                     identite: dict = Depends(get_identite)):
     """Met à jour le titre et/ou la scène (sauvegarde automatique de l'interface)."""
     try:
         donnees = tableaux.modifier(profile_id, tableau_id,
-                                    titre=body.get("titre"), scene=body.get("scene"))
+                                    titre=body.get("titre"), scene=body.get("scene"),
+                                    pour_compte=identite["user_id"])
     except tableaux.TableauInvalide as e:
         raise HTTPException(400, str(e))
     if donnees is None:
@@ -1617,8 +1987,9 @@ async def tableau_modifier(tableau_id: str, body: dict,
 
 
 @app.delete("/api/tableaux/{tableau_id}")
-async def tableau_supprimer(tableau_id: str, profile_id: str = Depends(get_current_profile)):
-    if not tableaux.supprimer(profile_id, tableau_id):
+def tableau_supprimer(tableau_id: str, profile_id: str = Depends(get_current_profile),
+                      identite: dict = Depends(get_identite)):
+    if not tableaux.supprimer(profile_id, tableau_id, pour_compte=identite["user_id"]):
         raise HTTPException(404, "Tableau introuvable")
     return {"ok": True}
 
@@ -1662,8 +2033,11 @@ async def connectors_status(profile_id: str = Depends(get_current_profile)):
     return {"connectors": out}
 
 
+# Routes IMAP en `def` : imaplib est bloquant ; en `async def`, un serveur de
+# messagerie qui ne répond pas figeait tout Olivia, chat compris. FastAPI les
+# exécute dans son pool de threads (comme auth_login).
 @app.get("/api/connectors/mail/unread")
-async def connectors_mail_unread(profile_id: str = Depends(get_current_profile)):
+def connectors_mail_unread(profile_id: str = Depends(get_current_profile)):
     cfg = reglages(profile_id).get().get("connectors", {}).get("imap", {})
     if not cfg.get("enabled"):
         return {"enabled": False, "count": 0}
@@ -1676,7 +2050,7 @@ async def connectors_mail_unread(profile_id: str = Depends(get_current_profile))
 
 
 @app.get("/api/connectors/imap/preview")
-async def connectors_imap(limit: int = 10, profile_id: str = Depends(get_current_profile)):
+def connectors_imap(limit: int = 10, profile_id: str = Depends(get_current_profile)):
     cfg = reglages(profile_id).get().get("connectors", {}).get("imap", {})
     if not cfg.get("enabled"):
         return {"enabled": False, "messages": []}
@@ -1709,9 +2083,18 @@ async def connectors_calendar(profile_id: str = Depends(get_current_profile)):
 # effacerait les données de toutes les autres présentes sur la même machine.
 # Toute évolution de ces routes doit préserver cette propriété.
 @app.get("/api/privacy/export")
-async def privacy_export(profile_id: str = Depends(get_current_profile)):
+def privacy_export(profile_id: str = Depends(get_current_profile),
+                   identite: dict = Depends(get_identite)):
     """Droit d'accès/portabilité : export des données locales de l'organisation
     connectée (ses réglages et ses conversations), et d'elle seule.
+
+    Périmètre selon le rôle (lot 4) :
+      - MEMBRE : ses conversations et tableaux, plus les anciens communs (sans
+        propriétaire) — exactement ce qu'il voit dans l'interface ;
+      - RESPONSABLE : toute l'organisation, conversations et tableaux privés des
+        autres comptes compris (y compris ceux de comptes supprimés), et la
+        liste des comptes. C'est l'export d'ORGANISATION : la seule exception,
+        avec l'effacement, à la règle « privé veut dire privé ».
 
     Les SECRETS (mot de passe IMAP, clé d'API, jeton Notion) sont masqués,
     comme dans GET /api/settings. L'export est un fichier téléchargé, qui finit
@@ -1724,37 +2107,61 @@ async def privacy_export(profile_id: str = Depends(get_current_profile)):
     """
     profil = profiles.get_profile(profile_id)
     reglages_exportes, secrets_masques = _masquer_secrets(reglages(profile_id).get())
+    responsable = identite["role"] == users.ROLE_RESPONSABLE
+    # None = vue d'organisation (tout), sinon les seules données du compte.
+    pour_compte = None if responsable else identite["user_id"]
     note = ("Toutes vos données restent sur cette machine. Aucun envoi externe. "
             "Cet export ne contient que les données de votre organisation.")
+    if responsable:
+        note += (" En tant que responsable, vous recevez les données de toute "
+                 "l'organisation, conversations de tous les comptes comprises.")
+    else:
+        note += (" Il contient vos conversations et vos tableaux, et ceux, plus "
+                 "anciens, communs à toute l'organisation.")
     if secrets_masques:
         note += (" Par sécurité, les mots de passe et clés d'accès enregistrés sont "
                  "masqués (••••••••) : voir « secrets_masques ».")
     payload = {
         "organisation": (profil or {}).get("name", ""),
+        "perimetre": "organisation" if responsable else "compte",
         "settings": reglages_exportes,
         "secrets_masques": secrets_masques,
-        "conversations": conversations.export_all_conversations(profile_id),
-        "tableaux": tableaux.exporter_tout(profile_id),
+        "conversations": conversations.export_all_conversations(profile_id, pour_compte),
+        "tableaux": tableaux.exporter_tout(profile_id, pour_compte),
         "note": note,
     }
+    if responsable:
+        # Données personnelles des comptes, sans le moindre dérivé de mot de passe.
+        payload["comptes"] = [
+            {"username": u.get("username", ""), "role": u["role"],
+             "created_at": u.get("created_at", 0)}
+            for u in users.lister_comptes(profile_id)
+        ]
     return JSONResponse(
         payload,
         headers={"Content-Disposition": 'attachment; filename="mes-donnees-local-ai.json"'},
     )
 
 
+# Route synchrone (def) : suppression de fichiers et parcours du cache OCR, travail
+# disque bloquant qui ne doit pas figer la boucle asyncio.
 @app.post("/api/privacy/delete")
-async def privacy_delete(profile_id: str = Depends(get_current_profile)):
+def privacy_delete(profile_id: str = Depends(get_current_profile),
+                   _responsable: dict = Depends(exiger_responsable)):
     """Droit à l'effacement, POUR LA SEULE ORGANISATION CONNECTÉE : réinitialise
     ses réglages, supprime ses conversations, ses tableaux et son index sémantique, purge la zone
-    d'upload de l'app dans chacune de SES racines documentaires, et retire du cache
-    OCR les entrées venues de ces mêmes racines.
+    d'upload de l'app dans chacune de SES racines documentaires, et la retire des
+    caches de texte extrait (cache OCR sur disque, cache mémoire de la recherche).
+
+    Réservé au responsable (lot 4) : l'effacement porte sur TOUTE l'organisation,
+    conversations privées des autres comptes comprises. Un membre ne doit pas
+    pouvoir effacer le travail de ses collègues.
 
     L'ORDRE compte : les dossiers documentaires sont lus AVANT la réinitialisation
     des réglages, puisque c'est elle qui efface `fs_roots`. Les lire après ne
-    donnerait plus que le dossier par défaut, et la zone d'upload comme le cache
-    OCR de l'organisation resteraient en place — un effacement incomplet, annoncé
-    comme complet.
+    donnerait plus que le dossier par défaut, et la zone d'upload de
+    l'organisation resterait en place — un effacement incomplet, annoncé comme
+    complet.
     """
     racines = get_fs_roots(profile_id)
     removed = 0
@@ -1772,10 +2179,14 @@ async def privacy_delete(profile_id: str = Depends(get_current_profile)):
                     pass
     # Le texte reconnu sur les documents scannés et l'index sémantique sont des
     # RECOPIES du contenu de documents personnels : ils relèvent du droit à
-    # l'effacement au même titre que les conversations. Le cache OCR étant commun
-    # au poste, il est filtré sur les racines de cette organisation (voir
-    # ocr.vider_cache) ; l'index, lui, est déjà propre au profil.
-    ocr_cache_removed = ocr.vider_cache(racines)
+    # l'effacement au même titre que les conversations. Les deux caches de texte
+    # étant communs au poste, chaque entrée retient les organisations qui l'ont
+    # reçue : celle-ci en est retirée, quels que soient ses dossiers actuels (une
+    # racine retirée ou débranchée avant l'effacement est donc couverte), et
+    # une entrée partagée reste en place pour les autres (voir ocr.vider_cache et
+    # docsearch.vider_cache). L'index, lui, est déjà propre au profil.
+    ocr_cache_removed = ocr.vider_cache(profile_id)
+    docsearch.vider_cache(profile_id)
     docindex_removed = docindex.purger_index(profile_id)
     reglages(profile_id).reset()
     conversations_removed = conversations.delete_all_conversations(profile_id)

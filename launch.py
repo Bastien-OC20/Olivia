@@ -143,19 +143,27 @@ def bind_child(proc: subprocess.Popen | None) -> None:
 def dossier_modeles_ollama() -> Path:
     """Où le moteur embarqué range ses modèles (plusieurs Go).
 
-    1. ./ollama/models s'il existe : disque portable et installeur Inno Setup,
-       qui livrent les modèles avec le moteur ;
-    2. sinon le dossier des données d'Oliv'IA (backend/emplacements.py),
+    1. le dossier désigné par olivia.ini (clé `modeles`) : installeur Inno
+       Setup, qui livre les modèles dans C:\\ProgramData\\Olivia\\modeles-ia,
+       dossier commun au poste et inscriptible. Ils étaient auparavant dans
+       ./ollama/models, sous Program Files : un modèle à télécharger (passage
+       en mode Léger, par exemple) ne pouvait pas s'y écrire ;
+    2. ./ollama/models s'il existe : disque portable, qui livre les modèles
+       avec le moteur ;
+    3. sinon le dossier des données d'Oliv'IA (backend/emplacements.py),
        sous-dossier modeles-ia : c'est le cas de l'application de bureau, qui
        embarque le moteur SANS les modèles (téléchargés au premier lancement,
        depuis Oliv'IA). Son dossier d'installation (Program Files, Olivia.app)
        n'est pas modifiable par un utilisateur standard et serait remplacé à
        chaque mise à jour : les modèles n'y survivraient pas.
     """
-    if OLLAMA_MODELS_DIR.is_dir():
-        return OLLAMA_MODELS_DIR
     sys.path.insert(0, str(ROOT if FROZEN else SRC_ROOT))   # rend 'backend' importable
     from backend import emplacements
+    designe = emplacements.dossier_modeles_ini()
+    if designe is not None:
+        return designe
+    if OLLAMA_MODELS_DIR.is_dir():
+        return OLLAMA_MODELS_DIR
     return emplacements.dossier_donnees() / "modeles-ia"
 
 
@@ -184,7 +192,10 @@ def start_ollama():
     except OSError as e:
         print(f"⚠️  Dossier des modèles inaccessible ({modeles}) : {e}")
     env["OLLAMA_MODELS"] = str(modeles)
-    env.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
+    # Imposé et non `setdefault` : un OLLAMA_HOST=0.0.0.0 posé sur le poste
+    # (installation d'Ollama antérieure, tutoriel) exposait sinon le moteur
+    # embarqué à tout le réseau de l'établissement.
+    env["OLLAMA_HOST"] = "127.0.0.1:11434"
     print(f"→ Démarrage d'Ollama (portable) — modèles : {modeles}")
     proc = subprocess.Popen(
         [str(OLLAMA_EXE), "serve"], env=env,
@@ -275,7 +286,12 @@ def surveiller_parent(flux, arret) -> None:
 # backend/profiles/ du dépôt et non dans celui de l'installation : une
 # installation neuve était inutilisable. Passer par l'exécutable lui-même
 # garantit d'écrire au bon endroit (_internal/backend/profiles/ en mode gelé).
-COMMANDES_COMPTES = {"init", "create-profile", "create-user", "list-profiles"}
+# Sous-commandes relayées à backend/manage_users.py. Toute commande ajoutée là-bas
+# doit l'être ici, sinon elle est inutilisable depuis ai-webapp.exe (poste installé).
+COMMANDES_COMPTES = {
+    "init", "create-profile", "create-user", "list-profiles",
+    "list-users", "change-password", "reset-password", "delete-user", "unlock", "set-role",
+}
 
 
 def run_comptes(argv: list[str]) -> int:
@@ -298,7 +314,8 @@ def run_comptes(argv: list[str]) -> int:
 def verifier_dossier_donnees() -> bool:
     """Affiche où sont les données et vérifie qu'on peut y écrire.
 
-    Sur un poste installé, les données vivent dans C:\\ProgramData\\Olivia et non
+    Sur un poste installé, les données vivent dans le profil du compte Windows
+    (%LOCALAPPDATA%\\Olivia) et non
     dans Program Files (voir backend/emplacements.py). Si ce dossier n'est pas
     modifiable, chaque connexion échouera : mieux vaut le dire ici, en clair,
     que laisser l'utilisatrice face à un écran de connexion qui refuse tout.

@@ -119,3 +119,25 @@ def formater_attente(secondes: float) -> str:
         return f"{m} minute{'s' if m > 1 else ''}"
     h = (m + 59) // 60
     return f"{h} heure{'s' if h > 1 else ''}"
+
+
+def est_bloque(username: str) -> bool:
+    """L'identifiant doit-il attendre avant une nouvelle tentative ?
+    (affiché dans la liste des comptes du responsable)"""
+    return attente_restante(username) > 0
+
+
+def debloquer(username: str) -> bool:
+    """Efface les échecs enregistrés pour cet identifiant (attente ET plafond des
+    24 heures). Renvoie False s'il n'y en avait aucun.
+
+    Réservé au responsable (API) et au service informatique (ligne de
+    commande), qui savent qui est derrière l'identifiant : sans cela, une
+    utilisatrice qui s'est trompée 25 fois restait dehors jusqu'au lendemain.
+    """
+    with profiles.store_lock:
+        data = _lire()
+        if data["tentatives"].pop(_cle(username), None) is None:
+            return False
+        profiles.write_store(_chemin(), data)
+        return True

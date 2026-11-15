@@ -127,7 +127,7 @@
               >
             </div>
             <div
-              v-if="!simple"
+              v-if="!simple && auth.estResponsable"
               class="field"
             >
               <label for="f-sys">Prompt système personnalisé</label>
@@ -145,8 +145,15 @@
             v-if="tab === 'documents'"
             aria-label="Documents"
           >
+            <p
+              v-if="!auth.estResponsable"
+              class="hint"
+            >
+              Les dossiers de travail, la lecture des documents scannés et le modèle
+              des documents Word. {{ MESSAGE_RESERVE }}
+            </p>
             <div
-              v-if="!simple"
+              v-if="!simple && auth.estResponsable"
               class="field"
             >
               <label for="f-fsroots">📁 Dossiers de documents accessibles</label>
@@ -163,54 +170,56 @@
               </p>
             </div>
 
-            <h3>🔎 Documents scannés</h3>
-            <div class="field">
-              <label class="checkbox">
-                <input
-                  v-model="settings.data.ocr_enabled"
-                  type="checkbox"
-                >
-                Lire le texte des documents scannés et des images
-              </label>
-              <p class="hint">
-                Une circulaire passée au scanner ou un courrier reçu par fax est un
-                document fait d'images : sans cette option, son texte n'apparaît dans
-                aucune recherche. Oliv'IA le déchiffre alors sur cette machine, sans
-                rien envoyer sur Internet. C'est plus lent la première fois (environ
-                une à trois secondes par page), puis le résultat est mémorisé.
-                La lecture automatique n'est jamais parfaite : les résultats obtenus
-                ainsi sont signalés par la mention « texte reconnu ».
-                Appliqué après <b>Enregistrer</b>.
-              </p>
-            </div>
-            <p
-              v-if="ocrState"
-              class="hint ocr-state"
-              aria-live="polite"
-            >
-              {{ ocrState.disponible ? '✅' : '⚠️' }} {{ ocrState.message }}
-              <template v-if="ocrState.chemin">
-                <br>
-                <code>{{ ocrState.chemin }}</code>
-              </template>
-            </p>
-            <div
-              v-if="!simple"
-              class="field"
-            >
-              <label for="f-ocr-path">Chemin du moteur de reconnaissance (facultatif)</label>
-              <input
-                id="f-ocr-path"
-                v-model="settings.data.ocr_tesseract_path"
-                placeholder="Laisser vide : moteur livré dans le dossier tesseract/"
+            <template v-if="auth.estResponsable">
+              <h3>🔎 Documents scannés</h3>
+              <div class="field">
+                <label class="checkbox">
+                  <input
+                    v-model="settings.data.ocr_enabled"
+                    type="checkbox"
+                  >
+                  Lire le texte des documents scannés et des images
+                </label>
+                <p class="hint">
+                  Une circulaire passée au scanner ou un courrier reçu par fax est un
+                  document fait d'images : sans cette option, son texte n'apparaît dans
+                  aucune recherche. Oliv'IA le déchiffre alors sur cette machine, sans
+                  rien envoyer sur Internet. C'est plus lent la première fois (environ
+                  une à trois secondes par page), puis le résultat est mémorisé.
+                  La lecture automatique n'est jamais parfaite : les résultats obtenus
+                  ainsi sont signalés par la mention « texte reconnu ».
+                  Appliqué après <b>Enregistrer</b>.
+                </p>
+              </div>
+              <p
+                v-if="ocrState"
+                class="hint ocr-state"
+                aria-live="polite"
               >
-              <p class="hint">
-                Utile seulement si Tesseract est installé ailleurs sur le poste.
-                Oliv'IA cherche d'abord le moteur livré avec elle, puis celui du système.
-                Le chemin doit désigner <code>tesseract.exe</code> ou le dossier qui le
-                contient : par sécurité, tout autre programme est refusé.
+                {{ ocrState.disponible ? '✅' : '⚠️' }} {{ ocrState.message }}
+                <template v-if="ocrState.chemin">
+                  <br>
+                  <code>{{ ocrState.chemin }}</code>
+                </template>
               </p>
-            </div>
+              <div
+                v-if="!simple"
+                class="field"
+              >
+                <label for="f-ocr-path">Chemin du moteur de reconnaissance (facultatif)</label>
+                <input
+                  id="f-ocr-path"
+                  v-model="settings.data.ocr_tesseract_path"
+                  placeholder="Laisser vide : moteur livré dans le dossier tesseract/"
+                >
+                <p class="hint">
+                  Utile seulement si Tesseract est installé ailleurs sur le poste.
+                  Oliv'IA cherche d'abord le moteur livré avec elle, puis celui du système.
+                  Le chemin doit désigner <code>tesseract.exe</code> ou le dossier qui le
+                  contient : par sécurité, tout autre programme est refusé.
+                </p>
+              </div>
+            </template>
 
             <h3>🧠 Recherche par le sens</h3>
             <p class="hint">
@@ -261,48 +270,50 @@
               </button>
             </div>
 
-            <h3>📄 Documents Word créés par Oliv'IA</h3>
-            <p
-              v-if="modeleEtat"
-              class="hint"
-              aria-live="polite"
-            >
-              {{ modeleEtat.disponible ? '✅' : '⚠️' }} {{ modeleEtat.message }}
-              <template v-if="modeleEtat.chemin">
-                <br>
-                <code>{{ modeleEtat.chemin }}</code>
-              </template>
-            </p>
-            <div class="field">
-              <label for="f-modele-source">Reprendre l'en-tête d'un document existant</label>
-              <input
-                id="f-modele-source"
-                v-model="modeleSource"
-                placeholder="r0/documents/Circulaire de rentrée.docx"
-              >
-              <p class="hint">
-                Indiquez un document Word de l'établissement (chemin affiché sous son
-                nom dans 📁 Documents). Oliv'IA en retire tout le texte et n'en garde
-                que l'identité : logo, en-tête, pied de page, polices et marges. C'est
-                ce modèle qui habille ensuite les circulaires, courriers, convocations
-                et comptes rendus. À refaire le jour où la charte du lycée change.
-              </p>
-              <div class="row">
-                <button
-                  :disabled="!modeleSource.trim() || modeleEnCours"
-                  @click="fabriquerModele"
-                >
-                  {{ modeleEnCours ? '⏳ Fabrication…' : '🏗 Fabriquer le modèle' }}
-                </button>
-              </div>
+            <template v-if="auth.estResponsable">
+              <h3>📄 Documents Word créés par Oliv'IA</h3>
               <p
-                v-if="modeleMsg"
+                v-if="modeleEtat"
                 class="hint"
                 aria-live="polite"
               >
-                {{ modeleMsg }}
+                {{ modeleEtat.disponible ? '✅' : '⚠️' }} {{ modeleEtat.message }}
+                <template v-if="modeleEtat.chemin">
+                  <br>
+                  <code>{{ modeleEtat.chemin }}</code>
+                </template>
               </p>
-            </div>
+              <div class="field">
+                <label for="f-modele-source">Reprendre l'en-tête d'un document existant</label>
+                <input
+                  id="f-modele-source"
+                  v-model="modeleSource"
+                  placeholder="r0/documents/Circulaire de rentrée.docx"
+                >
+                <p class="hint">
+                  Indiquez un document Word de l'établissement (chemin affiché sous son
+                  nom dans 📁 Documents). Oliv'IA en retire tout le texte et n'en garde
+                  que l'identité : logo, en-tête, pied de page, polices et marges. C'est
+                  ce modèle qui habille ensuite les circulaires, courriers, convocations
+                  et comptes rendus. À refaire le jour où la charte du lycée change.
+                </p>
+                <div class="row">
+                  <button
+                    :disabled="!modeleSource.trim() || modeleEnCours"
+                    @click="fabriquerModele"
+                  >
+                    {{ modeleEnCours ? '⏳ Fabrication…' : '🏗 Fabriquer le modèle' }}
+                  </button>
+                </div>
+                <p
+                  v-if="modeleMsg"
+                  class="hint"
+                  aria-live="polite"
+                >
+                  {{ modeleMsg }}
+                </p>
+              </div>
+            </template>
           </section>
 
           <!-- FORMULES DE POLITESSE -->
@@ -397,9 +408,21 @@
               v-if="settings.data.search_provider === 'brave'"
               class="field"
             >
-              <p class="hint">
-                Définissez la variable d'environnement
-                <code>BRAVE_API_KEY=votre-clé</code> avant de lancer le backend.
+              <label for="f-brave-key">Clé d'accès Brave Search</label>
+              <input
+                id="f-brave-key"
+                v-model="settings.data.search_brave_api_key"
+                type="password"
+                autocomplete="off"
+                aria-describedby="f-brave-note"
+              >
+              <p
+                v-if="noteBrave"
+                id="f-brave-note"
+                :class="noteBrave === 'a_ressaisir' ? 'warn' : 'hint'"
+                :role="noteBrave === 'a_ressaisir' ? 'alert' : null"
+              >
+                {{ noteBrave === 'a_ressaisir' ? AVERTISSEMENT_A_RESSAISIR : NOTE_EN_CLAIR }}
               </p>
             </div>
 
@@ -485,46 +508,59 @@
               Activer la connexion IMAP
             </label>
             <div class="field">
-              <label>Libellé affiché</label>
+              <label for="f-imap-label">Libellé affiché</label>
               <input
+                id="f-imap-label"
                 v-model="settings.data.connectors.imap.label"
                 placeholder="Boîte pro"
               >
             </div>
             <div class="field">
-              <label>Serveur IMAP</label>
+              <label for="f-imap-host">Serveur IMAP</label>
               <input
+                id="f-imap-host"
                 v-model="settings.data.connectors.imap.host"
                 placeholder="imap.gmail.com"
               >
             </div>
             <div class="field">
-              <label>Utilisateur (email)</label>
+              <label for="f-imap-user">Utilisateur (email)</label>
               <input
+                id="f-imap-user"
                 v-model="settings.data.connectors.imap.user"
                 placeholder="vous@pro.fr"
               >
             </div>
             <div class="field">
-              <label>Mot de passe d'application</label>
+              <label for="f-imap-password">Mot de passe d'application</label>
               <input
+                id="f-imap-password"
                 v-model="settings.data.connectors.imap.password"
                 type="password"
                 placeholder="16 caractères Gmail / token Outlook"
                 autocomplete="off"
+                aria-describedby="f-imap-note"
               >
+              <p
+                v-if="noteImap"
+                id="f-imap-note"
+                :class="noteImap === 'a_ressaisir' ? 'warn' : 'hint'"
+                :role="noteImap === 'a_ressaisir' ? 'alert' : null"
+              >
+                {{ noteImap === 'a_ressaisir' ? AVERTISSEMENT_A_RESSAISIR : NOTE_EN_CLAIR }}
+              </p>
             </div>
             <div class="field">
-              <label>Dossier</label>
+              <label for="f-imap-folder">Dossier</label>
               <input
+                id="f-imap-folder"
                 v-model="settings.data.connectors.imap.folder"
                 placeholder="INBOX"
               >
             </div>
             <p class="warn">
-              ⚠️ Stocké en clair dans <code>backend/settings.json</code> local.
-              <strong>Activez uniquement sur une machine de confiance.</strong>
-              Production : lib <code>keyring</code> (coffre OS) prévue dans requirements.txt.
+              <strong>Activez uniquement sur un poste de confiance.</strong>
+              Le mot de passe donne accès à la boîte mail.
             </p>
 
             <h3>📅 Calendrier (.ics local)</h3>
@@ -536,8 +572,9 @@
               Activer calendrier local
             </label>
             <div class="field">
-              <label>Chemin du fichier .ics</label>
+              <label for="f-ics-path">Chemin du fichier .ics</label>
               <input
+                id="f-ics-path"
                 v-model="settings.data.connectors.calendar_ics.path"
                 placeholder="C:\\Users\\vous\\cal.ics"
               >
@@ -558,8 +595,11 @@
               Activer Obsidian
             </label>
             <div class="field">
-              <label>Chemin du coffre</label>
-              <input v-model="settings.data.connectors.obsidian.vault_path">
+              <label for="f-obsidian-path">Chemin du coffre</label>
+              <input
+                id="f-obsidian-path"
+                v-model="settings.data.connectors.obsidian.vault_path"
+              >
             </div>
 
             <h3>🔗 Notion</h3>
@@ -571,13 +611,23 @@
               Activer Notion
             </label>
             <div class="field">
-              <label>Token d'intégration</label>
+              <label for="f-notion-token">Jeton d'intégration</label>
               <input
+                id="f-notion-token"
                 v-model="settings.data.connectors.notion.api_token"
                 type="password"
                 placeholder="secret_..."
                 autocomplete="off"
+                aria-describedby="f-notion-note"
               >
+              <p
+                v-if="noteNotion"
+                id="f-notion-note"
+                :class="noteNotion === 'a_ressaisir' ? 'warn' : 'hint'"
+                :role="noteNotion === 'a_ressaisir' ? 'alert' : null"
+              >
+                {{ noteNotion === 'a_ressaisir' ? AVERTISSEMENT_A_RESSAISIR : NOTE_EN_CLAIR }}
+              </p>
             </div>
           </section>
 
@@ -588,15 +638,21 @@
           >
             <h3>🔒 Vos données</h3>
             <p class="hint">
-              Oliv'IA fonctionne <b>entièrement sur cette machine</b>. Aucune donnée
-              (conversations, fichiers, identifiants) n'est transmise à un serveur externe.
+              Oliv'IA fonctionne <b>entièrement sur cette machine</b>. Vos conversations,
+              fichiers et identifiants ne sont transmis à aucun serveur externe.
               Les paramètres et les conversations sont stockés sur ce poste, dans le
               dossier des données d'Oliv'IA, séparément pour chaque organisation.
+            </p>
+            <p class="hint">
+              Seules exceptions, désactivées tant que vous ne les activez pas :
+              la <b>recherche web</b> envoie votre question au moteur de recherche choisi ;
+              les <b>mises à jour automatiques</b> de l'application de bureau interrogent
+              GitHub (adresse du poste et version installée, rien d'autre).
             </p>
 
             <h3>Droit d'accès et de portabilité</h3>
             <p class="hint">
-              Exportez l'ensemble de vos paramètres et données locales au format JSON.
+              {{ exportTexte }}
               Par sécurité, les mots de passe et clés d'accès enregistrés (boîte mail,
               moteur de recherche…) y sont masqués : le fichier peut circuler sans les
               divulguer.
@@ -605,18 +661,20 @@
               ⬇ Exporter mes données
             </button>
 
-            <h3>Droit à l'effacement</h3>
-            <p class="warn">
-              Réinitialise <strong>tous les paramètres</strong> et supprime les fichiers importés
-              via l'application (dossier <code>_uploads</code>). Vos autres documents ne sont pas touchés.
-              Action irréversible.
-            </p>
-            <button
-              class="danger"
-              @click="deleteData"
-            >
-              🗑 Supprimer mes données locales
-            </button>
+            <template v-if="auth.estResponsable">
+              <h3>Droit à l'effacement</h3>
+              <p class="warn">
+                Réinitialise <strong>tous les paramètres</strong> et supprime les fichiers importés
+                via l'application (dossier <code>_uploads</code>). Vos autres documents ne sont pas touchés.
+                Action irréversible.
+              </p>
+              <button
+                class="danger"
+                @click="deleteData"
+              >
+                🗑 Supprimer mes données locales
+              </button>
+            </template>
             <p
               v-if="privacyMsg"
               class="hint"
@@ -624,6 +682,20 @@
             >
               {{ privacyMsg }}
             </p>
+          </section>
+
+          <!-- MON COMPTE (tout compte) -->
+          <section
+            v-if="tab === 'compte'"
+            aria-label="Mon compte"
+          >
+            <MonCompte />
+          </section>
+
+          <!-- COMPTES DE L'ORGANISATION (responsable) : la liste est rechargée à
+               chaque ouverture de l'onglet, et ne survit pas à un changement de compte. -->
+          <section v-if="tab === 'comptes' && auth.estResponsable">
+            <ComptesOrganisation />
           </section>
         </div>
 
@@ -658,19 +730,32 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useSettingsStore } from '../stores/settings.js'
+import { useAuthStore } from '../stores/auth.js'
+import MonCompte from './MonCompte.vue'
+import ComptesOrganisation from './ComptesOrganisation.vue'
+import {
+  onglets, ongletDisponible, reglagesAEnvoyer, texteExport, MESSAGE_RESERVE,
+} from '../roles.js'
+import {
+  noteSecret, NOMS_SECRETS, NOTE_EN_CLAIR, AVERTISSEMENT_A_RESSAISIR,
+} from '../secrets.js'
 
 const settings = useSettingsStore()
+const auth = useAuthStore()
 const tab = ref('reasoning')
 const simple = computed(() => settings.data.simple_mode !== false)
-const allTabs = [
-  { id: 'reasoning', label: 'Préférences', simple: true },
-  { id: 'documents', label: 'Documents', simple: true },
-  { id: 'formules', label: 'Formules', simple: true },
-  { id: 'search', label: 'Recherche web', simple: false },
-  { id: 'connectors', label: 'Connexions', simple: false },
-  { id: 'privacy', label: 'Confidentialité', simple: true },
-]
-const tabs = computed(() => (simple.value ? allTabs.filter(t => t.simple) : allTabs))
+// Un membre ne voit ni les dossiers, ni les connexions, ni la recherche web, ni les
+// formules : le serveur les lui refuserait (403). Voir roles.js.
+const tabs = computed(() => onglets(auth.role, simple.value))
+const exportTexte = computed(() => texteExport(auth.role))
+const noteImap = computed(() => noteSecret(settings.etatSecrets, NOMS_SECRETS.imap))
+const noteNotion = computed(() => noteSecret(settings.etatSecrets, NOMS_SECRETS.notion))
+const noteBrave = computed(() => noteSecret(settings.etatSecrets, NOMS_SECRETS.brave))
+
+// L'onglet affiché doit toujours être proposé (changement de mode ou de compte).
+watch(tabs, () => {
+  if (!ongletDisponible(tab.value, auth.role, simple.value)) tab.value = 'reasoning'
+})
 
 // Textarea "un dossier par ligne" <-> tableau fs_roots.
 // Chaque ligne : "chemin" ou "chemin | libellé". Entrées objet {path, label}
@@ -697,7 +782,7 @@ const fsRootsText = computed({
 async function toggleAdvanced() {
   const goSimple = !simple.value
   settings.data.simple_mode = goSimple
-  if (goSimple && !allTabs.find(t => t.id === tab.value)?.simple) tab.value = 'reasoning'
+  if (!ongletDisponible(tab.value, auth.role, goSimple)) tab.value = 'reasoning'
   await settings.save({ simple_mode: goSimple })
 }
 
@@ -876,7 +961,10 @@ async function testSearch() {
 async function exportData() {
   try {
     const r = await fetch('/api/privacy/export')
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    if (!r.ok) {
+      const corps = await r.json().catch(() => null)
+      throw new Error(corps?.detail || `HTTP ${r.status}`)
+    }
     const blob = await r.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -903,7 +991,8 @@ async function deleteData() {
 }
 
 async function save() {
-  const result = await settings.save()
+  // Un membre n'envoie que ses réglages de confort (voir reglagesAEnvoyer).
+  const result = await settings.save(reglagesAEnvoyer(settings.data, auth.role))
   if (!result?.ok) {
     alert('Enregistrement impossible : ' + (result?.error || 'erreur inconnue'))
     return

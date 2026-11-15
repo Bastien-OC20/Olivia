@@ -41,6 +41,7 @@
         </option>
       </select>
       <button
+        v-if="auth.estResponsable"
         ref="browseBtn"
         class="ghost"
         @click="browserOpen = true"
@@ -251,6 +252,7 @@
     </Transition>
 
     <FolderPickerModal
+      v-if="auth.estResponsable"
       :is-open="browserOpen"
       @close="closeBrowser"
     />
@@ -262,10 +264,13 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import FilePreview from './FilePreview.vue'
 import FolderPickerModal from './FolderPickerModal.vue'
 import { useSettingsStore } from '../stores/settings.js'
+import { useAuthStore } from '../stores/auth.js'
 import { useChatStore } from '../stores/chat.js'
 import { useTableauxStore } from '../stores/tableaux.js'
 
 const settings = useSettingsStore()
+// Le parcours des dossiers du poste est réservé au responsable (403 sinon).
+const auth = useAuthStore()
 const chat = useChatStore()
 const tableaux = useTableauxStore()
 const items = ref([])

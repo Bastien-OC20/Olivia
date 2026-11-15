@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { copier, fusionner, restaurer } from '../reglages.js'
 
 // Doit rester aligné sur DEVICE_MODELS de backend/settings.py.
 const DEVICE_MODELS = {
@@ -19,6 +20,8 @@ const DEFAULTS = {
   simple_mode: true,
   search_provider: "duckduckgo",
   searxng_url: "http://localhost:8888",
+  // Clé Brave Search : secret, renvoyé masqué par le serveur (jamais en clair).
+  search_brave_api_key: "",
   search_official_only: false,
   // Reconnaissance de caractères sur les documents scannés (voir backend/ocr.py).
   // Activée par défaut, comme côté backend : sans cela un PDF passé au scanner
@@ -42,30 +45,31 @@ const DEFAULTS = {
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const data = ref(JSON.parse(JSON.stringify(DEFAULTS)))
+  const data = ref(copier(DEFAULTS))
+  // Dernière version ENREGISTRÉE (reçue du serveur). Les champs de la fenêtre sont liés
+  // directement à `data` : « Annuler » rétablit cette copie. Elle suit tous les
+  // enregistrements, y compris ceux de la barre du haut (⚡ 🧩 🪶) : ils ne sont donc
+  // jamais défaits par une annulation.
+  const enregistre = ref(copier(DEFAULTS))
   const open = ref(false)
   const saving = ref(false)
+  // { chiffres: bool, a_ressaisir: [noms] } d'après le serveur ; null si inconnu.
+  const etatSecrets = ref(null)
 
-  function _merge(base, loaded) {
-    const out = JSON.parse(JSON.stringify(base))
-    for (const k in loaded) {
-      if (loaded[k] && typeof loaded[k] === 'object' && !Array.isArray(loaded[k]) && out[k]) {
-        out[k] = { ...out[k], ...loaded[k] }
-        // fusion profonde du niveau connecteurs
-        if (k === 'connectors') {
-          for (const c in loaded[k]) out[k][c] = { ...(base.connectors[c] || {}), ...loaded[k][c] }
-        }
-      } else {
-        out[k] = loaded[k]
-      }
-    }
-    return out
+  /** Réglages reçus du serveur : ils deviennent à la fois l'affichage et la référence. */
+  function adopter(recus) {
+    // `etat_secrets` n'est pas un réglage : il est gardé à part pour ne jamais
+    // repartir dans le PUT.
+    const { etat_secrets: etat, ...reglages } = recus || {}
+    etatSecrets.value = etat && typeof etat === 'object' ? etat : null
+    data.value = fusionner(DEFAULTS, reglages)
+    enregistre.value = copier(data.value)
   }
 
   async function load() {
     try {
       const r = await fetch('/api/settings')
-      if (r.ok) data.value = _merge(DEFAULTS, await r.json())
+      if (r.ok) adopter(await r.json())
     } catch (e) { console.error('Impossible de charger les paramètres :', e) }
   }
 
@@ -79,7 +83,7 @@ export const useSettingsStore = defineStore('settings', () => {
       })
       const body = await r.json().catch(() => null)
       if (r.ok) {
-        data.value = _merge(DEFAULTS, body)
+        adopter(body)
         return { ok: true }
       }
       const error = body?.detail || `HTTP ${r.status}`
@@ -92,15 +96,22 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function show() { open.value = true }
-  function hide() { open.value = false }
+  /** Ferme la fenêtre. Ce qui n'a pas été enregistré est abandonné : après un
+   *  enregistrement réussi, `data` et `enregistre` sont identiques, rien ne change. */
+  function hide() {
+    if (open.value) data.value = restaurer(enregistre.value)
+    open.value = false
+  }
 
   /** Revient aux valeurs par défaut (déconnexion). Les réglages appartiennent à
    *  l'organisation et contiennent des secrets (identifiants de connecteurs) :
    *  ceux du compte précédent ne doivent pas rester en mémoire pour le suivant. */
   function reset() {
-    data.value = JSON.parse(JSON.stringify(DEFAULTS))
+    data.value = copier(DEFAULTS)
+    enregistre.value = copier(DEFAULTS)
+    etatSecrets.value = null
     open.value = false
   }
 
-  return { data, open, saving, load, save, show, hide, reset }
+  return { data, open, saving, etatSecrets, load, save, show, hide, reset }
 })

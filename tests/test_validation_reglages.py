@@ -103,3 +103,47 @@ def test_secret_masque_renvoye_ne_remplace_pas_le_vrai(client):
     assert client.put("/api/settings", json=lus).status_code == 200
     vrais = settings.reglages(client.pid).get()
     assert vrais["connectors"]["imap"]["password"] == "Vrai-MDP-1"
+
+
+def _coffre_simule(monkeypatch):
+    """Chiffrement actif, DPAPI remplacé par une transformation réversible
+    (vrai DPAPI : tests/test_coffre.py, sous Windows)."""
+    from backend import coffre
+    monkeypatch.setattr(coffre, "actif", lambda: True)
+    monkeypatch.setattr(coffre, "_proteger", lambda b: b"SIM" + b[::-1])
+
+    def deproteger(b):
+        if not b.startswith(b"SIM"):
+            raise coffre.SecretIllisible("simulé")
+        return b[3:][::-1]
+    monkeypatch.setattr(coffre, "_deproteger", deproteger)
+
+
+def test_secret_chiffre_reste_masque_et_utilisable(client, monkeypatch):
+    """Lot 4d : chiffré sur disque, masqué dans l'API, en clair pour le backend."""
+    _coffre_simule(monkeypatch)
+    client.put("/api/settings", json={"search_brave_api_key": "Cle-Brave-9",
+                                      "connectors": {"imap": {"password": "Vrai-MDP-1"}}})
+    fichier = profiles.profile_dir(client.pid) / "settings.json"
+    texte = fichier.read_text(encoding="utf-8")
+    assert "Vrai-MDP-1" not in texte and "Cle-Brave-9" not in texte
+    lus = client.get("/api/settings").json()
+    assert lus["connectors"]["imap"]["password"] == "••••••••"
+    assert lus["search_brave_api_key"] == "••••••••"
+    assert client.put("/api/settings", json=lus).status_code == 200
+    vrais = settings.reglages(client.pid).get()
+    assert vrais["connectors"]["imap"]["password"] == "Vrai-MDP-1"
+    assert vrais["search_brave_api_key"] == "Cle-Brave-9"
+
+
+def test_secret_illisible_ne_bloque_pas_les_reglages(client, monkeypatch):
+    """Fichier copié d'un autre compte Windows : jamais d'erreur 500."""
+    fichier = profiles.profile_dir(client.pid) / "settings.json"
+    fichier.parent.mkdir(parents=True, exist_ok=True)
+    fichier.write_text('{"connectors": {"imap": {"password": "dpapi:v1:AAAA"}}}',
+                       encoding="utf-8")
+    monkeypatch.setattr(settings, "registry", settings.SettingsRegistry())
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    assert r.json()["connectors"]["imap"]["password"] == ""
+    assert settings.reglages(client.pid).secrets_a_ressaisir() == ["connectors.imap.password"]

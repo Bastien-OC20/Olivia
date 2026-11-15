@@ -230,11 +230,26 @@ onMounted(() => {
 // encore valide au démarrage, et connexion réussie).
 watch(() => auth.connecte, (ouverte) => {
   if (ouverte) demarrer()
-  else {                         // déconnexion ou session expirée
-    moteur.arreter()
-    tableaux.reinitialiser()
-  }
+  else purger()                  // déconnexion OU session expirée
 })
+
+/** Vide tout ce qui appartient au compte qui vient de quitter la session.
+ *
+ *  Le poste peut être partagé : rien du compte précédent ne doit rester à
+ *  l'écran ni en mémoire pour la personne qui se connectera ensuite. Appelée
+ *  pour une déconnexion comme pour une session EXPIRÉE : auparavant seule la
+ *  déconnexion explicite vidait la conversation et les documents joints, et
+ *  après une expiration (8 h) le compte suivant retrouvait la conversation du
+ *  précédent — dont les documents joints repartaient vers le modèle. */
+function purger() {
+  moteur.arreter()
+  chat.stop()                    // une réponse en cours ne doit pas finir chez le suivant
+  chat.clear()
+  chat.clearFileContexts()
+  chat.conversations = []
+  tableaux.reinitialiser()
+  settings.reset()
+}
 
 // Ouvrir une conversation depuis la liste ramène à la conversation : sinon le
 // clic ne produirait aucun effet visible tant qu'un tableau est affiché. Le
@@ -281,15 +296,11 @@ async function demarrer() {
 }
 
 async function deconnexion() {
+  // La purge suit le passage de `auth.connecte` à faux (voir le `watch` plus
+  // haut). Appelée ici aussi, sans attendre : si la session était déjà fermée
+  // côté serveur, `connecte` ne change pas et le `watch` ne se déclenche pas.
   await auth.deconnexion()
-  moteur.arreter()
-  // Le poste peut être partagé : rien du compte précédent ne doit rester à
-  // l'écran ni en mémoire pour la personne qui se connectera ensuite.
-  chat.clear()
-  chat.clearFileContexts()
-  chat.conversations = []
-  tableaux.reinitialiser()
-  settings.reset()
+  purger()
 }
 
 // Navigation clavier attendue pour un role="tablist" (flèches, Début, Fin).
