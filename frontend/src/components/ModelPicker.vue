@@ -15,7 +15,7 @@
           :key="m.name"
           :value="m.name"
         >
-          {{ m.name }} ({{ m.size_gb }} Go){{ m.recommended ? ' ✓ adapté' : '' }}
+          {{ m.name }} ({{ m.size_gb }} Go){{ m.recommended ? ' — adapté' : '' }}
         </option>
       </optgroup>
       <optgroup

@@ -180,3 +180,14 @@ test('copierSaufModeles : écarte models/ (sans tenir compte de la casse), garde
   // Un sous-dossier « models » plus profond n'est pas celui d'Ollama.
   assert.ok(copie('lib', 'models'))
 })
+
+test('couleurFondFenetre : suit le thème de Windows, alignée sur --fond de l\'interface', () => {
+  assert.equal(outils.couleurFondFenetre(true), '#0b1020')
+  assert.equal(outils.couleurFondFenetre(false), '#f5f7fc')
+  // Garde-fou : si les couleurs des thèmes changent dans style.css, la fenêtre
+  // doit suivre, sinon un éclair d'une autre couleur précède l'interface.
+  const css = require('node:fs').readFileSync(
+    path.join(__dirname, '..', '..', 'frontend', 'src', 'style.css'), 'utf8')
+  assert.match(css, /--fond:\s*#0b1020/)
+  assert.match(css, /--fond:\s*#f5f7fc/)
+})

@@ -182,7 +182,21 @@ function estLienExterneAutorise (url) {
   }
 }
 
+/**
+ * Couleur de fond de la fenêtre, visible avant que l'interface ne s'affiche.
+ * Elle reprend `--fond` des deux thèmes de frontend/src/style.css (à tenir
+ * alignée) : sans cela, en thème clair, un éclair sombre précédait l'interface.
+ * Le réglage « theme » de l'organisation n'est pas encore connu à ce stade :
+ * on suit le thème de Windows, comme l'écran de connexion.
+ * @param {boolean} sombre thème sombre de Windows (nativeTheme.shouldUseDarkColors)
+ * @returns {string}
+ */
+function couleurFondFenetre(sombre) {
+  return sombre ? '#0b1020' : '#f5f7fc'
+}
+
 module.exports = {
+  couleurFondFenetre,
   PORT_PREFERE,
   PORT_MAX,
   choisirPort,

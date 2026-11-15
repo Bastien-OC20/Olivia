@@ -15,7 +15,7 @@
  */
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut, shell, dialog, ipcMain, nativeImage,
-  session,
+  nativeTheme, session,
 } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
@@ -187,7 +187,7 @@ function creerFenetre () {
     icon: path.join(__dirname, 'icons', 'fenetre.png'),
     autoHideMenuBar: true,
     show: false,
-    backgroundColor: '#0f1115',
+    backgroundColor: outils.couleurFondFenetre(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
