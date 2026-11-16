@@ -181,6 +181,35 @@
                     step="0.05"
                   >
                 </div>
+                <!-- Boucle d'outils : réservée au responsable (réglage de l'organisation). -->
+                <div
+                  v-if="auth.estResponsable"
+                  class="field"
+                >
+                  <label class="checkbox">
+                    <input
+                      id="f-outils"
+                      v-model="settings.data.outils_actifs"
+                      type="checkbox"
+                      aria-describedby="f-outils-aide"
+                      :disabled="outilsIndisponibles"
+                    >
+                    Laisser Oliv'IA consulter d'elle-même les documents, les mails et l'agenda
+                  </label>
+                  <p
+                    id="f-outils-aide"
+                    class="hint"
+                  >
+                    <template v-if="outilsIndisponibles">
+                      Disponible uniquement en mode ⚡ Rapide (GPU).
+                    </template>
+                    <template v-else>
+                      Oliv'IA ne fait que lire : rien n'est modifié et rien ne part sur
+                      Internet. Tout document à créer vous est d'abord proposé : il n'est
+                      créé que si vous cliquez. Appliqué après <b>Enregistrer</b>.
+                    </template>
+                  </p>
+                </div>
                 <div
                   v-if="!simple && auth.estResponsable"
                   class="field"
@@ -1005,6 +1034,9 @@ const tab = ref('reasoning')
 const simple = computed(() => settings.data.simple_mode !== false)
 // Un membre ne voit ni les dossiers, ni les connexions, ni la recherche web, ni les
 // formules : le serveur les lui refuserait (403). Voir roles.js.
+// La consultation autonome demande le mode Rapide (GPU) : trop lente sur processeur.
+const outilsIndisponibles = computed(
+  () => ['cpu', 'leger'].includes(settings.data.compute_device))
 const tabs = computed(() => onglets(auth.role, simple.value))
 const exportTexte = computed(() => texteExport(auth.role))
 const noteImap = computed(() => noteSecret(settings.etatSecrets, NOMS_SECRETS.imap))

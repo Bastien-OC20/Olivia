@@ -1,5 +1,64 @@
 <template>
   <div class="bubble-body">
+    <!-- Consultations faites par Oliv'IA avant de répondre. La région est annoncée
+         poliment aux lecteurs d'écran : une étape qui démarre ou se termine se lit. -->
+    <div
+      class="etapes"
+      aria-live="polite"
+    >
+      <ul
+        v-if="etapes.length"
+        class="etapes-liste"
+        aria-label="Ce qu'Oliv'IA a consulté"
+      >
+        <li
+          v-for="e in etapes"
+          :key="e.id"
+          class="etape"
+          :class="e.etat"
+        >
+          <Icone
+            :nom="iconeEtape(e)"
+            :taille="15"
+          />
+          <span class="etape-texte">
+            <span>{{ e.libelle || libelleParDefaut(e) }}</span>
+            <!-- L'état est écrit en toutes lettres : jamais la couleur seule. -->
+            <span
+              v-if="e.etat === 'en_cours'"
+              class="etape-etat"
+            > — en cours…</span>
+            <span
+              v-else-if="e.etat === 'echec'"
+              class="etape-etat echec"
+            > — échec{{ e.resume ? ` : ${e.resume}` : '' }}</span>
+            <span
+              v-else-if="e.resume"
+              class="etape-etat"
+            > — {{ e.resume }}</span>
+            <span
+              v-if="documentsDe(e).length"
+              class="etape-docs"
+            >
+              <button
+                v-for="d in documentsDe(e)"
+                :key="d.path"
+                type="button"
+                class="etape-doc"
+                @click="emit('ouvrir-document', d)"
+              >
+                <Icone
+                  nom="document"
+                  :taille="13"
+                />
+                {{ d.name || d.path }}
+              </button>
+            </span>
+          </span>
+        </li>
+      </ul>
+    </div>
+
     <details
       v-if="reasoning"
       class="reasoning"
@@ -25,6 +84,48 @@
       v-html="html"
     />
     <!-- eslint-enable vue/no-v-html -->
+
+    <!-- Oliv'IA ne crée jamais le document d'elle-même : elle le propose, et c'est
+         un clic qui ouvre le formulaire prérempli. -->
+    <div
+      v-if="proposition && !streaming"
+      class="proposition carte"
+    >
+      <p class="proposition-texte">
+        <Icone
+          nom="document"
+          :taille="18"
+        />
+        <span>
+          Oliv'IA propose de créer : {{ libelleType(proposition.type_document) }}
+          <template v-if="proposition.titre">« {{ proposition.titre }} »</template>
+        </span>
+      </p>
+      <div class="proposition-actions">
+        <button
+          type="button"
+          class="btn btn-primaire btn-compact"
+          @click="emit('proposition', 'creer')"
+        >
+          <Icone
+            nom="coche"
+            :taille="16"
+          />
+          Créer le document
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondaire btn-compact"
+          @click="emit('proposition', 'modifier')"
+        >
+          <Icone
+            nom="crayon"
+            :taille="16"
+          />
+          Modifier…
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -51,7 +152,43 @@ const THROTTLE_MS = 100
 const props = defineProps({
   content: { type: String, default: '' },
   streaming: { type: Boolean, default: false },
+  etapes: { type: Array, default: () => [] },
+  proposition: { type: Object, default: null },
+  // Types du formulaire Word ({ id, libelle }), pour nommer le type proposé.
+  typesDocument: { type: Array, default: () => [] },
 })
+
+// `ouvrir-document` : ouvre l'aperçu d'un document consulté (géré par ChatPanel) ;
+// `proposition` : 'creer' ou 'modifier', les deux ouvrent le formulaire prérempli.
+const emit = defineEmits(['ouvrir-document', 'proposition'])
+
+const ICONES_OUTILS = {
+  chercher_documents: 'loupe',
+  lire_document: 'document',
+  lister_mails_non_lus: 'mail',
+  consulter_agenda: 'calendrier',
+}
+const LIBELLES_OUTILS = {
+  chercher_documents: 'Recherche dans les documents',
+  lire_document: "Lecture d'un document",
+  lister_mails_non_lus: 'Consultation des mails non lus',
+  consulter_agenda: "Consultation de l'agenda",
+}
+
+function iconeEtape(e) {
+  if (e.etat === 'echec') return 'alerte'
+  return Object.hasOwn(ICONES_OUTILS, e.outil) ? ICONES_OUTILS[e.outil] : 'etincelles'
+}
+// Une étape reçue sans libellé (ligne de fin seule) reste lisible.
+function libelleParDefaut(e) {
+  return Object.hasOwn(LIBELLES_OUTILS, e.outil) ? LIBELLES_OUTILS[e.outil] : 'Consultation'
+}
+function documentsDe(e) {
+  return Array.isArray(e.documents) ? e.documents.filter((d) => d && d.path) : []
+}
+function libelleType(id) {
+  return props.typesDocument.find((t) => t.id === id)?.libelle || 'un document Word'
+}
 
 const html = ref('')
 const reasoning = ref('')
@@ -124,6 +261,40 @@ onBeforeUnmount(clearTimer)
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
+
+/* Étapes de consultation : discrètes, au-dessus de la réponse. */
+.etapes-liste { list-style: none; margin: 0 0 var(--e-3); padding: 0; }
+.etape {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--discret);
+  margin: 2px 0;
+}
+.etape .icone { flex-shrink: 0; margin-top: 2px; }
+.etape.echec .icone { color: var(--danger); }
+.etape-etat.echec { color: var(--texte); font-weight: 600; }
+.etape-docs { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; margin-left: 6px; }
+.etape-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--accent-texte);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.proposition { margin-top: var(--e-3); padding: var(--e-3) var(--e-4); }
+.proposition-texte { display: flex; align-items: flex-start; gap: var(--e-2); margin: 0; }
+.proposition-texte .icone { flex-shrink: 0; margin-top: 3px; color: var(--accent-texte); }
+.proposition-actions { display: flex; flex-wrap: wrap; gap: var(--e-2); margin-top: var(--e-3); }
 
 .reasoning {
   margin: 0 0 var(--e-3);

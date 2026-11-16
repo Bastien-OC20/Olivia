@@ -82,10 +82,11 @@ from fastapi.responses import (
     StreamingResponse, JSONResponse, FileResponse, RedirectResponse, PlainTextResponse,
 )
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from .settings import reglages, style_directives, valider_patch
+from .settings import DEVICE_MODELS, NUM_CTX, reglages, style_directives, valider_patch
 from .search import web_search
 from . import coffre
 from . import documents
@@ -95,6 +96,7 @@ from . import docgen
 from . import docmodele
 from . import moteur
 from . import ocr
+from . import outils
 from . import conversations
 from . import tableaux
 from . import profiles
@@ -711,7 +713,9 @@ def safe_path(profile_id: str, virtual: str) -> tuple[Path, Path, str]:
     except ValueError:
         raise HTTPException(
             status_code=403,
-            detail=f"Accès refusé : '{virtual}' sort du périmètre autorisé ({root})",
+            # Sans le dossier de travail : ce message est lu par tout compte, et
+            # le chemin du disque n'apprend rien d'utile à l'utilisatrice.
+            detail=f"Accès refusé : '{virtual}' sort des dossiers de travail",
         )
     if zones.est_reserve(p, deja_resolu=True):
         raise HTTPException(403, "Accès refusé : dossier réservé au fonctionnement d'Oliv'IA")
@@ -851,11 +855,16 @@ async def moteur_telecharger(body: dict, profile_id: str = Depends(get_current_p
 def _build_options(profile_id: str, temperature: float | None) -> dict:
     s = reglages(profile_id).get()
     eff_temp = s.get("temperature", 0.7) if temperature is None else temperature
-    options = {"temperature": eff_temp, "num_predict": MAX_TOKENS_REPONSE}
+    peripherique = s.get("compute_device", "gpu")
+    options = {
+        "temperature": eff_temp, "num_predict": MAX_TOKENS_REPONSE,
+        # Sans num_ctx, Ollama coupe en silence au-delà de 4096 jetons (voir NUM_CTX).
+        "num_ctx": NUM_CTX.get(peripherique, NUM_CTX["gpu"]),
+    }
     # CPU/GPU : num_gpu=0 force le calcul CPU ; sinon Ollama utilise le GPU auto.
     # Le mode « leger » n'impose rien : son modèle (~1 Go) tient aussi sur une
     # petite carte graphique, qu'Ollama emploie alors d'office.
-    if s.get("compute_device") == "cpu":
+    if peripherique == "cpu":
         options["num_gpu"] = 0
     return options
 
@@ -903,6 +912,10 @@ async def chat_stream(req: ChatRequest, profile_id: str = Depends(get_current_pr
         # après chaque pause de plus de 5 min (défaut Ollama).
         "keep_alive": -1,
     }
+    if await _outils_actifs(profile_id, req.model):
+        return StreamingResponse(
+            _flux_avec_outils(profile_id, req.model, body["messages"], body["options"]),
+            media_type="text/event-stream")
 
     async def event_generator():
         try:
@@ -971,6 +984,280 @@ def _erreur_ollama_lisible(statut: int, corps: str, modele: str) -> str:
     return f"Le moteur d'IA a refusé la demande (erreur {statut}) : {detail[:300]}"
 
 
+# ---------- Boucle d'outils du chat (voir backend/outils.py) ----------
+# Modèles autorisés à recevoir des outils : ceux qui ont passé le banc d'essai
+# (`tests/banc/banc_outils.py`), c'est-à-dire le modèle GPU retenu. La capacité
+# « tools » annoncée par Ollama ne suffit pas : `mistral-nemo` la déclare, mais
+# au banc du 16/11/2026 il écrivait ses appels en texte et SUIVAIT les consignes
+# cachées dans un mail ou un document piégé. Une installation antérieure, ou le
+# sélecteur du mode avancé, peut encore envoyer ce modèle : il garde alors le
+# chat d'avant, sans outils. Changer le modèle GPU impose de rejouer le banc.
+MODELES_OUTILS_VALIDES = frozenset(DEVICE_MODELS["gpu"])
+# Température plafonnée en mode outils (16/11/2026) : au banc, ministral-3:8b
+# fait 36/36 à 0,3, mais à 0,7 (le réglage par défaut) il suit une consigne
+# piégée. Le plafond ne s'applique qu'aux réponses en mode outils (tous leurs
+# tours) : le chat sans outils garde la température réglée.
+TEMPERATURE_MAX_OUTILS = 0.3
+# Délai de `POST /api/show` : quelques millisecondes d'habitude. Un Ollama qui
+# ne répond pas ne doit retarder la réponse que de ce délai, puis le chat part
+# sans outils (et l'erreur de connexion habituelle s'affiche s'il est éteint).
+DELAI_CAPACITES = 5.0
+# Capacités par nom de modèle, en mémoire : une réponse exploitable d'Ollama ne
+# change pas tant que le modèle n'est pas remplacé. Un échec n'y est jamais
+# rangé : un modèle téléchargé entre-temps doit être reconnu au message suivant.
+_capacites_outils: dict[str, bool] = {}
+
+
+async def _modele_sait_appeler_des_outils(modele: str) -> bool:
+    """Le modèle déclare-t-il la capacité « tools » (`POST /api/show`) ?
+    Toute réponse inexploitable vaut « non », sans être mise en cache."""
+    if modele in _capacites_outils:
+        return _capacites_outils[modele]
+    try:
+        async with httpx.AsyncClient(timeout=DELAI_CAPACITES) as client:
+            reponse = await client.post(f"{OLLAMA_URL}/api/show", json={"model": modele})
+            if reponse.status_code != 200:
+                return False
+            donnees = reponse.json()
+    except Exception:
+        return False
+    if not isinstance(donnees, dict):
+        return False
+    capacites = donnees.get("capabilities")
+    sait = isinstance(capacites, list) and "tools" in capacites
+    _capacites_outils[modele] = sait
+    return sait
+
+
+async def _outils_actifs(profile_id: str, modele: str) -> bool:
+    """La boucle d'outils s'applique-t-elle à ce message ?
+
+    Toutes les conditions sont requises : réglage `outils_actifs` de
+    l'organisation, mode GPU (décision du 16/11/2026 : les modèles CPU et Léger
+    n'ont pas passé le banc), modèle validé au banc et capacité « tools »
+    déclarée par Ollama. Sinon le chat se comporte exactement comme avant.
+    Les conditions locales passent en premier : elles évitent l'appel à Ollama.
+    """
+    s = reglages(profile_id).get()
+    if s.get("outils_actifs") is not True:
+        return False
+    if s.get("compute_device", "gpu") != "gpu":
+        return False
+    if modele not in MODELES_OUTILS_VALIDES:
+        return False
+    return await _modele_sait_appeler_des_outils(modele)
+
+
+def _extrait_resultat(resultat: dict) -> str:
+    extraits = [str(e) for e in (resultat.get("snippets") or []) if e]
+    return " … ".join(extraits[:2])
+
+
+def _chercher_pour_outil(profile_id: str, requete: str) -> list[dict]:
+    """Outil `chercher_documents` : par le sens si l'index de l'organisation
+    répond, sinon par mots-clés, comme les deux routes de recherche.
+
+    Index absent, vide, modèle bge-m3 manquant ou aucun document proche : la
+    recherche par mots-clés prend le relais, pour que l'outil serve aussi sur un
+    poste où l'index n'a jamais été construit. Chemins toujours virtuels
+    (`rN/…`) : une entrée de l'index hors des dossiers actuels est écartée.
+    """
+    semantique = docindex.rechercher(profile_id, requete, k=outils.MAX_RESULTATS_RECHERCHE)
+    trouves = []
+    for r in semantique.get("results") or []:
+        virtuel = _virtual_for_abs(profile_id, Path(str(r.get("path") or "")))
+        if virtuel is None:
+            continue
+        trouves.append({"path": virtuel, "name": str(r.get("name") or ""),
+                        "extrait": _extrait_resultat(r)})
+    if trouves:
+        return trouves
+    cibles = _resolve_search_targets(profile_id, "")
+    mots_cles = docsearch.search(profile_id, _iter_searchable_files(cibles), requete)
+    return [{"path": str(r.get("path") or ""), "name": str(r.get("name") or ""),
+             "extrait": _extrait_resultat(r)}
+            for r in mots_cles.get("results") or []]
+
+
+def _lire_pour_outil(profile_id: str, chemin: str) -> str:
+    """Outil `lire_document` : même extraction que `GET /api/fs/text`.
+
+    Les refus de `safe_path` deviennent les exceptions attendues par
+    outils.py, SANS leur message : celui de `safe_path` cite le dossier de
+    travail en chemin absolu, qui ne doit parvenir ni au modèle ni au flux.
+    """
+    try:
+        p, _root, _prefix = safe_path(profile_id, chemin)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise FileNotFoundError("document introuvable") from None
+        raise PermissionError("hors des dossiers de travail") from None
+    if zones.est_reserve(p, deja_resolu=True):
+        raise PermissionError("dossier réservé")
+    if not p.is_file():
+        raise FileNotFoundError("document introuvable")
+    if p.suffix.lower() not in documents.SEARCHABLE_EXT:
+        raise ValueError("format non pris en charge")
+    return documents.extract_text(profile_id, p)[:MAX_TEXT_CHARS]
+
+
+def _contexte_outils(profile_id: str) -> outils.ContexteOutils:
+    """Sources offertes au modèle, pour l'organisation de la SESSION seulement.
+
+    Mails et agenda ne sont proposés que s'ils sont configurés (un outil
+    impossible à honorer pousserait le modèle à des appels vains) ; leurs
+    réglages sont lus ici, une fois, pour toute la réponse.
+    """
+    connecteurs = reglages(profile_id).get().get("connectors") or {}
+
+    def chercher(requete: str) -> list[dict]:
+        return _chercher_pour_outil(profile_id, requete)
+
+    def lire(chemin: str) -> str:
+        return _lire_pour_outil(profile_id, chemin)
+
+    imap = connecteurs.get("imap") or {}
+    hote, compte, secret = imap.get("host"), imap.get("user"), imap.get("password")
+    dossier = imap.get("folder") or "INBOX"
+    boite_configuree = bool(imap.get("enabled") and hote and compte and secret)
+
+    def mails(nombre: int) -> list[dict]:
+        # read_inbox ouvre la boîte en lecture seule (BODY.PEEK) : consulter ne
+        # marque aucun mail comme lu.
+        return read_inbox(hote, compte, secret, dossier, limit=nombre)
+
+    calendrier = connecteurs.get("calendar_ics") or {}
+    chemin_ics = str(calendrier.get("path") or "").strip()
+    # Même garde que GET /api/connectors/calendar/preview : le chemin du .ics est
+    # un réglage libre, il ne doit pas désigner un fichier interne d'Olivia.
+    agenda_configure = bool(calendrier.get("enabled") and chemin_ics
+                            and not zones.est_reserve(Path(chemin_ics)))
+
+    def agenda() -> list[dict]:
+        return calendar_list_events(chemin_ics, limit=outils.MAX_EVENEMENTS)
+
+    return outils.ContexteOutils(chercher=chercher, lire=lire,
+                                 mails=mails if boite_configuree else None,
+                                 agenda=agenda if agenda_configure else None)
+
+
+def _appel_lisible(appel) -> tuple[str, object]:
+    """(nom, arguments) d'un appel d'outil d'Ollama. Les arguments arrivent en
+    objet ; certains modèles les envoient en texte JSON, décodé ici. Tout le
+    reste (appel mal formé) est laissé à outils.executer, qui en fait un échec."""
+    fonction = appel.get("function") if isinstance(appel, dict) else None
+    if not isinstance(fonction, dict):
+        return "", None
+    arguments = fonction.get("arguments")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except ValueError:
+            pass
+    return str(fonction.get("name") or ""), arguments
+
+
+async def _flux_avec_outils(profile_id: str, modele: str, messages: list[dict],
+                            options: dict):
+    """Flux SSE de `POST /api/chat/stream` quand la boucle d'outils est active.
+
+    Un tour = une requête streamée à Ollama. Le texte est relayé en direct ;
+    les appels d'outils (dans n'importe quel morceau) sont accumulés. Un tour
+    terminé par des appels n'est PAS clos côté interface : Ollama envoie
+    `"done": true` à la fin de CHAQUE tour, et l'interface s'arrête au premier
+    reçu ; seul le `done` du dernier tour (sans appel) est donc relayé.
+    Chaque outil s'exécute hors de la boucle d'événements (IMAP, extraction,
+    FAISS sont bloquants), encadré de deux lignes `etape` (en cours, puis
+    finie ou en échec), suivies d'une ligne `proposition` le cas échéant.
+    Au plus `outils.MAX_TOURS_OUTILS` tours avec outils ; un dernier tour sans
+    outils force alors une réponse en texte.
+    """
+    ctx = _contexte_outils(profile_id)
+    definitions = outils.definitions(ctx)
+    messages[0]["content"] = f"{messages[0]['content']} {outils.DIRECTIVE_OUTILS}".strip()
+    options["temperature"] = min(options["temperature"], TEMPERATURE_MAX_OUTILS)
+    numero_etape = 0
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            for tour in range(outils.MAX_TOURS_OUTILS + 1):
+                avec_outils = tour < outils.MAX_TOURS_OUTILS
+                corps = {"model": modele, "messages": messages, "stream": True,
+                         "options": options, "keep_alive": -1}
+                if avec_outils:
+                    corps["tools"] = definitions
+                texte: list[str] = []
+                appels: list[dict] = []
+                fin = None
+                contenu_fin = ""
+                async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=corps) as resp:
+                    if resp.status_code >= 400:
+                        brut = (await resp.aread()).decode("utf-8", "replace")
+                        yield _ligne_sse({"error": _erreur_ollama_lisible(
+                            resp.status_code, brut, modele)})
+                        return
+                    async for ligne in resp.aiter_lines():
+                        if not ligne:
+                            continue
+                        try:
+                            morceau = json.loads(ligne)
+                        except ValueError:
+                            continue          # ligne incomplète : jamais relayée
+                        if not isinstance(morceau, dict):
+                            continue
+                        if morceau.get("error"):
+                            # Erreur d'Ollama en cours de réponse : fin du flux.
+                            yield _ligne_sse({"error": str(morceau["error"])})
+                            return
+                        message = morceau.get("message")
+                        message = message if isinstance(message, dict) else {}
+                        if isinstance(message.get("tool_calls"), list):
+                            appels.extend(a for a in message["tool_calls"] if isinstance(a, dict))
+                        contenu = message.get("content")
+                        contenu = contenu if isinstance(contenu, str) else ""
+                        texte.append(contenu)
+                        if morceau.get("done"):
+                            fin, contenu_fin = morceau, contenu
+                        elif contenu:
+                            yield _ligne_sse({**morceau, "message": {
+                                "role": "assistant", "content": contenu}})
+
+                if not (appels and avec_outils):
+                    # Dernier tour : son `done` clôt le flux, comme sans outils.
+                    if fin is not None:
+                        yield _ligne_sse({**fin, "message": {
+                            "role": "assistant", "content": contenu_fin}})
+                    return
+
+                # Tour d'outils : un éventuel texte porté par la ligne `done` est
+                # relayé, mais pas la fin elle-même.
+                if contenu_fin:
+                    yield _ligne_sse({"message": {"role": "assistant", "content": contenu_fin},
+                                      "done": False})
+                # Au-delà du plafond, les appels sont oubliés : ni exécutés, ni
+                # rendus au modèle (l'historique doit rester cohérent).
+                appels = appels[:outils.MAX_APPELS_PAR_TOUR]
+                messages.append({"role": "assistant", "content": "".join(texte),
+                                 "tool_calls": appels})
+                for appel in appels:
+                    nom, arguments = _appel_lisible(appel)
+                    numero_etape += 1
+                    base = {"id": numero_etape, "outil": nom,
+                            "libelle": outils.libelle(nom, arguments)}
+                    yield _ligne_sse({"etape": {**base, "etat": "en_cours"}})
+                    resultat = await run_in_threadpool(outils.executer, ctx, nom, arguments)
+                    yield _ligne_sse({"etape": {**resultat.etape, **base}})
+                    if resultat.proposition:
+                        yield _ligne_sse({"proposition": resultat.proposition})
+                    messages.append({"role": "tool", "tool_name": nom,
+                                     "content": resultat.texte_modele})
+    except httpx.ConnectError:
+        yield _ligne_sse({"error": MESSAGE_OLLAMA_INJOIGNABLE})
+    except httpx.HTTPError as e:
+        yield _ligne_sse({"error": f"La connexion au moteur d'IA a été interrompue ({e})."})
+    except Exception as e:
+        yield _ligne_sse({"error": f"Erreur inattendue pendant la réponse : {e}"})
+
+
 @app.post("/api/chat")
 async def chat_blocking(req: ChatRequest, profile_id: str = Depends(get_current_profile)):
     body = {
@@ -990,6 +1277,25 @@ async def chat_blocking(req: ChatRequest, profile_id: str = Depends(get_current_
 
 
 # ---------- Routes Filesystem sandboxées ----------
+def _noms_de_racines_distincts(entries: list[tuple[Path, str]]) -> list[str]:
+    """Noms affichés des dossiers de travail, tous différents, SANS chemin.
+
+    Deux dossiers homonymes étaient distingués par le chemin complet de leur
+    parent (« Courrier — C:\\…\\Lycée ») : tout compte de l'organisation, membre
+    compris, lisait ainsi l'arborescence du poste (corrigé le 16/11/2026). On
+    ajoute le seul NOM du dossier parent, puis un numéro si cela ne suffit pas.
+    """
+    noms = [label or r.name for r, label in entries]
+    noms = [f"{nom} — {r.parent.name}" if noms.count(nom) > 1 and r.parent.name else nom
+            for nom, (r, _label) in zip(noms, entries)]
+    vus: dict[str, int] = {}
+    distincts = []
+    for nom in noms:
+        vus[nom] = vus.get(nom, 0) + 1
+        distincts.append(nom if vus[nom] == 1 else f"{nom} ({vus[nom]})")
+    return distincts
+
+
 @app.get("/api/fs/list")
 async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide = racine)"),
                   profile_id: str = Depends(get_current_profile)):
@@ -1000,18 +1306,20 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
         if len(entries) == 1:
             root, label = entries[0]
             if not root.exists() or not root.is_dir():
-                raise HTTPException(404, f"Dossier introuvable : {root}")
+                raise HTTPException(404, f"Le dossier de travail « {label or root.name} » est "
+                                         "introuvable : vérifiez-le dans Paramètres → Documents.")
+            # `root` = le NOM du dossier, plus son chemin : tout compte lit cette
+            # réponse, membre compris, et l'interface n'en tire que le libellé
+            # (corrigé le 16/11/2026, comme les messages d'erreur ci-dessous).
             return {
-                "root": str(root), "current": "", "items": _list_dir_items(root, root, "r0"),
-                "root_label": label or root.name,
+                "root": label or root.name, "current": "",
+                "items": _list_dir_items(root, root, "r0"), "root_label": label or root.name,
             }
         # Plusieurs racines : on les présente comme des dossiers de premier niveau.
-        display_names = [label or r.name for r, label in entries]
+        noms = _noms_de_racines_distincts(entries)
         items = []
         for i, (r, label) in enumerate(entries):
-            name = display_names[i]
-            if display_names.count(name) > 1:
-                name = f"{name} — {r.parent}"
+            name = noms[i]
             try:
                 mtime = r.stat().st_mtime
             except OSError:
@@ -1026,17 +1334,18 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
         }
 
     p, root, prefix = safe_path(profile_id, raw)
+    # Messages : le chemin VIRTUEL envoyé par l'interface, jamais celui du disque.
     if not p.exists():
-        raise HTTPException(404, f"Dossier introuvable : {p}")
+        raise HTTPException(404, f"Dossier introuvable : {raw}")
     if not p.is_dir():
-        raise HTTPException(400, f"Pas un dossier : {p}")
+        raise HTTPException(400, f"Pas un dossier : {raw}")
     m = _R_PREFIX_RE.match(prefix)
     if not m:
         raise HTTPException(400, f"Préfixe invalide : {prefix}")
     idx = int(m.group(1))
     root_label = entries[idx][1] or root.name
     return {
-        "root": str(root), "current": raw, "items": _list_dir_items(p, root, prefix),
+        "root": root_label, "current": raw, "items": _list_dir_items(p, root, prefix),
         "root_label": root_label,
     }
 
@@ -1045,15 +1354,16 @@ async def fs_list(path: str = Query("", description="Chemin virtuel rN/... (vide
 async def fs_read(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
     p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
-        raise HTTPException(404, f"Fichier introuvable : {p}")
+        raise HTTPException(404, f"Fichier introuvable : {path}")
     if p.suffix.lower() not in ALLOWED_EXT:
         raise HTTPException(400, f"Extension non autorisée : {p.suffix}")
     if p.stat().st_size > MAX_FILE_SIZE:
         raise HTTPException(413, f"Fichier trop volumineux (>{MAX_FILE_SIZE} octets)")
     try:
         return {"path": _virtual_path(p, root, prefix), "content": p.read_text(errors="ignore")}
-    except Exception as e:
-        raise HTTPException(500, f"Erreur lecture : {e}")
+    except Exception:
+        # Pas le texte de l'exception : il cite le chemin du disque.
+        raise HTTPException(500, f"Le fichier {path} n'a pas pu être lu.")
 
 
 # Route synchrone (def) : l'aperçu ouvre et décode le fichier (Word, Excel, CSV),
@@ -1063,7 +1373,7 @@ async def fs_read(path: str = Query(...), profile_id: str = Depends(get_current_
 def fs_preview(path: str = Query(...), profile_id: str = Depends(get_current_profile)):
     p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
-        raise HTTPException(404, f"Fichier introuvable : {p}")
+        raise HTTPException(404, f"Fichier introuvable : {path}")
     rel = _virtual_path(p, root, prefix)
     # Chemin ENCODÉ : un nom comme « C&A n°1+2.pdf » cassait l'adresse (le « & »
     # ouvrait un nouveau paramètre, le « + » devenait une espace) et l'aperçu
@@ -1094,7 +1404,7 @@ def fs_text(path: str = Query(...), profile_id: str = Depends(get_current_profil
     """
     p, root, prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
-        raise HTTPException(404, f"Fichier introuvable : {p}")
+        raise HTTPException(404, f"Fichier introuvable : {path}")
     if p.suffix.lower() not in documents.SEARCHABLE_EXT:
         raise HTTPException(400, f"Ce type de fichier ne contient pas de texte : {p.suffix}")
     content = documents.extract_text(profile_id, p)
@@ -1120,7 +1430,7 @@ async def fs_download(path: str = Query(...), apercu: bool = Query(False),
     """
     p, _root, _prefix = safe_path(profile_id, path)
     if not p.exists() or not p.is_file():
-        raise HTTPException(404, f"Fichier introuvable : {p}")
+        raise HTTPException(404, f"Fichier introuvable : {path}")
     if apercu and p.suffix.lower() == ".pdf":
         return FileResponse(str(p), filename=p.name, media_type="application/pdf",
                             content_disposition_type="inline")
@@ -1192,8 +1502,10 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
     size = 0
     try:
         dest, out = _ouvrir_fichier_neuf(target_dir, safe_name)
-    except OSError as e:
-        raise HTTPException(500, f"Erreur d'upload : {e}")
+    except OSError:
+        # Pas le texte de l'exception : il cite le chemin du disque.
+        raise HTTPException(500, "L'import du fichier a échoué : vérifiez qu'il n'est pas ouvert "
+                            "dans un autre logiciel, puis réessayez.")
     try:
         with out:
             while chunk := await file.read(1024 * 1024):
@@ -1208,9 +1520,10 @@ async def fs_upload(file: UploadFile = File(...), path: str = Query(""),
                 out.write(chunk)
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         dest.unlink(missing_ok=True)
-        raise HTTPException(500, f"Erreur d'upload : {e}")
+        raise HTTPException(500, "L'import du fichier a échoué : vérifiez qu'il n'est pas ouvert "
+                            "dans un autre logiciel, puis réessayez.")
     # Le fichier vient d'apparaître : sans ce déclenchement, il resterait
     # introuvable par la recherche par le sens jusqu'au prochain démarrage ou
     # clic manuel sur « Construire l'index ». Tâche de fond, jamais bloquant.
@@ -1477,9 +1790,38 @@ async def fs_browse(path: str = Query(..., description="Chemin absolu (hors sand
 
 
 # ---------- Routes Settings ----------
-def _reponse_reglages(profile_id: str) -> JSONResponse:
+def _nom_de_racine(entree) -> str:
+    """Nom affichable d'une entrée de `fs_roots` : son libellé, sinon le nom du
+    dossier (dernier élément du chemin, séparateurs Windows ou POSIX)."""
+    if isinstance(entree, dict):
+        libelle = str(entree.get("label") or "").strip()
+        chemin = str(entree.get("path") or "")
+    else:
+        libelle, chemin = "", str(entree or "")
+    return libelle or (re.split(r"[\\/]", chemin.rstrip("\\/"))[-1] if chemin else "")
+
+
+def _vue_membre(donnees: dict) -> dict:
+    """Réglages tels qu'un MEMBRE les reçoit : sans aucun réglage réservé au
+    responsable, ni l'ancienne clé `fs_root` (un chemin).
+
+    Avant le 16/11/2026, tout compte recevait tout : chemins des dossiers, du
+    calendrier et de Tesseract, serveur et compte IMAP, prompt système.
+    L'interface les cachait au membre, pas le serveur. Seuls les NOMS des dossiers
+    de travail restent, dans le même ordre (l'explorateur choisit un dossier par
+    son rang, `rN`), avec un chemin vide.
+    """
+    vue = {k: v for k, v in donnees.items()
+           if k not in CLES_RESERVEES_RESPONSABLE and k != "fs_root"}
+    vue["fs_roots"] = [{"path": "", "label": _nom_de_racine(e)}
+                       for e in donnees.get("fs_roots") or []]
+    return vue
+
+
+def _reponse_reglages(profile_id: str, role: str) -> JSONResponse:
     """Réglages masqués, plus l'état des secrets sous `etat_secrets` (hors des
     réglages : `valider_patch` ignore cette clé si l'interface la renvoie).
+    Un membre ne reçoit que sa vue (`_vue_membre`).
 
     - `chiffres` : faux sur une clé portable, sous macOS ou Linux, où les
       secrets restent en clair dans settings.json (voir coffre.py) ; l'interface
@@ -1489,6 +1831,8 @@ def _reponse_reglages(profile_id: str) -> JSONResponse:
     """
     reglages_profil = reglages(profile_id)
     donnees = _mask_secrets(reglages_profil.get())
+    if role != users.ROLE_RESPONSABLE:
+        donnees = _vue_membre(donnees)
     donnees["etat_secrets"] = {
         "chiffres": coffre.actif(),
         "a_ressaisir": reglages_profil.secrets_a_ressaisir(),
@@ -1497,9 +1841,11 @@ def _reponse_reglages(profile_id: str) -> JSONResponse:
 
 
 @app.get("/api/settings")
-def get_settings(profile_id: str = Depends(get_current_profile)):
-    """Réglages de l'organisation connectée (jamais ceux d'une autre)."""
-    return _reponse_reglages(profile_id)
+def get_settings(identite: dict = Depends(get_identite),
+                 profile_id: str = Depends(get_current_profile)):
+    """Réglages de l'organisation connectée (jamais ceux d'une autre) ; un
+    membre ne reçoit pas les réglages réservés au responsable."""
+    return _reponse_reglages(profile_id, identite["role"])
 
 
 # Réglages d'ORGANISATION, réservés au responsable (lot 4) : ils décident de ce
@@ -1515,6 +1861,9 @@ CLES_RESERVEES_RESPONSABLE = frozenset({
     "ocr_enabled", "ocr_tesseract_path",
     "system_prompt",
     "docgen_appel", "docgen_formule_politesse", "docgen_lieu", "docgen_signature",
+    # Boucle d'outils : décide si le modèle lit de lui-même documents, mails et
+    # agenda de l'organisation, au même titre que `fs_roots` et `connectors`.
+    "outils_actifs",
 })
 
 
@@ -1569,6 +1918,16 @@ def _cles_reservees_modifiees(patch: dict, actuels: dict) -> list[str]:
 @app.put("/api/settings")
 def update_settings(patch: dict, identite: dict = Depends(get_identite),
                     profile_id: str = Depends(get_current_profile)):
+    # Un membre ne reçoit qu'une vue réduite (`_vue_membre`), où les dossiers
+    # n'ont plus de chemin. S'il la renvoie telle quelle (l'interface renvoie ce
+    # qu'elle a reçu), ces valeurs ne sont pas des changements : on les retire
+    # AVANT la validation, qui refuserait un dossier sans chemin, et avant le
+    # contrôle des droits, qui y verrait une modification des dossiers.
+    if identite["role"] != users.ROLE_RESPONSABLE and isinstance(patch, dict):
+        vue = _vue_membre(_mask_secrets(reglages(profile_id).get()))
+        for cle in CLES_RESERVEES_RESPONSABLE & patch.keys():
+            if cle in vue and patch[cle] == vue[cle]:
+                del patch[cle]
     # Types et bornes de chaque réglage connu (voir settings.valider_patch) :
     # une valeur invalide est refusée ici, avec un message qui nomme le champ,
     # au lieu d'être enregistrée puis de faire échouer chaque appel au modèle.
@@ -1638,7 +1997,7 @@ def update_settings(patch: dict, identite: dict = Depends(get_identite),
         patch["fs_roots"] = cleaned
     reglages_profil = reglages(profile_id)
     reglages_profil.update(patch)
-    return _reponse_reglages(profile_id)
+    return _reponse_reglages(profile_id, identite["role"])
 
 
 def _valider_chemin_tesseract(brut, actuel: str = "") -> str:
@@ -1775,8 +2134,11 @@ async def documents_modele(body: dict, profile_id: str = Depends(get_current_pro
             p, destination=docmodele.chemin_modele_organisation(profile_id))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Fabrication du modèle impossible : {e}")
+    except Exception:
+        # Pas le texte de l'exception : il cite le chemin du disque.
+        raise HTTPException(500, "Fabrication du modèle impossible : le document n'a pas "
+                                 "pu être lu ou le modèle écrit. Réessayez avec un autre "
+                                 "document Word.")
     return {"ok": True, "modele": infos, "etat": docmodele.etat(profile_id)}
 
 
@@ -1836,9 +2198,11 @@ async def documents_generate(demande: DemandeDocument,
                                chemin_modele=docmodele.chemin_modele(profile_id))
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except Exception as e:
+    except Exception:
         dest.unlink(missing_ok=True)
-        raise HTTPException(500, f"Création du document impossible : {e}")
+        # Pas le texte de l'exception : il cite le chemin du disque.
+        raise HTTPException(500, "Création du document impossible : le fichier n'a pas pu "
+                                 "être écrit dans le dossier de travail. Réessayez.")
 
     return {
         "path": _virtual_path(dest, root, prefix),

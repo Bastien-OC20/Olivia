@@ -99,6 +99,18 @@ def test_theme_invalide_refuse(client, valeur):
     assert client.get("/api/settings").json()["theme"] == "systeme"
 
 
+def test_outils_actifs_par_defaut_et_booleen(client):
+    """Boucle d'outils du chat : active par défaut, et un vrai booléen exigé
+    (« non » serait vrai en Python et laisserait les outils actifs)."""
+    assert client.get("/api/settings").json()["outils_actifs"] is True
+    for valeur in ("non", 0, None):
+        r = client.put("/api/settings", json={"outils_actifs": valeur})
+        assert r.status_code == 400 and "outils_actifs" in r.json()["detail"]
+    r = client.put("/api/settings", json={"outils_actifs": False})
+    assert r.status_code == 200 and r.json()["outils_actifs"] is False
+    assert settings.reglages(client.pid).get()["outils_actifs"] is False
+
+
 def test_cle_inconnue_ignoree_sans_bloquer_l_enregistrement(client):
     # Clés d'anciennes versions renvoyées par l'interface : ignorées, pas refusées.
     r = client.put("/api/settings", json={

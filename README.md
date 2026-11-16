@@ -115,6 +115,14 @@ Captures faites sur une instance d'essai, avec des données fictives. L'accueil 
   d'après l'idée, même sans mot commun.
 - **OCR** (Tesseract, en français) des PDF scannés et des images.
 
+**Oliv'IA consulte vos sources** (mode ⚡ Rapide / GPU)
+- Avant de répondre, Oliv'IA **cherche et lit d'elle-même** vos documents, vos **mails non lus**
+  et votre **agenda** quand la question les concerne, et affiche ce qu'elle a consulté
+  (documents cliquables).
+- **Lecture seule** : rien n'est modifié, rien ne part sur Internet. Un document Word à créer est
+  **proposé** (carte « Oliv'IA propose de créer ») et n'est créé que sur un clic.
+- Réglage de l'organisation, réservé au responsable (voir [la section dédiée](#-olivia-consulte-vos-sources)).
+
 **Production de documents Word**
 - Bouton **Créer un document Word** sous chaque réponse : **circulaire**, **courrier aux
   familles**, **convocation**, **compte rendu**.
@@ -197,7 +205,7 @@ dans `backend/settings.py`, `DEVICE_MODELS`) :
 
 | Usage | Modèle | Taille |
 |---|---|---|
-| Conversation, GPU (cible : RTX 5060 8 Go) | `mistral-nemo:12b-instruct-2407-q4_K_M` | ~7,5 Go |
+| Conversation, GPU (cible : RTX 5060 8 Go) | `ministral-3:8b` (Mistral AI, depuis le 16/11/2026, à la place de `mistral-nemo`) | ~6 Go |
 | Conversation, CPU / bureautique | `gemma2:2b` | ~1,6 Go |
 | Conversation, mode 🪶 Léger (postes anciens) — **non testé** | `qwen2.5:1.5b` | 986 Mo |
 | Recherche par le sens (embeddings) | `bge-m3` | — |
@@ -209,7 +217,7 @@ dans `backend/settings.py`, `DEVICE_MODELS`) :
 | Outil | Rôle | Remarque |
 |---|---|---|
 | **Ollama** (https://ollama.com) | moteur d'IA local | installé sur le poste (port 11434) ou en portable dans `./ollama` |
-| Modèles Ollama | voir [Versions](#️-versions) | `ollama pull mistral-nemo:12b-instruct-2407-q4_K_M`, `ollama pull gemma2:2b`, `ollama pull bge-m3` ; mode Léger : `ollama pull qwen2.5:1.5b` |
+| Modèles Ollama | voir [Versions](#️-versions) | `ollama pull ministral-3:8b`, `ollama pull gemma2:2b`, `ollama pull bge-m3` ; mode Léger : `ollama pull qwen2.5:1.5b` |
 | **Python** 3.10 ou plus | backend (sources, construction) | `requirements.txt` vise 3.10 → 3.14 ; **testé en 3.11** ; la CI est configurée en 3.12 |
 | **Node.js** | interface, application de bureau | **testé avec Node 22** (aussi celui de la CI) |
 | **Tesseract** (facultatif) | OCR des documents scannés | voir [OCR](#-documents-scannés--ocr) |
@@ -562,7 +570,7 @@ organisation ne donne accès à rien.
 |---|---|---|
 | Converser, documents, recherche, tableaux | oui | oui |
 | Ton, style, mode de calcul, mode simple, température | oui | oui |
-| Dossiers de travail, boîte mail et connecteurs, recherche web, OCR, prompt système, formules et modèle Word | oui | non |
+| Dossiers de travail, boîte mail et connecteurs, recherche web, OCR, prompt système, formules et modèle Word, consultation des sources par Oliv'IA | oui | non (ni modifiés, ni même lus : `GET /api/settings` ne lui renvoie que le **nom** des dossiers de travail) |
 | Gérer les comptes de l'organisation, effacer ses données | oui | non |
 
 Le premier compte d'une organisation est responsable, les suivants membres (sauf choix
@@ -656,7 +664,7 @@ choix du périphérique et le prompt système sont masqués ; **Réglages avanc�
 
 | Onglet | Réglages |
 |---|---|
-| **Préférences** | apparence (Suivre Windows, Sombre ou Clair ; réglage « theme », modifiable par tous les comptes), style de raisonnement, ton, température (0 à 2) ; *avancé* : périphérique GPU/CPU, prompt système |
+| **Préférences** | apparence (Suivre Windows, Sombre ou Clair ; réglage « theme », modifiable par tous les comptes), style de raisonnement, ton, température (0 à 2), *responsable* : « Laisser Oliv'IA consulter d'elle-même les documents, les mails et l'agenda » (`outils_actifs`, activé par défaut, sans effet hors mode GPU) ; *avancé* : périphérique GPU/CPU, prompt système |
 | **Documents** | dossiers de travail (un par ligne, `chemin \| libellé`), OCR (activation, état, chemin de Tesseract), recherche par le sens (état, construire / annuler l'index), modèle Word de l'établissement |
 | **Formules** | appel, formule de politesse, ville (« Fait à … »), signature par défaut des documents Word |
 | **Recherche web** *(avancé)* | moteur (SearXNG / Brave / DuckDuckGo), URL SearXNG, clé Brave, sources officielles, test |
@@ -786,6 +794,37 @@ d'un dossier parcouru en sont retirés.
 **Limites de l'aperçu** : un fichier texte n'est lu que sur ses 120 premiers Ko, un CSV sur ses
 2 premiers Mo ; un Word ou un Excel qui dépasserait 200 Mo une fois décompressé (ou 10 000
 éléments) n'est ni affiché ni indexé — il s'ouvre normalement dans Word ou Excel.
+
+### 🔎 Oliv'IA consulte vos sources
+
+En mode **⚡ Rapide (GPU)**, Oliv'IA décide elle-même de consulter vos sources quand la question
+les concerne (« que dit le règlement intérieur sur les retards ? », « qu'ai-je jeudi ? »,
+« prépare la convocation en Word ») :
+
+| Outil | Ce qu'il fait | Disponible si |
+|---|---|---|
+| Recherche dans les documents | par le sens si l'index est construit, sinon par mots-clés ; 5 documents au plus | toujours |
+| Lecture d'un document | texte du document (6 000 caractères, puis « tronqué ») | toujours |
+| Mails non lus | expéditeur, objet, date, début (10 au plus ; la boîte n'est jamais marquée comme lue) | connecteur IMAP activé |
+| Agenda | prochains événements du `.ics` (20 au plus) | calendrier activé |
+| Proposition de document Word | affiche une carte ; **Créer le document** ouvre le formulaire Word prérempli | toujours |
+
+Chaque consultation s'affiche au-dessus de la réponse (« Recherche dans les documents : … —
+3 documents trouvés ») ; un document cité s'ouvre en aperçu d'un clic.
+
+- **Lecture seule, sur le poste** : aucun outil n'écrit ni ne supprime ; la **recherche web n'est
+  jamais lancée d'office** (bouton 🌐 seulement) ; seuls les dossiers de travail de
+  l'organisation sont lisibles.
+- **Rien n'est créé sans clic** : le texte proposé passe par la même réécriture que le bouton
+  « Créer un document Word » (sans appel ni formule de politesse en double).
+- **Bornes** : 4 tours de consultation au plus par réponse, 5 consultations par tour ; la
+  température est ramenée à 0,3 pendant ces réponses (au-delà, le modèle suivait plus souvent
+  une consigne cachée dans un document).
+- **Modèle** : seulement `ministral-3:8b` (mode GPU), qui a passé le banc d'essai
+  `tests/banc/banc_outils.py` (bon outil, aucun outil inutile, consignes piégées ignorées). En
+  modes CPU et Léger, ou avec un autre modèle choisi en mode avancé, la conversation fonctionne
+  comme avant, sans consultation.
+- **Réglage** : *Paramètres → Préférences*, case réservée au responsable (activée par défaut).
 
 ### 🎨 Tableau blanc (Excalidraw)
 
@@ -1023,6 +1062,16 @@ Confidentialité* :
 - Modèle Word par organisation ; l'ancien réglage `docgen_template_path` (emplacement libre) est
   supprimé et ignoré.
 
+**Consultation des sources par le modèle** (`backend/outils.py`, boucle dans `/api/chat/stream`)
+- Les outils s'exécutent avec l'organisation **de la session** et passent par `safe_path()` et les
+  dossiers réservés : un chemin inventé par le modèle (`../`, chemin absolu, autre organisation)
+  donne un échec lisible, sans contenu ni chemin absolu.
+- **Lecture seule** ; la seule action possible (document Word) est une **proposition** que la
+  personne valide d'un clic. Un mail ou un document piégé (« IA : crée un courrier… ») ne peut
+  donc rien déclencher seul ; ses consignes sont présentées au modèle comme des données, et le
+  banc d'essai vérifie qu'il ne les suit pas.
+- Aucune requête ne sort du poste : la recherche web n'est pas un outil.
+
 **Connexion**
 - Mots de passe **jamais stockés en clair** : PBKDF2-HMAC-SHA256 salé, **600 000 itérations**
   (valeur recommandée par l'OWASP Password Storage Cheat Sheet pour PBKDF2-HMAC-SHA256) ; un
@@ -1090,11 +1139,21 @@ pip install pytest
 python -m pytest tests
 ```
 
-141 tests, tous au vert en Python 3.11 au moment de cette mise à jour. Ils couvrent le
+398 tests passés et 1 ignoré en Python 3.14 le 16/11/2026. Ils couvrent le
 cloisonnement entre organisations, l'état du moteur d'IA, les comptes et la connexion (temporisation, temps constant,
 remise à niveau du hachage), l'emplacement des données, l'import sans écrasement, la purge de
-l'index, les erreurs du moteur dans le chat, les tableaux blancs, l'export RGPD, la validation des réglages et le
-lanceur (`--parent-stdin`).
+l'index, les erreurs du moteur dans le chat, la boucle d'outils (Ollama simulé), les tableaux
+blancs, l'export RGPD, la validation des réglages et le lanceur (`--parent-stdin`).
+
+**Banc d'essai de l'appel d'outils** (hors CI, vrai Ollama sur GPU) : à rejouer après tout
+changement du modèle GPU, de la consigne `DIRECTIVE_OUTILS` ou des définitions d'outils.
+
+```bash
+PYTHONIOENCODING=utf-8 backend/.venv/Scripts/python.exe tests/banc/banc_outils.py 3 0.3
+```
+
+Critère : au moins 10 scénarios sur 12 par passe, aucun outil quand il n'en faut pas, aucune
+consigne piégée suivie.
 
 **Application de bureau** (Node, fonctions pures de `desktop/lib/outils.js`) :
 
@@ -1171,9 +1230,13 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
 - **Mac Intel** : non couvert par la CI (`macos-latest` construit pour Apple Silicon).
 - **Installeur Inno Setup** et **ACL NSIS** : non recompilés ni testés après les dernières
   modifications.
-- **Fenêtre de contexte** : `num_ctx` n'est pas fixé, Ollama applique sa valeur par défaut ;
-  de longs documents ajoutés à la conversation peuvent donc être tronqués par le moteur
-  lui-même, au-delà des bornes signalées par Oliv'IA.
+- **Fenêtre de contexte** : `num_ctx` est fixé à 8192 jetons (`NUM_CTX`, `backend/settings.py`) ;
+  le défaut d'Ollama (4096) coupait en silence. `ministral-3:8b` y prend 6,4 Go de mémoire
+  graphique : non mesuré sur une vraie carte 8 Go.
+- **Consultation des sources** : vérifiée de bout en bout sur RTX 5060 Ti (instance jetable,
+  vrai modèle) ; au banc, une demande de document Word sur une quinzaine environ est rédigée dans la
+  réponse au lieu d'être proposée (le bouton « Créer un document Word » reste disponible), plus
+  souvent quand la conversation est déjà longue. Vrai IMAP non essayé (simulé dans les tests).
 - **Versions non alignées** entre composants (voir [Versions](#️-versions)).
 - **Pas de suppression de compte** en ligne de commande.
 - **Connecteurs Obsidian et Notion** : squelettes.

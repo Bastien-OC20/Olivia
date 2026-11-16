@@ -43,15 +43,31 @@ journal = logging.getLogger(__name__)
 # (dont `reasoning_style="detailed"` + `tone="teacher"`, le réglage le plus
 # exigeant testé, qui a justement révélé la plupart des échecs ci-dessous).
 #
-# GPU : Mistral Nemo (12B, Mistral AI + NVIDIA, Apache 2.0, conçu multilingue).
-#   Français administratif juste (« Madame, Monsieur, … Nous vous prions de bien
-#   vouloir »), sortie en PROSE PURE (pas de Markdown parasite), réponse
-#   correcte et complète en 12 s même avec le réglage « détaillé ». Alternatives
-#   écartées : `qwen3:8b` ajoute un méta-titre et des `**gras**` Markdown qui
-#   atterrissent tels quels dans le document Word produit ; `mistral:7b`
-#   (instruct) bascule en anglais en cours de document, ou part carrément hors
-#   sujet (voir CPU ci-dessous, même modèle) — un courrier bilingue ou erroné
-#   partirait aux familles sans que personne ne le remarque.
+# GPU : Ministral 3 8B (`ministral-3:8b`, Mistral AI, Apache 2.0), depuis le
+#   16/11/2026, à la place de Mistral Nemo. Raison : la boucle d'outils (le modèle
+#   consulte de lui-même documents, mails et agenda). Banc d'essai
+#   `tests/banc/banc_outils.py` (12 scénarios : bon outil, aucun outil quand il
+#   n'en faut pas, mails et documents piégés), température 0,3 :
+#   - `ministral-3:8b` : 36/36 ; refuse les consignes piégées (et les signale).
+#     6,4 Go de mémoire graphique à num_ctx 8192 : tient sur la carte cible de
+#     8 Go. 69 jetons/s sur RTX 5060 Ti.
+#   - `mistral-nemo` : 13/24 — écrit les appels d'outil EN TEXTE, suit les
+#     consignes cachées dans un mail ou un document, réponses vides, HTML
+#     parasite. 8,7 Go à 8192 : déborde d'une carte 8 Go. 51 jetons/s.
+#   - `qwen3.5:9b` : 24/24, mais éditeur hors UE (l'argument de souveraineté
+#     retient Mistral) et Markdown abondant.
+#   Prompt de référence : comme Nemo le même jour, Ministral 3 met du Markdown et
+#   tend au « tutoriel » en réglage détaillé + pédagogue ; la réécriture dirigée
+#   de la chaîne Word (DIRECTIVE_REDACTION, ChatPanel.vue) le nettoie (vérifié).
+#
+# Ancien GPU (jusqu'au 15/11/2026) : Mistral Nemo (12B, Mistral AI + NVIDIA, Apache 2.0). Bilan de
+#   l'époque, sans outils : français administratif juste (« Madame, Monsieur, … Nous vous prions de
+#   bien vouloir »), sortie en PROSE PURE (pas de Markdown parasite), réponse correcte et complète
+#   en 12 s même avec le réglage « détaillé ». Alternatives écartées : `qwen3:8b` ajoute un
+#   méta-titre et des `**gras**` Markdown qui atterrissent tels quels dans le document Word produit
+#   ; `mistral:7b` (instruct) bascule en anglais en cours de document, ou part carrément hors sujet
+#   (voir CPU ci-dessous, même modèle) — un courrier bilingue ou erroné partirait aux familles sans
+#   que personne ne le remarque.
 #
 # CPU : `gemma2:2b` (Google, Apache 2.0). Un 12B y serait inutilisable
 #   (plusieurs minutes par réponse). Seul candidat, sur SIX testés le
@@ -83,10 +99,23 @@ journal = logging.getLogger(__name__)
 #   annoncé en anglais seulement pour la taille 1B ; `llama3.2:1b` (1,3 Go par
 #   défaut) n'allège presque pas ; `qwen3:1.7b` est déjà recalé ci-dessus.
 DEVICE_MODELS = {
-    "gpu": ["mistral-nemo:12b-instruct-2407-q4_K_M"],
+    "gpu": ["ministral-3:8b"],
     "cpu": ["gemma2:2b"],
     "leger": ["qwen2.5:1.5b"],
 }
+
+# Fenêtre de contexte (`num_ctx`) envoyée à Ollama, par périphérique. Sans elle,
+# Ollama applique sa valeur par défaut — 4096 jetons, relevée le 16/11/2026
+# (Ollama 0.40.16) — et coupe EN SILENCE le début d'une conversation plus longue :
+# l'interface admet pourtant jusqu'à 24 000 caractères de documents joints
+# (≈ 7 000 jetons, `DOC_CHARS_TOTAL` dans frontend/src/stores/chat.js).
+# 8192 couvre ce budget et laisse la place aux résultats d'outils. C'est aussi le
+# maximum de `gemma2:2b`. Mesuré le 16/11/2026 sur RTX 5060 Ti 16 Go, mémoire
+# graphique : `ministral-3:8b` 6,4 Go à 8192 (tient sur la carte cible de 8 Go) ;
+# l'ancien `mistral-nemo` prenait 7,9 Go à 4096, 8,7 Go à 8192, 10,1 Go à 16384.
+# 16384 n'est pas retenu : rien ne l'exige aujourd'hui, et chaque doublement
+# coûte de la mémoire graphique qu'une carte de 8 Go n'a pas en réserve.
+NUM_CTX = {"gpu": 8192, "cpu": 8192, "leger": 8192}
 
 DEFAULTS = {
     "system_prompt": "Tu es un assistant IA local. Réponds en français, clair et structuré.",
@@ -118,6 +147,12 @@ DEFAULTS = {
     # Chemin d'un Tesseract installé ailleurs. Vide = moteur portable livré dans
     # le dossier tesseract/ de l'application, sinon celui trouvé dans le PATH.
     "ocr_tesseract_path": "",
+    # Boucle d'outils du chat : le modèle consulte de lui-même, en lecture seule,
+    # les documents, les mails non lus et l'agenda, et peut proposer un document
+    # Word (voir backend/outils.py). Réservé au responsable (il décide de ce
+    # qu'Olivia lit, comme pour les dossiers et les connecteurs). Sans effet hors
+    # du mode GPU : les modèles CPU et Léger n'ont pas passé le banc d'essai.
+    "outils_actifs": True,
     # Le modèle Word de l'établissement (logo, en-tête, styles) n'a PAS de réglage
     # d'emplacement : il est rangé dans le dossier de l'organisation, avec repli
     # sur le modèle commun modeles/modele-etablissement.docx (voir
@@ -163,7 +198,8 @@ CHOIX = {
     "search_provider": {"duckduckgo", "searxng", "brave"},
     "theme": {"systeme", "sombre", "clair"},
 }
-BOOLEENS = {"simple_mode", "search_official_only", "ocr_enabled", "privacy_consent"}
+BOOLEENS = {"simple_mode", "search_official_only", "ocr_enabled", "privacy_consent",
+            "outils_actifs"}
 # Texte libre : longueur maximale (borne une saisie aberrante, ou un collage
 # accidentel de plusieurs pages dans le prompt système).
 TEXTES = {

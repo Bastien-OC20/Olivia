@@ -5,7 +5,9 @@ import { appliquerTheme, themeEffectif } from '../theme.js'
 
 // Doit rester aligné sur DEVICE_MODELS de backend/settings.py.
 const DEVICE_MODELS = {
-  gpu: ["mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
+  // mistral-nemo reste en 2e position : sur un poste pas encore mis à jour, il sert
+  // en attendant que le panneau « pas encore prête » fasse télécharger ministral-3.
+  gpu: ["ministral-3:8b", "mistral-nemo:12b-instruct-2407-q4_K_M", "qwen3:8b", "qwen2.5-coder:7b",
         "llama3.3:8b", "qwen2.5-vl:7b", "phi4-mini:3.8b"],
   cpu: ["qwen3:4b", "qwen3:1.7b", "phi4-mini:3.8b", "gemma2:2b"],
   leger: ["qwen2.5:1.5b"],
@@ -39,6 +41,9 @@ const DEFAULTS = {
   docgen_lieu: "",
   docgen_signature: "",
   fs_roots: [],
+  // Consultation autonome des documents, mails et agenda (lecture seule) ; réglage
+  // du responsable, absent de CLES_MEMBRE. Sans effet hors mode GPU (côté serveur).
+  outils_actifs: true,
   privacy_consent: false,
   connectors: {
     imap: { enabled: false, label: "Boîte pro", host: "", user: "", password: "", folder: "INBOX" },

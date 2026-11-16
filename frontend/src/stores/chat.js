@@ -10,6 +10,7 @@ import {
   DOC_MAX, reponseApplicable, idAAppliquerApresEnregistrement, normaliserDocuments,
   documentsPourEnvoi, documentDepuisTexte, avisDocumentsIndisponibles, fusionnerDocuments,
 } from '../conversationDocs.js'
+import { analyserLigne, appliquerEvenement, champsOutils } from '../fluxChat.js'
 
 // Recherche web : nombre de résultats injectés et longueur max de la requête
 // envoyée au moteur (une demande de chat peut être un paragraphe entier).
@@ -236,6 +237,8 @@ export const useChatStore = defineStore('chat', () => {
       erreur: m.erreur || '',
       // Tableau créé par /tableau : garde le bouton « Ouvrir le tableau ».
       ...(m.tableau ? { tableau: m.tableau } : {}),
+      // Étapes de consultation et proposition de document : à réafficher au rechargement.
+      ...champsOutils(m),
     }))
   }
 
@@ -293,6 +296,7 @@ export const useChatStore = defineStore('chat', () => {
         searchNote: m.searchNote || '',
         erreur: m.erreur || '',
         ...(m.tableau ? { tableau: m.tableau } : {}),
+        ...champsOutils(m),
       })), [])
       historyUnavailable.value = false
       const aRecharger = normaliserDocuments(data.documents)
@@ -429,7 +433,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     messages.value.push({ role: 'user', content: userMessage })
     isStreaming.value = true
-    messages.value.push({ role: 'assistant', content: '', sources: [], searchNote: '', erreur: '' })
+    messages.value.push({
+      role: 'assistant', content: '', sources: [], searchNote: '', erreur: '',
+      etapes: [], proposition: null,
+    })
     // On reprend l'élément DEPUIS le tableau : Vue renvoie alors un proxy réactif.
     // Écrire sur l'objet brut d'origine ne déclencherait aucun rendu — la réponse
     // n'apparaîtrait qu'à la toute fin du streaming, et la comparaison
@@ -509,31 +516,9 @@ export const useChatStore = defineStore('chat', () => {
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
-          if (!line.startsWith('data:')) continue
-          let payload
-          try {
-            payload = JSON.parse(line.slice(5).trim())
-          } catch {
-            continue           // ligne incomplète ou étrangère au protocole
-          }
-          // Erreur du moteur (Ollama éteint, modèle absent…), envoyée par le
-          // backend ou par Ollama en cours de réponse. Auparavant ignorée :
-          // l'utilisatrice voyait une bulle vide, sans explication.
-          if (payload.error) {
-            assistantMsg.erreur = String(payload.error)
-            termine = true
-            break lecture
-          }
-          if (payload.message?.content) {
-            assistantMsg.content += payload.message.content
-          }
-          if (payload.done) {
-            // Plafond de génération atteint (num_predict, voir backend) : la
-            // réponse est coupée, il faut le dire avant qu'elle soit recopiée.
-            if (payload.done_reason === 'length') {
-              assistantMsg.erreur = 'Réponse coupée : longueur maximale atteinte. '
-                + 'Demandez la suite, ou une version plus courte.'
-            }
+          const payload = analyserLigne(line)
+          if (!payload) continue
+          if (appliquerEvenement(assistantMsg, payload)) {
             termine = true
             break lecture
           }

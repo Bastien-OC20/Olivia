@@ -12,7 +12,7 @@
 ;      fichiers (moteurs + modèles) — voir README pour leur mise en place.
 ;
 ; Tout est embarqué (comme la clé USB) : Ollama portable + les 3 modèles
-; retenus (mistral-nemo, gemma2:2b, bge-m3 — voir backend/settings.py) +
+; retenus (ministral-3:8b, gemma2:2b, bge-m3 — voir backend/settings.py) +
 ; Tesseract + le modèle Word de l'établissement. Installeur volumineux
 ; (~10-11 Go) en conséquence : compression "fast" plutôt que maximale, les
 ; poids de modèles (GGUF, déjà denses) ne se compressent presque pas et LZMA
@@ -98,7 +98,7 @@ Source: "{#SourceRoot}dist\ai-webapp\*"; DestDir: "{app}\ai-webapp"; Flags: igno
 ; c'est là que launch.py le cherche (à côté de l'exécutable).
 Source: "{#SourceRoot}ollama\*"; DestDir: "{app}\ai-webapp\ollama"; Excludes: "\models"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Les 3 modèles retenus (mistral-nemo, gemma2:2b, bge-m3), HORS de Program Files :
+; Les 3 modèles retenus (ministral-3:8b, gemma2:2b, bge-m3), HORS de Program Files :
 ; dans {commonappdata}\Olivia\modeles-ia, commun au poste et inscriptible (voir
 ; [Dirs]). Sous Program Files, un modèle à télécharger plus tard (passage en
 ; mode Léger, par exemple) ne pouvait pas s'écrire. Désigné à launch.py par la

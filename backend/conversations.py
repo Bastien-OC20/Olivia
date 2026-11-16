@@ -110,8 +110,79 @@ def _clean_messages(messages: list[dict] | None) -> list[dict]:
         if (isinstance(tableau, dict) and isinstance(tableau.get("id"), str)
                 and _is_valid_id(tableau["id"]) and isinstance(tableau.get("titre"), str)):
             entry["tableau"] = {"id": tableau["id"], "titre": tableau["titre"][:TABLEAU_TITRE_MAX]}
+        # Boucle d'outils : étapes de consultation et document Word proposé,
+        # réaffichés à la réouverture. Venus du client : bornés champ par champ.
+        etapes = _clean_etapes(m.get("etapes"))
+        if etapes:
+            entry["etapes"] = etapes
+        proposition = _clean_proposition(m.get("proposition"))
+        if proposition:
+            entry["proposition"] = proposition
         cleaned.append(entry)
     return cleaned
+
+
+# Bornes des champs de la boucle d'outils (voir backend/outils.py, mêmes ordres
+# de grandeur) : une conversation enregistrée ne doit pas pouvoir grossir sans
+# limite par ces champs, que l'interface renvoie tels qu'elle les a reçus.
+ETAPES_MAX = 20
+ETAPE_ID_MAX = 50
+ETAPE_TEXTE_MAX = 200
+ETATS_ETAPE = {"en_cours", "fini", "echec"}
+PROPOSITION_CHAMP_MAX = 200
+PROPOSITION_TEXTE_MAX = 8000
+
+
+def _clean_etapes(etapes) -> list[dict]:
+    """Étapes d'outils `[{id, outil, etat, libelle, resume, documents}]`.
+
+    Une étape sans identifiant exploitable (entier, ou texte court) ou d'état
+    inconnu est ignorée ; un champ texte d'un autre type est omis. Jamais
+    d'erreur : l'enregistrement de la conversation ne doit pas échouer pour ça.
+    """
+    if not isinstance(etapes, list):
+        return []
+    sortie: list[dict] = []
+    for e in etapes:
+        if len(sortie) >= ETAPES_MAX:
+            break
+        if not isinstance(e, dict):
+            continue
+        ident = e.get("id")
+        if isinstance(ident, bool) or not (
+                isinstance(ident, int) or (isinstance(ident, str) and ident
+                                           and len(ident) <= ETAPE_ID_MAX)):
+            continue
+        if e.get("etat") not in ETATS_ETAPE:
+            continue
+        propre = {"id": ident, "etat": e["etat"]}
+        for champ in ("outil", "libelle", "resume"):
+            if isinstance(e.get(champ), str):
+                propre[champ] = e[champ][:ETAPE_TEXTE_MAX]
+        if "documents" in e:
+            propre["documents"] = _clean_documents(e["documents"])
+        sortie.append(propre)
+    return sortie
+
+
+def _clean_proposition(proposition) -> dict | None:
+    """Document Word proposé par le modèle (jamais créé par le serveur), ou None
+    s'il est mal formé. Champs texte seulement, bornés."""
+    if not isinstance(proposition, dict) or proposition.get("type") != "document_word":
+        return None
+
+    def texte(champ: str, maximum: int) -> str:
+        valeur = proposition.get(champ)
+        return valeur[:maximum] if isinstance(valeur, str) else ""
+
+    return {
+        "type": "document_word",
+        "type_document": texte("type_document", PROPOSITION_CHAMP_MAX),
+        "titre": texte("titre", PROPOSITION_CHAMP_MAX),
+        "objet": texte("objet", PROPOSITION_CHAMP_MAX),
+        "destinataire": texte("destinataire", PROPOSITION_CHAMP_MAX),
+        "texte": texte("texte", PROPOSITION_TEXTE_MAX),
+    }
 
 
 def _clean_documents(documents) -> list[dict]:

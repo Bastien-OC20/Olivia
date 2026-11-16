@@ -16,7 +16,8 @@ import subprocess
 # rapporte souvent un peu moins que 8192 Mio de VRAM nominale (mémoire réservée
 # par le pilote, l'OS, etc.) — seuil fixé à 7000 Mio pour ne pas rejeter une
 # carte réellement 8 Go à cause de cet arrondi, tout en excluant les cartes
-# d'entrée de gamme (4 Go) manifestement insuffisantes pour mistral-nemo.
+# d'entrée de gamme (4 Go) manifestement insuffisantes pour le modèle GPU
+# (`ministral-3:8b`, 6,4 Go de mémoire graphique à num_ctx 8192).
 SEUIL_VRAM_MIO = 7000
 
 # Le sous-processus interroge le pilote NVIDIA, qui peut être lent à répondre

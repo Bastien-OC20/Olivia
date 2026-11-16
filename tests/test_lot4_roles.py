@@ -171,11 +171,26 @@ def test_responsable_change_les_reglages_reserves(env):
     assert s["connectors"]["imap"]["host"] == "imap.lycee.fr"
 
 
+def test_outils_actifs_reserve_au_responsable(env):
+    """La boucle d'outils décide de ce que le modèle lit de lui-même (documents,
+    mails, agenda) : un membre ne la change pas, le responsable si."""
+    r = env["marc"].put("/api/settings", json={"outils_actifs": False})
+    assert r.status_code == 403
+    assert "outils_actifs" in r.json()["detail"]
+    assert settings.reglages(env["pid"]).get()["outils_actifs"] is True
+    # Renvoyée inchangée (l'interface renvoie tout), elle n'est pas refusée.
+    assert env["marc"].put("/api/settings", json={"outils_actifs": True}).status_code == 200
+    r = env["rachel"].put("/api/settings", json={"outils_actifs": False})
+    assert r.status_code == 200 and r.json()["outils_actifs"] is False
+
+
 def test_membre_enregistre_son_ton_en_renvoyant_tous_les_reglages(env):
     """L'interface renvoie TOUS les réglages (secrets masqués) à chaque
     « Enregistrer » : un membre doit pouvoir changer son ton malgré cela."""
     tout = env["marc"].get("/api/settings").json()
-    assert tout["connectors"]["imap"]["password"] == "••••••••"
+    # Depuis le 16/11/2026, un membre ne reçoit plus les réglages réservés
+    # (connecteurs compris, voir tests/test_reglages_membre.py) : il renvoie sa vue.
+    assert "connectors" not in tout and "search_brave_api_key" not in tout
     tout.update(tone="formal", reasoning_style="concise", temperature=0.3,
                 simple_mode=False, privacy_consent=True)
     r = env["marc"].put("/api/settings", json=tout)

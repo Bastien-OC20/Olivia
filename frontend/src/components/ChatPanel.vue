@@ -65,6 +65,18 @@
               <MessageBubble
                 :content="m.content"
                 :streaming="chat.isStreaming && i === chat.messages.length - 1"
+                :etapes="m.etapes || []"
+                :proposition="m.proposition || null"
+                :types-document="typesDocument"
+                @ouvrir-document="ouvrirApercuEtape(i, $event)"
+                @proposition="ouvrirProposition(i, $event)"
+              />
+              <!-- Aperçu d'un document consulté par Oliv'IA : même aperçu que celui
+                   du document créé plus bas. -->
+              <FilePreview
+                v-if="apercuEtape && apercuEtape.index === i"
+                :path="apercuEtape.path"
+                @close="apercuEtape = null"
               />
             </div>
             <p
@@ -221,6 +233,7 @@
 
               <div class="doc-actions">
                 <button
+                  ref="boutonCreer"
                   type="button"
                   class="btn btn-primaire"
                   :disabled="!!creation.etape"
@@ -438,9 +451,16 @@ const creation = reactive({
   index: null, type: 'circulaire', titre: '', objet: '',
   destinataire: '', signature: '', participants: '',
   etape: '', erreur: '',
+  // Texte venu d'une proposition d'Oliv'IA : déjà rédigé comme corps de document,
+  // il est transmis tel quel (null = corps à rédiger depuis la réponse).
+  corpsPropose: null,
 })
 const documentCree = ref(null)
 const apercuOuvert = ref(false)
+// Aperçu d'un document consulté par Oliv'IA (clic dans ses étapes) : repéré, comme
+// le formulaire, par le numéro du message.
+const apercuEtape = ref(null)
+const boutonCreer = ref(null)
 
 // Le formulaire et la carte « document créé » sont repérés par le NUMÉRO du message :
 // sans remise à zéro, le 2e message de n'importe quelle autre conversation héritait
@@ -455,6 +475,7 @@ watch(() => chat.messages, () => {
   creation.erreur = ''
   documentCree.value = null
   apercuOuvert.value = false
+  apercuEtape.value = null
 })
 
 const besoinObjet = computed(
@@ -493,8 +514,41 @@ function ouvrirCreation(i) {
   creation.erreur = ''
   creation.titre = titreSuggere(chat.messages[i]?.content)
   creation.objet = creation.objet || creation.titre
+  creation.corpsPropose = null
   documentCree.value = null
   apercuOuvert.value = false
+}
+
+function ouvrirApercuEtape(i, doc) {
+  apercuEtape.value = doc?.path ? { index: i, path: doc.path } : null
+}
+
+/** Formulaire Word prérempli avec la proposition d'Oliv'IA. Rien n'est créé tant que
+ *  l'utilisatrice n'a pas validé : « Créer le document » place seulement le focus
+ *  sur le bouton de validation. */
+async function ouvrirProposition(i, mode) {
+  const p = chat.messages[i]?.proposition
+  if (!p) return
+  creation.index = i
+  creation.erreur = ''
+  // Type inconnu : le formulaire s'ouvre sur le type par défaut.
+  creation.type = typesDocument.value.some((t) => t.id === p.type_document)
+    ? p.type_document : typesDocument.value[0]?.id || 'circulaire'
+  creation.titre = p.titre || ''
+  creation.objet = p.objet || p.titre || ''
+  creation.destinataire = p.destinataire || ''
+  creation.signature = ''
+  creation.participants = ''
+  creation.corpsPropose = (p.texte || '').trim() ? p.texte : null
+  documentCree.value = null
+  apercuOuvert.value = false
+  if (mode === 'creer') {
+    await nextTick()
+    // Le bouton vit dans le v-for des messages : Vue y range la référence dans
+    // un tableau, et `.focus()` sur ce tableau ne faisait rien (vu à l'écran).
+    const bouton = Array.isArray(boutonCreer.value) ? boutonCreer.value[0] : boutonCreer.value
+    bouton?.focus()
+  }
 }
 
 async function chargerEtatModele() {
@@ -566,8 +620,13 @@ async function creerDocument() {
   if (!message) return
   creation.erreur = ''
   try {
+    // Proposition d'Oliv'IA : on part de SON texte plutôt que de la réponse, mais la
+    // réécriture dirigée reste nécessaire. Constaté au banc d'essai du 16/11/2026 :
+    // malgré la consigne, le texte proposé garde « Madame, Monsieur » et
+    // « Cordialement », que le document ajoute déjà lui-même (doublon), et parfois
+    // du Markdown.
     creation.etape = 'Rédaction…'
-    const corps = await redigerCorps(message.content || '')
+    const corps = await redigerCorps(creation.corpsPropose ?? (message.content || ''))
     creation.etape = 'Création…'
     const r = await fetch('/api/documents/generate', {
       method: 'POST',

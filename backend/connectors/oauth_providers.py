@@ -11,6 +11,18 @@ validation Google (jetons expirant tous les 7 jours hors app vérifiée) comme l
 consentement administrateur d'un tenant Microsoft.
 """
 
+# Messages d'erreur SANS le chemin du fichier : l'aperçu du calendrier est ouvert
+# à tous les comptes de l'organisation, alors que le chemin est un réglage du
+# responsable. Les anciens messages recopiaient le chemin, ou le texte brut de
+# l'exception, qui le contient (« [Errno 13] Permission denied: 'C:\\…' ») : un
+# membre y lisait l'arborescence du poste.
+ICS_INTROUVABLE = ("Le fichier de l'agenda (.ics) est introuvable : vérifiez son "
+                   "emplacement dans Paramètres → Connexions.")
+ICS_ILLISIBLE = ("Le fichier de l'agenda n'a pas pu être lu : vérifiez qu'il s'agit "
+                 "bien d'un export de calendrier (.ics).")
+ICS_MODULE_ABSENT = ("La lecture des agendas n'est pas disponible sur ce poste : "
+                     "prévenez le service informatique.")
+
 
 def calendar_list_events(ics_path: str, limit: int = 10) -> list[dict]:
     """Lit un fichier .ics local (exporté depuis Google/Outlook/Apple Calendar)."""
@@ -19,7 +31,7 @@ def calendar_list_events(ics_path: str, limit: int = 10) -> list[dict]:
     from pathlib import Path
     p = Path(ics_path)
     if not p.exists():
-        return [{"error": f"Fichier .ics introuvable : {ics_path}"}]
+        return [{"error": ICS_INTROUVABLE}]
     try:
         from ics import Calendar
         with open(ics_path) as f:
@@ -32,6 +44,7 @@ def calendar_list_events(ics_path: str, limit: int = 10) -> list[dict]:
             "description": (e.description or "")[:200],
         } for e in list(cal.events)[:limit]]
     except ImportError:
-        return [{"error": "Module 'ics' non installé. pip install ics"}]
-    except Exception as e:
-        return [{"error": f"Erreur parsing .ics : {e}"}]
+        return [{"error": ICS_MODULE_ABSENT}]
+    except Exception:
+        # Pas de texte de l'exception : il cite le chemin (voir plus haut).
+        return [{"error": ICS_ILLISIBLE}]

@@ -266,15 +266,19 @@ def construire_modele(source: Path, destination: Optional[Path] = None) -> dict:
     """
     source = Path(source)
     if not source.is_file():
-        raise ValueError(f"Document source introuvable : {source}")
+        # Le nom seul : ce message remonte tel quel à l'interface.
+        raise ValueError(f"Document source introuvable : {source.name}")
     if source.suffix.lower() != ".docx":
         raise ValueError("Le document source doit être un fichier Word (.docx).")
     destination = Path(destination) if destination else chemin_modele_commun()
 
     try:
         doc = Document(str(source))
-    except Exception as e:
-        raise ValueError(f"Document source illisible : {e}")
+    except Exception:
+        # Pas le texte de l'exception (« Package not found at 'C:\…' ») : il cite
+        # le chemin du disque, et ce message remonte tel quel à l'interface.
+        raise ValueError(f"Document source illisible : « {source.name} » n'est pas un "
+                         "document Word valide.")
 
     porteuse = _section_porteuse(doc)
     de_tete = [] if porteuse is not None else _paragraphes_de_tete(doc)
