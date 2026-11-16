@@ -13,7 +13,9 @@
 ;
 ; Tout est embarqué (comme la clé USB) : Ollama portable + les 3 modèles
 ; retenus (ministral-3:8b, gemma2:2b, bge-m3 — voir backend/settings.py) +
-; Tesseract + le modèle Word de l'établissement. Installeur volumineux
+; Tesseract. Le modèle Word du lycée pilote ne l'est que sur demande
+; (/DAvecModeleWord, voir [Files]). Ollama embarqué 0.32.4 : chargement de
+; ministral-3:8b sur GPU et appel d'outils vérifiés le 16/11/2026. Installeur volumineux
 ; (~10-11 Go) en conséquence : compression "fast" plutôt que maximale, les
 ; poids de modèles (GGUF, déjà denses) ne se compressent presque pas et LZMA
 ; maximal ferait juste perdre du temps de compilation pour rien.
@@ -72,8 +74,17 @@ UninstallDisplayIcon={app}\ai-webapp\{#AppExeName}
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
+; Parcours le plus court possible pour une utilisatrice non technique : pas
+; d'écran de choix du dossier (Program Files par défaut ; les modèles vont de
+; toute façon dans C:\ProgramData, le choisir n'apportait rien), pas de choix
+; de groupe ni de raccourci (le raccourci du Bureau est toujours créé). Il
+; reste UN écran (« Prêt à installer »), la progression, puis l'écran de fin.
+DisableDirPage=yes
+DisableWelcomePage=yes
 ; ~10-11 Go de modèles : prévenir si le disque cible est trop petit plutôt
-; que planter en cours d'installation.
+; que planter en cours d'installation. Sans écran de dossier, Inno Setup ne
+; fait plus ce contrôle : EspaceSuffisant (section [Code]) le fait au
+; démarrage, sur le disque système, où vont l'application ET les modèles.
 ExtraDiskSpaceRequired=1073741824
 ; Un Setup.exe unique est plafonné à ~4,2 Go par Windows (limite du format
 ; PE) — largement dépassé ici. DiskSpanning fractionne la sortie en
@@ -86,8 +97,17 @@ DiskSliceSize=2100000000
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "Créer un raccourci sur le Bureau"; GroupDescription: "Raccourcis supplémentaires :"
+[Messages]
+; Textes par défaut d'Inno Setup jugés trop techniques ou inquiétants : « Précédent
+; pour modifier une option » alors qu'il n'y en a pas, et une désinstallation
+; « complète avec tous ses composants » qui laisse croire que les conversations
+; seront effacées (elles ne le sont jamais).
+ReadyLabel1=Oliv'IA va être installée sur cet ordinateur. Tout reste sur le poste : rien n'est envoyé sur Internet.
+ReadyLabel2b=Cliquez sur Installer. L'installation dure quelques minutes (environ 11 Go à copier) ; vous pouvez continuer à travailler pendant ce temps.
+FinishedHeadingLabel=Oliv'IA est installée
+FinishedLabel=Oliv'IA est prête. Pour l'ouvrir plus tard, double-cliquez sur l'icône « Oliv'IA » du Bureau.
+ConfirmUninstall=Désinstaller %1 ?%n%nVos comptes, conversations et documents sont conservés sur cet ordinateur : ils seront retrouvés si %1 est réinstallée.
+UninstalledAll=%1 a été désinstallée. Vos comptes et vos conversations sont conservés sur cet ordinateur.
 
 [Files]
 ; Application (backend + frontend buildés par PyInstaller) — déjà nettoyée
@@ -106,6 +126,9 @@ Source: "{#SourceRoot}ollama\*"; DestDir: "{app}\ai-webapp\ollama"; Excludes: "\
 ; Les fichiers de blobs/ portent l'empreinte de leur contenu : déjà présents,
 ; ils sont identiques, et onlyifdoesntexist évite de réécrire ~9 Go à chaque
 ; mise à jour. Les manifestes, minuscules, sont toujours réécrits.
+; uninsneveruninstall : la désinstallation ne les retire pas fichier par
+; fichier ; elle supprime TOUT le dossier dans [Code] (SupprimerModeles), sauf
+; si l'application de bureau, qui partage ce dossier, est encore installée.
 Source: "{#SourceRoot}ollama\models\blobs\*"; DestDir: "{commonappdata}\Olivia\modeles-ia\blobs"; Flags: onlyifdoesntexist uninsneveruninstall recursesubdirs createallsubdirs
 Source: "{#SourceRoot}ollama\models\manifests\*"; DestDir: "{commonappdata}\Olivia\modeles-ia\manifests"; Flags: ignoreversion uninsneveruninstall recursesubdirs createallsubdirs
 
@@ -113,13 +136,20 @@ Source: "{#SourceRoot}ollama\models\manifests\*"; DestDir: "{commonappdata}\Oliv
 Source: "{#SourceRoot}tesseract\*"; DestDir: "{app}\ai-webapp\tesseract"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Modèle Word de l'établissement (logo, en-tête) — voir backend/docmodele.py.
+; PAS embarqué par défaut : le logo appartient au lycée pilote, il n'a rien à
+; faire dans un installeur destiné à d'autres structures (chacune fabrique le
+; sien depuis Oliv'IA, rangé dans son organisation). Pour un installeur propre
+; au lycée : ISCC.exe /DAvecModeleWord olivia.iss
+#ifdef AvecModeleWord
 Source: "{#SourceRoot}modeles\*"; DestDir: "{app}\ai-webapp\modeles"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+#endif
 
 [Dirs]
 ; Seul dossier commun au poste ouvert en écriture aux utilisateurs : les modèles
 ; d'IA (plusieurs Go, aucune donnée personnelle), pour qu'Oliv'IA puisse en
 ; télécharger un depuis n'importe quel compte Windows. Comptes et conversations
-; n'y sont pas (voir l'en-tête). Jamais supprimé à la désinstallation.
+; n'y sont pas (voir l'en-tête). Supprimé à la désinstallation par [Code]
+; (SupprimerModeles), pas par ce drapeau.
 Name: "{commonappdata}\Olivia\modeles-ia"; Permissions: users-modify; Flags: uninsneveruninstall
 
 [InstallDelete]
@@ -148,7 +178,9 @@ Name: "{group}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; WorkingDi
 ; une installation neuve n'a aucun compte, et la connexion est obligatoire.
 Name: "{group}\Créer un compte {#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; Parameters: "init"; WorkingDir: "{app}\ai-webapp"
 Name: "{group}\Désinstaller {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; WorkingDir: "{app}\ai-webapp"; Tasks: desktopicon
+; Toujours créé (plus de case à cocher) : c'est le moyen le plus simple de
+; retrouver Oliv'IA, et une question de moins pendant l'installation.
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; WorkingDir: "{app}\ai-webapp"
 
 [Run]
 ; Proposé seulement s'il n'existe encore aucun compte (voir AucunCompte) : sur
@@ -157,8 +189,11 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\ai-webapp\{#AppExeName}"; Wor
 ; de l'administrateur qui l'a autorisée — les données sont propres à chaque
 ; compte Windows. Installé par quelqu'un d'autre que l'utilisatrice, ne pas
 ; cocher : elle créera son compte depuis le menu Démarrer, dans sa session.
-Filename: "{app}\ai-webapp\{#AppExeName}"; Parameters: "init"; WorkingDir: "{app}\ai-webapp"; Description: "Créer le premier compte (pour ce compte Windows)"; Flags: postinstall skipifsilent runasoriginaluser; Check: AucunCompte
-Filename: "{app}\ai-webapp\{#AppExeName}"; Description: "Lancer {#AppName} maintenant"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\ai-webapp\{#AppExeName}"; Parameters: "init"; WorkingDir: "{app}\ai-webapp"; Description: "Créer mon compte {#AppName} (une fenêtre s'ouvre et pose quelques questions)"; Flags: postinstall skipifsilent runasoriginaluser; Check: AucunCompte
+; Coché par défaut : l'entrée précédente attend la fin de la création du
+; compte (pas de nowait), Oliv'IA s'ouvre donc juste après, prête à l'emploi.
+; Une entrée postinstall s'exécute d'office sous le compte d'origine.
+Filename: "{app}\ai-webapp\{#AppExeName}"; Description: "Ouvrir {#AppName} maintenant"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Purge explicitement le cache PyInstaller (dossier temporaire de
@@ -181,4 +216,105 @@ begin
   Result := not FileExists(ExpandConstant('{localappdata}\Olivia\profiles\users.json'))
     and not FileExists(ExpandConstant('{commonappdata}\Olivia\profiles\users.json'))
     and not FileExists(ExpandConstant('{app}\ai-webapp\_internal\backend\profiles\users.json'));
+end;
+
+// Contrôle de place au lancement de l'installeur (remplace celui de l'écran
+// de choix du dossier, retiré). Application et modèles vont tous deux sur le
+// disque système. Sur une mise à jour, les modèles déjà présents ne sont pas
+// recopiés (onlyifdoesntexist) : il faut alors bien moins de place.
+// Arrêter tout de suite avec un message clair vaut mieux qu'un échec
+// d'écriture au milieu de 11 Go.
+function InitializeSetup: Boolean;
+var
+  Disque: String;
+  Libre, Total: Int64;
+  BesoinGo, LibreGo: Integer;
+begin
+  Result := True;
+  if FileExists(ExpandConstant('{commonappdata}\Olivia\modeles-ia\manifests\registry.ollama.ai\library\ministral-3\8b')) then
+    BesoinGo := 5
+  else
+    BesoinGo := 14;
+  Disque := ExtractFileDrive(ExpandConstant('{commonappdata}'));
+  if GetSpaceOnDisk64(Disque, Libre, Total) then
+  begin
+    LibreGo := Libre div 1073741824;
+    if LibreGo < BesoinGo then
+    begin
+      // Pas de ligne commençant par « [ » : Inno Setup la prendrait pour un
+      // en-tête de section, même dans [Code].
+      SuppressibleMsgBox(Format('Il n''y a pas assez de place sur le disque %s pour installer Oliv''IA.' + #13#10#13#10 +
+        'Il faut au moins %d Go libres, il en reste %d.' + #13#10#13#10 +
+        'Libérez de la place (par exemple en vidant la Corbeille), puis relancez l''installation.', [
+        Disque, BesoinGo, LibreGo]), mbError, MB_OK, IDOK);
+      Result := False;
+    end;
+  end;
+end;
+
+// Vrai si l'application de bureau (Electron, installeur NSIS, desktop/) est
+// installée sur le poste : elle range ses modèles dans le MÊME dossier commun
+// (desktop/build/installer.nsh, lib/outils.js). Sa clé de désinstallation porte
+// un identifiant calculé par electron-builder ; on la reconnaît donc à son nom
+// affiché, « Olivia <version> » (productName de desktop/package.json) — celui de
+// cet installeur est « Oliv'IA version … ».
+function ApplicationDeBureauInstallee: Boolean;
+var
+  Racines: array of Integer;
+  Cles: TArrayOfString;
+  Nom: String;
+  R, I: Integer;
+begin
+  Result := False;
+  if IsWin64 then
+  begin
+    SetArrayLength(Racines, 2);
+    Racines[0] := HKLM64;
+    Racines[1] := HKLM32;
+  end
+  else
+  begin
+    SetArrayLength(Racines, 1);
+    Racines[0] := HKLM;
+  end;
+  for R := 0 to GetArrayLength(Racines) - 1 do
+    if RegGetSubkeyNames(Racines[R], 'Software\Microsoft\Windows\CurrentVersion\Uninstall', Cles) then
+      for I := 0 to GetArrayLength(Cles) - 1 do
+        if RegQueryStringValue(Racines[R], 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + Cles[I], 'DisplayName', Nom) then
+          if (Nom = 'Olivia') or (Pos('Olivia ', Nom) = 1) then
+          begin
+            Result := True;
+            Exit;
+          end;
+end;
+
+// Désinstallation : supprime les modèles d'IA (~9 Go, aucune donnée
+// personnelle, y compris ceux téléchargés ensuite, mode Léger par exemple).
+// Comptes et conversations sont ailleurs (%LOCALAPPDATA%\Olivia) et ne sont
+// jamais touchés. Le dossier commun {commonappdata}\Olivia n'est retiré que
+// s'il est VIDE : il peut encore contenir les données d'une ancienne version
+// pas encore reprises (voir l'en-tête), RemoveDir échoue alors sans rien effacer.
+procedure SupprimerModeles;
+var
+  Modeles: String;
+begin
+  Modeles := ExpandConstant('{commonappdata}\Olivia\modeles-ia');
+  if not DirExists(Modeles) then
+    Exit;
+  if ApplicationDeBureauInstallee then
+  begin
+    Log('Modèles conservés : l''application de bureau Olivia les utilise encore.');
+    Exit;
+  end;
+  if DelTree(Modeles, True, True, True) then
+    Log('Modèles d''IA supprimés : ' + Modeles)
+  else
+    Log('Modèles d''IA pas entièrement supprimés (fichier en cours d''utilisation ?) : ' + Modeles);
+  RemoveDir(ExpandConstant('{commonappdata}\Olivia'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    SupprimerModeles;
 end;

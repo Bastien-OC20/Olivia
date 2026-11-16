@@ -434,15 +434,36 @@ backend\.venv\Scripts\pyinstaller.exe build.spec --clean --noconfirm
 ## 💾 Installeur Windows (Inno Setup)
 
 `installer Olivia/olivia.iss` produit un installeur classique (Program Files, menu Démarrer,
-désinstalleur), **tout embarqué** : application, Ollama portable, les trois modèles,
-Tesseract et le modèle Word commun. Installeur volumineux (~10-11 Go, d'après l'estimation
-notée dans le script).
+désinstalleur), **tout embarqué** : application, Ollama portable (0.32.4), les trois modèles
+(`ministral-3:8b`, `gemma2:2b`, `bge-m3`) et Tesseract. Le modèle Word du lycée pilote
+(`modeles\`) n'est embarqué que sur demande : `ISCC.exe /DAvecModeleWord olivia.iss`.
+
+Installeur volumineux (9,3 Go, ~11 Go une fois installé ; il faut 14 Go libres sur le disque
+système pour une première installation), donc **fractionné** : `Installer-Olivia-<version>.exe` et
+ses fichiers `.bin` se distribuent **ensemble, dans le même dossier** (limite de ~4,2 Go d'un
+`.exe` Windows).
 
 **Avant compilation** :
 1. `cd frontend && npm run build`
 2. `backend\.venv\Scripts\python -m PyInstaller build.spec --clean --noconfirm` (depuis la racine)
-3. vérifier `ollama\`, `tesseract\` et `modeles\` à la racine du dépôt ;
-4. compiler `installer Olivia\olivia.iss` avec Inno Setup → `Installer-Olivia-<version>.exe`.
+3. vérifier `ollama\` (moteur + les trois modèles ci-dessus, rien d'autre) et `tesseract\` à la
+   racine du dépôt ;
+4. compiler `installer Olivia\olivia.iss` avec Inno Setup 6 (`ISCC.exe`) →
+   `installer Olivia\Sortie\`.
+
+**Parcours de l'utilisatrice** (une seule question, aucune option à choisir) :
+1. double-clic sur `Installer-Olivia-<version>.exe`, puis *Oui* à la demande d'autorisation de
+   Windows (l'installation se fait pour tout le poste) ;
+2. écran **« Prêt à installer »** : un bouton *Installer* (s'il manque de la place sur le disque
+   système, l'installeur le dit dès le départ et s'arrête, sans rien installer) ;
+3. progression (quelques minutes) ;
+4. écran **« Oliv'IA est installée »** : *Créer mon compte Oliv'IA* (proposé seulement s'il n'en
+   existe aucun ; une fenêtre pose quelques questions) et *Ouvrir Oliv'IA maintenant*, cochés
+   tous les deux, puis *Terminer*.
+
+Le raccourci du Bureau est toujours créé. La désinstallation (*Paramètres Windows →
+Applications*, ou menu Démarrer → *Désinstaller Oliv'IA*) rappelle que les comptes et
+conversations sont conservés.
 
 L'installeur :
 - range les **modèles d'IA** dans `C:\ProgramData\Olivia\modeles-ia`, commun au poste et
@@ -459,7 +480,11 @@ L'installeur :
   lancé l'installation (case proposée seulement s'il n'en existe aucun), et ajoute un raccourci
   **« Créer un compte Oliv'IA »** au menu Démarrer, à utiliser dans la session de chaque
   personne ;
-- ne supprime **jamais** le dossier des données à la désinstallation.
+- ne supprime **jamais** le dossier des données à la désinstallation ;
+- supprime en revanche les **modèles d'IA** à la désinstallation (`C:\ProgramData\Olivia\modeles-ia`,
+  ~9 Go, ceux téléchargés ensuite compris), **sauf** si l'application de bureau, qui partage ce
+  dossier, est encore installée sur le poste. `C:\ProgramData\Olivia` n'est retiré que s'il est
+  vide (il peut encore contenir les données d'une ancienne version pas encore reprises).
 
 ---
 
@@ -1228,8 +1253,14 @@ Pousser une étiquette (`git tag v1.1.0 && git push origin v1.1.0`) donne le mê
   Ollama simulé ; les consignes d'installation (application Ollama, commande `ollama` dans le Terminal ou
   l'Invite de commandes) restent à confirmer sur de vrais postes Mac et Windows.
 - **Mac Intel** : non couvert par la CI (`macos-latest` construit pour Apple Silicon).
-- **Installeur Inno Setup** et **ACL NSIS** : non recompilés ni testés après les dernières
-  modifications.
+- **Installeur Inno Setup** : recompilé le 16/11/2026 (9,25 Go en six fichiers ; Ollama
+  embarqué 0.32.4 vérifié avec `ministral-3:8b` sur GPU, appel d'outils compris ; exécutable
+  lancé sur une instance jetable). Installation silencieuse d'essai (dossier jetable) et
+  désinstallation vérifiées le même jour : fichiers, `olivia.ini`, modèles dans
+  `C:\ProgramData\Olivia\modeles-ia` (inscriptibles par les utilisateurs), raccourcis, moteur
+  installé qui répond sur GPU ; la désinstallation retire tout. Les
+  écrans de l'assistant (mode non silencieux) n'ont pas été passés en revue à l'œil.
+- **ACL NSIS** : non recompilées ni testées après les dernières modifications.
 - **Fenêtre de contexte** : `num_ctx` est fixé à 8192 jetons (`NUM_CTX`, `backend/settings.py`) ;
   le défaut d'Ollama (4096) coupait en silence. `ministral-3:8b` y prend 6,4 Go de mémoire
   graphique : non mesuré sur une vraie carte 8 Go.
